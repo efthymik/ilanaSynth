@@ -546,8 +546,8 @@ void runPlayOscReview7Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudi
         // (Review 23: TONE and EXCITER are two panels of one card, side by side.)
         const auto sameGrid = decay != nullptr && hammer != nullptr && visibleInTree (decay) && visibleInTree (hammer)
                               && decay->getParentComponent() == hammer->getParentComponent();
-        expect (stringShown && sameGrid && buttonNamed (juce::CharPointer_UTF8 ("EDIT BODY \xe2\x80\xba")) != nullptr,
-                "OSC: a Physical card shows its moving string, STRING and EXCITER on one grid, EDIT BODY > links to FILTER");
+        expect (stringShown && sameGrid && buttonNamed (juce::CharPointer_UTF8 ("EDIT BODY \xe2\x80\xba")) == nullptr,
+                "OSC: a Physical card shows its moving string, STRING and EXCITER on one grid, and no EDIT BODY link (PLAY's BODY tab is beside it)");
         const auto exciteText = processor.apvts.getParameter ("osc1_excite")->getCurrentValueAsText();
         expect (exciteText.startsWith ("Piano"), "OSC: EXCITE reads Piano ('" + exciteText + "')");
         expect (editor.getPageIds().indexOf ("PHYSICAL") < 0, "the PHYSICAL tab is gone: the card holds the whole string");
@@ -4703,8 +4703,8 @@ int runUiTests()
 
     // The string has one editor, its oscillator's card (the PHYSICAL tab
     // folded in, 2026-10-10): every control of the physical list is on the
-    // card, in its order, with the moving string in the well; the body is a
-    // link (EDIT BODY > opens FILTER), the soundboard is the strip's.
+    // card, in its order, with the moving string in the well; the body is
+    // on PLAY's BODY tab (no link on the card), the soundboard is the strip's.
     {
         processor.loadFactoryPreset (names.indexOf ("Felt Hammer Board"));
         pages->showPage ("OSC");
@@ -4761,16 +4761,11 @@ int runUiTests()
         {
             std::vector<juce::TextButton*> buttons;
             findAll<juce::TextButton> (*editor, buttons);
-            juce::TextButton* editBody = nullptr;
+            auto editBodyShown = false;
             for (auto* button : buttons)
                 if (visibleInTree (button) && button->getButtonText() == juce::String::fromUTF8 ("EDIT BODY \xe2\x80\xba"))
-                    editBody = button;
-            if (editBody != nullptr)
-            {
-                editBody->triggerClick();
-                settle (300);
-            }
-            expect (editBody != nullptr && pages->getCurrentPageId() == "MAIN", "OSC's EDIT BODY > opens PLAY (its BODY / BOARD card, one-tab PLAY 2026-10-25)");
+                    editBodyShown = true;
+            expect (! editBodyShown, "a Physical card has no EDIT BODY link (the BODY tab is on the same page)");
             pages->showPage ("OSC");
             settle (200);
         }

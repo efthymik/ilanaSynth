@@ -1532,19 +1532,6 @@ public:
             };
             addChildComponent (card.opEnvButton);
 
-            // A Physical oscillator's card holds its whole string and exciter
-            // (the PHYSICAL tab folded in, 2026-10-10); the body it shares
-            // with the other voices is on FILTER, the soundboard in the strip
-            // below.
-            styleJumpLink (card.stringButton, "BODY");
-            card.stringButton.setTooltip (juce::String::fromUTF8 ("The resonant body and the soundboard: PLAY's BODY \xc2\xb7 BOARD card"));
-            card.stringButton.onClick = [this]
-            {
-                if (auto* editor = findParentComponentOfClass<IlanaSynthAudioProcessorEditor>())
-                    editor->showPage ("BODY");
-            };
-            addChildComponent (card.stringButton);
-
             // The header's x removes the oscillator (ilana 2026-10-26: "an easier way to ... delete oscs").
             card.removeButton.setTooltip ("Remove this oscillator (undo brings it back). Drag the header to move the card; right-click it to duplicate");
             card.removeButton.onClick = [this, i] { removeOscillatorCard (i); };
@@ -2898,7 +2885,7 @@ private:
         }
 
         // (From the right: a sample card reads LOAD, RESAMPLE, EXPORT, SLICE, ZONES, DETECT.)
-        for (auto* button : { &loadButton (index), &pieces.sampleDetectButton, &pieces.sampleZonesButton, &pieces.sampleSliceButton, &pieces.sampleExportButton, &pieces.opEnvButton, &pieces.stringButton,
+        for (auto* button : { &loadButton (index), &pieces.sampleDetectButton, &pieces.sampleZonesButton, &pieces.sampleSliceButton, &pieces.sampleExportButton, &pieces.opEnvButton,
                               editButtons[(size_t) index].get(), bounceButtons[(size_t) index].get(), &pieces.sampleLoadButton })
             if (button != nullptr && button->isVisible())
             {
@@ -4096,7 +4083,7 @@ private:
         IconPicker exciterPills; // (the exciter types as small icons, the name on hover)
         SampleNameBox sampleNameButton;
         BarSliderControl xfadeBar; // the sample's CROSSFADE, a row of the toggle list
-        juce::TextButton opEnvButton, stringButton, sampleLoadButton, sampleSliceButton, sampleExportButton, sampleZonesButton, sampleDetectButton;
+        juce::TextButton opEnvButton, sampleLoadButton, sampleSliceButton, sampleExportButton, sampleZonesButton, sampleDetectButton;
         // The header's x: remove this oscillator. Drawn as two strokes, as big as
         // the buttons' capitals (a text x read small).
         struct RemoveButton : juce::TextButton
@@ -4479,7 +4466,7 @@ private:
                  &phys.hammer, &phys.couple, &phys.damper, &phys.registerMap, &phys.slap,
                  &phys.epDistance, &phys.epPosition, &phys.fbGain, &phys.fbDistance, &waveDisplay (i), &scrubbers[(size_t) i], &loadButton (i), editButtons[(size_t) i].get(),
                  bounceButtons[(size_t) i].get(), &pieces.stringView, &pieces.opEnvGraph, &pieces.spreadView, &pieces.partials, &pieces.status,
-                 &pieces.opEnvButton, &pieces.stringButton, &pieces.sampleLoadButton, &pieces.sampleSliceButton, &pieces.sampleExportButton, &pieces.sampleZonesButton, &pieces.sampleDetectButton, &pieces.sampleNameButton,
+                 &pieces.opEnvButton, &pieces.sampleLoadButton, &pieces.sampleSliceButton, &pieces.sampleExportButton, &pieces.sampleZonesButton, &pieces.sampleDetectButton, &pieces.sampleNameButton,
                  &pieces.removeButton, &pieces.typeBar, &pieces.routeBar, &pieces.outBar, &pieces.prevTable, &pieces.nextTable, &pieces.exciterPills,
                  &phys.resAmount, &phys.resOn, &phys.resBoard };
     }
@@ -4568,7 +4555,7 @@ private:
 
         // The header's buttons: the packed size, whatever the type.
         auto& pieces = *aux[(size_t) index];
-        for (auto* button : { &loadButton (index), &pieces.sampleLoadButton, &pieces.sampleDetectButton, &pieces.sampleZonesButton, &pieces.sampleSliceButton, &pieces.sampleExportButton, &pieces.opEnvButton, &pieces.stringButton,
+        for (auto* button : { &loadButton (index), &pieces.sampleLoadButton, &pieces.sampleDetectButton, &pieces.sampleZonesButton, &pieces.sampleSliceButton, &pieces.sampleExportButton, &pieces.opEnvButton,
                               editButtons[(size_t) index].get(), bounceButtons[(size_t) index].get(), &pieces.prevTable, &pieces.nextTable })
             if (button != nullptr && ! button->getProperties().contains ("packedButton"))
                 button->getProperties().set ("packedButton", true);
@@ -4642,7 +4629,6 @@ private:
             pieces.sampleDetectButton.setVisible (kind == Kind::sample);
             bounceButtons[(size_t) index]->setVisible (kind != Kind::live && ! opEnv);
             pieces.opEnvButton.setVisible (false); // (the envelope picture opens the editor on a click)
-            pieces.stringButton.setVisible (kind == Kind::physical);
             pieces.removeButton.setVisible (numShown() > 1);
 
             // The well: the table (slim line), the string, the operator's
@@ -4799,7 +4785,6 @@ private:
             pieces.partials.setAlpha (alpha);
             pieces.status.setAlpha (alpha);
             pieces.opEnvButton.setAlpha (alpha);
-            pieces.stringButton.setAlpha (alpha);
             pieces.sampleLoadButton.setAlpha (alpha);
             pieces.sampleNameButton.setAlpha (alpha);
             pieces.sampleSliceButton.setAlpha (alpha);
