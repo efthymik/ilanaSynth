@@ -676,6 +676,9 @@ private:
         {
             setOperatorCardStyle (*each, true);
             each->feedbackType.setCompactLayout (false); // (a menu in the menus' row, the same look)
+            each->feedbackType.setLabelText ("FEEDBACK TYPE");
+            for (auto* knob : { &each->ratio, &each->fixedHz, &each->semi, &each->fine, &each->egOut, &each->feedback })
+                knob->setSizeRole (IlanaTheme::KnobSize::main);
         }
 
         auto inner = operatorCard.reduced (10, 0);
@@ -749,56 +752,71 @@ private:
         const auto opEnv = usesOperatorEnv (selectedOperator);
         for (auto& each : operators)
             setOperatorCardStyle (*each, false);
-        // On the Operator Env, the envelope's editor takes the card: its
-        // graph at the right, its tabs and knobs along the bottom; the
-        // operator's own controls go in the space it leaves.
-        if (opEnv)
+        if (! opEnv)
         {
-            envelope.setBounds (inner);
-            inner = envelope.getHostArea().translated (inner.getX(), inner.getY());
-        }
-        else
-        {
+            for (auto& each : operators)
+            {
+                each->ampEnv.setPackedMenu (false);
+                each->ampEnv.setLabelText (FmOperatorInfo::envelopeLabel);
+            }
             layoutPlainOperator (controls);
             return;
         }
+        layoutOperatorEnvCard (controls, inner);
+    }
+
+    // An operator on the Operator Env (ilana, 2026-11-03, "the op env is not well integrated", option A): the operator's
+    // own controls in a column at the left (TUNING and SNAP, then two rows of three: the dials and FEEDBACK's TYPE), and
+    // at the right the envelope as one panel: its tabs and the card's ENVELOPE menu on the first line, the graph, and the
+    // eight stage knobs under it.
+    void layoutOperatorEnvCard (OperatorControls& controls, juce::Rectangle<int> inner)
+    {
+        for (auto& each : operators)
+        {
+            setOperatorCardStyle (*each, false);
+            each->feedbackType.setCompactLayout (false);
+            each->feedbackType.setLabelText ("TYPE"); // (beside FEEDBACK's knob; the tooltip names it in full)
+            each->ampEnv.setPackedMenu (false);
+            each->ampEnv.setLabelText ({}); // (just the box: the panel's first line writes ENVELOPE before it)
+            // One dial size across the card: the stage knobs' (the left column's cells are wider, so they would grow).
+            for (auto* knob : { &each->ratio, &each->fixedHz, &each->semi, &each->fine, &each->egOut, &each->feedback })
+                knob->setSizeRole (IlanaTheme::KnobSize::mini);
+        }
+
+        const auto leftWidth = juce::jlimit (200, 250, inner.getWidth() * 33 / 100);
+        auto left = inner.removeFromLeft (leftWidth);
+        inner.removeFromLeft (15);
+        envelope.setBounds (inner);
+        // The ENVELOPE menu at the right of the panel's first line (the editor leaves the room).
+        {
+            auto room = envelope.getHostArea().translated (envelope.getX(), envelope.getY());
+            const auto width = juce::jmin (room.getWidth(), OperatorEnvEditor::envelopeMenuWidth);
+            controls.ampEnv.setBounds (room.removeFromRight (width).withSizeKeepingCentre (width, 24));
+            controls.ampEnv.toFront (false); // (over the envelope's panel)
+        }
+
         const auto tune = juce::roundToInt (read (juce::String (OscillatorIds::prefixes[(size_t) selectedOperator]) + "_tune"));
+        auto menus = left.removeFromTop (40);
+        std::vector<juce::Component*> menuRow { &controls.tune, tune == OscTuning::Ratio ? static_cast<juce::Component*> (&controls.snap) : nullptr };
+        layoutRow (menus, menuRow);
 
-        auto topRow = inner.removeFromTop (46);
-        std::vector<juce::Component*> top { &controls.tune };
+        std::vector<juce::Component*> dials;
         if (tune == OscTuning::Ratio)
-            top.push_back (&controls.snap);
-        top.push_back (&controls.feedbackType);
-        top.push_back (&controls.ampEnv);
-
-        inner.removeFromTop (4);
-        std::vector<juce::Component*> bottom;
-        if (tune == OscTuning::Ratio)
-            bottom.push_back (&controls.ratio);
+            dials.push_back (&controls.ratio);
         if (tune == OscTuning::Fixed)
-            bottom.push_back (&controls.fixedHz);
-        bottom.push_back (&controls.semi);
-        bottom.push_back (&controls.fine);
-        if (opEnv)
-        {
-            bottom.push_back (&controls.egOut);
-        }
-        else
-        {
-            bottom.push_back (&controls.level);
-            bottom.push_back (&controls.keyLevel);
-        }
-
-        bottom.push_back (&controls.feedback);
-
-        // Menus and knobs on a grid (as many columns as the longer row), so
-        // the menus line up with the knobs; the menus' row has one column
-        // fewer, since FEEDBACK (I10-4) left them too narrow for "Semitones".
-        const auto columns = juce::jmax (top.size(), bottom.size());
-        top.resize (juce::jmax (top.size(), columns - 1), nullptr);
-        bottom.resize (columns, nullptr);
-        layoutRow (topRow, top);
-        layoutRow (inner, bottom);
+            dials.push_back (&controls.fixedHz);
+        for (auto* knob : { &controls.semi, &controls.fine, &controls.egOut, &controls.feedback })
+            dials.push_back (knob);
+        std::vector<juce::Component*> rowOne, rowTwo;
+        for (size_t i = 0; i < dials.size(); ++i)
+            (i < 3 ? rowOne : rowTwo).push_back (dials[i]);
+        rowTwo.push_back (&controls.feedbackType);
+        rowOne.resize (3, nullptr);
+        rowTwo.resize (3, nullptr);
+        // (Two equal bands under the menus: each row sits centred in its band, so the gaps are even.)
+        const auto band = left.getHeight() / 2;
+        layoutRow (left.removeFromTop (band), rowOne, true);
+        layoutRow (left, rowTwo, true);
     }
 
     // One route of the ROUTES list: an oscillator into another, into itself (feedback), or the noise (-1) into one.

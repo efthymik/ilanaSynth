@@ -104,8 +104,11 @@ void runOperatorReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAud
                 continue;
             if (! within.contains (bounds))
                 problems.add ("cut " + bounds.toString());
+            // (The bounds are in the editor's own, zoomed units: at 75 % a label is the zoomed width, but never less than
+            // the 10 px floor's, so it is judged by that, not by its width at 100 %.)
+            const auto zoom = juce::jmax ((float) editor.getWidth() / 1060.0f, 10.0f / label.getHeight());
             if (auto* knob = dynamic_cast<KnobControl*> (component))
-                if (juce::GlyphArrangement::getStringWidth (label, knob->getLabelText()) > (float) bounds.getWidth() + 1.0f)
+                if (juce::GlyphArrangement::getStringWidth (label, knob->getLabelText()) * zoom > (float) bounds.getWidth() + 1.0f)
                     problems.add ("squeezed " + knob->getLabelText());
             inside.push_back ({ component, bounds });
         }
@@ -130,7 +133,7 @@ void runOperatorReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAud
         findAll<ComboControl> (editor, combos);
         auto found = false, blank = false;
         for (auto* combo : combos)
-            if (visibleInTree (combo) && combo->getNameLabel().getText() == "ENVELOPE")
+            if (visibleInTree (combo) && combo->getParameterId().endsWith ("_amp_env"))
             {
                 found = true;
                 blank = blank || combo->getComboBox().getText() != "OP ENV";
