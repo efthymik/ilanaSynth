@@ -895,7 +895,11 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
     // CPU and uploads them through Apple's OpenGL-on-Metal layer, and measured
     // on an M4 (ilanaSnapshot --fps) it ran at 5-25 fps where CoreGraphics
     // reaches 45-60. Linux keeps it on. The settings menu still offers it.
-    const auto gpuByDefault = ! (bool) JUCE_MAC;
+#if JUCE_MAC
+    const auto gpuByDefault = false;
+#else
+    const auto gpuByDefault = true;
+#endif
     setGpuRendering (settings->getBoolValue ("gpuRendering", gpuByDefault)
                      && juce::SystemStats::getEnvironmentVariable ("ILANA_NO_GPU", "").isEmpty());
 
