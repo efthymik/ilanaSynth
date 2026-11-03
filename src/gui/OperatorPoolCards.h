@@ -423,6 +423,8 @@ class OperatorEnvEditor : public juce::Component,
 {
 public:
     enum class Place { pool, fmCard };
+    // The FM card's ENVELOPE menu at the right of the panel's first line (the card places it; the panel writes its name).
+    static constexpr int envelopeMenuWidth = 128;
 
     // The knobs' order on both tabs (an index into getControl).
     static constexpr int numStageControls = 8, numControls = 16;
@@ -569,6 +571,7 @@ public:
     TransposeKnob& getTranspose() { return transpose; }
 
     // The FM card: the space left free for its own controls (local).
+    // (The FM card's panel: the first line's room at the right of the tabs, for the card's ENVELOPE menu.)
     juce::Rectangle<int> getHostArea() const { return hostArea; }
 
     void paint (juce::Graphics& g) override
@@ -577,11 +580,18 @@ public:
             return;
         if (place == Place::fmCard)
         {
-            if (! tabLine.isEmpty())
+            // (ilana, 2026-11-03, "the op env is not well integrated", option A: the graph and its eight stage knobs are one
+            // envelope panel; the hint "drag the graph or the knobs" is the graph's tooltip.)
+            const auto box = getLocalBounds().toFloat();
+            g.setColour (IlanaTheme::Ui::panel.interpolatedWith (IlanaTheme::Ui::raised, 0.35f));
+            g.fillRoundedRectangle (box, 8.0f);
+            g.setColour (IlanaTheme::Ui::line);
+            g.drawRoundedRectangle (box.reduced (0.5f), 7.5f, 1.0f);
+            if (! hostArea.isEmpty())
             {
                 g.setColour (IlanaTheme::Ui::text3);
-                g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny));
-                g.drawText (hintText(), tabLine.withTrimmedLeft (tabs.getRight() - tabLine.getX() + 12), juce::Justification::centredRight, true);
+                g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true).withKerningFactor (0.07f));
+                g.drawText (FmOperatorInfo::envelopeLabel, hostArea.withTrimmedRight (envelopeMenuWidth + 8), juce::Justification::centredRight, true);
             }
             return;
         }
@@ -615,15 +625,46 @@ public:
 
         if (place == Place::fmCard)
         {
-            // Knobs along the bottom, the tabs over them, the graph at the
-            // top right; the rest is the card's.
-            auto area = getLocalBounds();
-            auto row = area.removeFromBottom (juce::jlimit (56, 76, (area.getHeight() - 20) / 3));
-            tabLine = area.removeFromBottom (22);
+            // One panel: the tabs on its first line (the card's ENVELOPE menu at their right), the graph under them and
+            // the eight stage knobs under the graph, each in its operator's colour.
+            auto area = getLocalBounds().reduced (8, 6);
+            tabLine = area.removeFromTop (22);
             tabs.setBounds (tabLine.withWidth (tabs.getIdealWidth()).withSizeKeepingCentre (tabs.getIdealWidth(), 20));
-            area.removeFromBottom (4);
-            graph.setBounds (area.removeFromRight (area.getWidth() / 3).withTrimmedLeft (8).reduced (0, 2));
-            hostArea = area;
+            area.removeFromTop (6);
+            hostArea = tabLine.withTrimmedLeft (tabs.getRight() - tabLine.getX() + 12);
+            if (operatorTab != 0 && rows.size() == (size_t) numStageControls)
+            {
+                // KEYS & VELOCITY: eight controls with menus among them, which need wider cells than eight in a row give; so
+                // the graph makes way and they take the panel in two rows of four (the scaling's two ends, then the rest).
+                graph.setVisible (false);
+                // (One grid for both rows: a knob's column, a menu's wider one, so the rows' columns line up.)
+                const auto band = area.getHeight() / 2;
+                const auto unit = (float) area.getWidth() / 4.7f;
+                const float shares[] { 1.0f, 1.35f, 1.0f, 1.35f };
+                const auto fillRow = [&] (juce::Rectangle<int> rowArea, std::initializer_list<int> list)
+                {
+                    auto x = (float) rowArea.getX();
+                    int column = 0;
+                    for (const auto i : list)
+                    {
+                        const auto width = shares[column++] * unit;
+                        auto cell = juce::Rectangle<int> ((int) x, rowArea.getY(), (int) width, rowArea.getHeight());
+                        // (A menu's name on the knobs' name line: the menu at the cell's top, as the dials fill theirs.)
+                        if (dynamic_cast<ComboControl*> (rows[(size_t) i]) != nullptr)
+                            cell = cell.removeFromTop (preferredControlHeight (rows[(size_t) i], cell.getWidth()));
+                        layoutRow (cell, { rows[(size_t) i] }, true);
+                        x += width;
+                    }
+                };
+                // (rows: KEY RATE, SCALE KEY, LOW DEPTH, LOW CURVE, HIGH DEPTH, HIGH CURVE, VEL, AMP MOD)
+                fillRow (area.removeFromTop (band), { 2, 3, 4, 5 });
+                fillRow (area, { 0, 1, 6, 7 });
+                return;
+            }
+            graph.setVisible (true);
+            auto row = area.removeFromBottom (juce::jlimit (66, 78, area.getHeight() * 45 / 100));
+            area.removeFromBottom (6);
+            graph.setBounds (area);
             layoutKnobs (row, rows, false);
             return;
         }
