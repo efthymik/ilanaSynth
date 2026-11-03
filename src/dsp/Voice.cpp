@@ -527,8 +527,7 @@ void Voice::startNote (int midiNoteNumber, float velocity, juce::SynthesiserSoun
                                : oscFrequencyFactor (settings);
 
         // A stereo string route: the twin (or each unison string) starts on its own side of it.
-        const auto unison = settings.stringExcite == (int) KarplusStrong::Excite::ModalPiano
-                                ? 1 : juce::jlimit (1, VoiceParams::maxBufferedUnison, settings.unison);
+        const auto unison = juce::jlimit (1, VoiceParams::maxBufferedUnison, settings.unison);
         stringTwin[osc] = settings.stringStereo && unison == 1;
         twinAsleep[osc] = stringTwin[osc] && ! disableTwinSleep && stereoStringAtRest (osc);
         const auto count = stringTwin[osc] ? 2 : unison;
@@ -1491,9 +1490,9 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
             const auto note = getCurrentlyPlayingNote();
             numOscUnison[osc] = juce::jmin (numOscUnison[osc], note < 35 ? 1 : (note < 47 ? 2 : 3));
         }
-        // The Modal Piano's recording already has all of a note's strings.
-        if (settings.stringMode && settings.stringExcite == (int) KarplusStrong::Excite::ModalPiano)
-            numOscUnison[osc] = juce::jmin (numOscUnison[osc], 1);
+        // (The Modal Piano plays unison too, since 2026-11-03: ilana, "modal
+        // piano unison dont work". Each voice is a whole recorded note, so
+        // UNISON stacks detuned pianos, as on a wavetable.)
 
         // A stereo string route on one string: a second plays its right side.
         const auto twin = settings.stringMode && settings.stringStereo && numOscUnison[osc] == 1;

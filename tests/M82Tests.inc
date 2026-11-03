@@ -409,6 +409,42 @@ void runTests()
                                                             + juce::String (modal, 1) + " dB vs " + juce::String (wavetable, 1) + " dB)");
         }
 
+        // UNISON stacks detuned Modal Pianos (2026-11-03, ilana: "modal
+        // piano unison dont work"; it was held at one voice): spread wide,
+        // the two channels play different pitches, so they correlate less.
+        {
+            const auto correlationWith = [] (int unison)
+            {
+                IlanaSynthAudioProcessor processor;
+                setParam (processor, "osc1_mode", 1.0f);
+                processor.chooseExciter (0, 11);
+                setParam (processor, "osc1_unison", (float) unison);
+                setParam (processor, "osc1_detune", 25.0f);
+                setParam (processor, "osc1_spread", 1.0f);
+                processor.prepareToPlay (48000.0, 256);
+                juce::AudioBuffer<float> buffer (2, 256);
+                auto lr = 0.0, ll = 0.0, rr = 0.0;
+                for (int start = 0; start < 48000; start += 256)
+                {
+                    juce::MidiBuffer midi;
+                    if (start == 0)
+                        midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+                    buffer.clear();
+                    processor.processBlock (buffer, midi);
+                    if (start >= 4800)
+                        for (int i = 0; i < 256; ++i)
+                        {
+                            const auto l = (double) buffer.getSample (0, i), r = (double) buffer.getSample (1, i);
+                            lr += l * r; ll += l * l; rr += r * r;
+                        }
+                }
+                return lr / std::sqrt (juce::jmax (1.0e-30, ll * rr));
+            };
+            const auto one = correlationWith (1), four = correlationWith (4);
+            check (four < one - 0.2, "Modal Piano UNISON 4 spread wide is wider than one voice (L/R correlation "
+                                         + juce::String (four, 2) + " vs " + juce::String (one, 2) + ")");
+        }
+
         // Picking the Modal Piano icon sets the string knobs to the
         // recording's (Modal Grand's); other exciters, and picking it again,
         // leave them (2026-11-03, ilana: "yes").
