@@ -358,8 +358,10 @@ void runTests()
                                         + juce::String (worst, 1) + " dB; time " + juce::String (timeSkip / timeAll, 2) + "x)");
         }
 
-        // Stereo: the reference's microphones are far out of phase at C4
-        // (correlation about -0.9), and the two channels are about as loud.
+        // Stereo: as the reference's microphones heard it. The Spitfire
+        // grand (since 2026-11-03) is in phase at C4 (correlation 0.8, Piano V's
+        // was -0.9): the channels are related but not one mono signal, and
+        // about as loud.
         {
             std::vector<float> right;
             const auto left = play (60, 0.5f, 0.5f, false, 48000, -1, &right);
@@ -372,7 +374,7 @@ void runTests()
             }
             const auto correlation = lr / std::sqrt (juce::jmax (1.0e-30, ll * rr));
             const auto balance = 10.0 * std::log10 (juce::jmax (1.0e-30, ll) / juce::jmax (1.0e-30, rr));
-            check (correlation < 0.0 && std::abs (balance) < 6.0,
+            check (correlation > 0.5 && correlation < 0.97 && std::abs (balance) < 6.0,
                    "the Modal Piano plays in stereo (C4: correlation " + juce::String (correlation, 2)
                        + ", balance " + juce::String (balance, 1) + " dB)");
         }
