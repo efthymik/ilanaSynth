@@ -2878,7 +2878,7 @@ inline std::vector<FactoryPreset> buildLaterPacks()
 
     using B = Builder;
 
-    // The Modal Piano exciter: Piano V's grand rebuilt from its measured
+    // The Modal Piano exciter: a Spitfire grand (ilana's render, 2026-11-03; Piano V's before) rebuilt from its measured
     // partials, its knobs at the middle (DAMP at 0) so it plays as measured.
     // No soundboard: the recording has its own. Master matches Felt Hammer
     // Board's trimmed level (+7 dB).
