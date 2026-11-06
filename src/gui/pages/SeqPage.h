@@ -581,8 +581,8 @@ public:
         std::vector<std::vector<Item>> groups {
             { { &genRoot, 0.8f }, { &genScale, 1.2f }, { &genSnap, 1.35f } },
             { { &sprayStrum, 1.05f }, { strumTime.get(), 0.9f } },
-            { { &sprayDirection, 1.05f }, { sprayCount.get(), 1.0f }, { sprayRange.get(), 1.0f },
-              { spraySpread.get(), 1.0f }, { sprayChance.get(), 1.0f }, { sprayVelocity.get(), 1.0f } }
+            { { &sprayDirection, 1.05f }, { sprayCount.get(), 0.85f }, { sprayRange.get(), 0.85f },
+              { spraySpread.get(), 0.85f }, { sprayChance.get(), 0.85f }, { sprayVelocity.get(), 0.85f } }
         };
         engineBox = {};
         if (engineTabs.getSelected() != 3)
@@ -590,7 +590,9 @@ public:
             const auto engine = engineTabs.getSelected();
             std::vector<Item> items;
             if (engine == 0)
-                items = { { &arpDiv, 1.0f }, { &arpMode, 1.0f }, { &arpSteps, 0.8f }, { &arpGate, 0.8f }, { &arpOctaves, 0.8f }, { &arpChance, 0.8f } };
+                // (MODE is wider, so "UpDown", "Converge" and "Scale Random" read whole; SPRAY's five rings give the width
+                // back: UI review 29, B1.)
+                items = { { &arpDiv, 0.9f }, { &arpMode, 1.95f }, { &arpSteps, 0.75f }, { &arpGate, 0.75f }, { &arpOctaves, 0.75f }, { &arpChance, 0.75f } };
             else if (engine == 1)
                 items = { { &eucDiv, 1.0f }, { &eucTarget, 1.0f }, { &eucSteps, 0.8f }, { &eucGate, 0.8f }, { &eucHits, 0.8f }, { &eucRotate, 0.8f } };
             else

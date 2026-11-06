@@ -2210,7 +2210,49 @@ private:
         oscBar.setRangeLimits (0.0, (double) page->getHeight());
         oscBar.setCurrentRange ((double) oscView.getViewPositionY(), (double) oscView.getHeight());
         oscBar.setVisible (page->getHeight() > oscView.getHeight() + 1);
+
+        // The fades at the oscillator area's edges follow the scroll (UI review 29, B3).
+        const auto fadeAbove = oscView.getViewPositionY() > 0;
+        const auto fadeBelow = oscView.getViewPositionY() + oscView.getHeight() < page->getHeight() - 1;
+        if (fadeAbove != oscFadeAbove || fadeBelow != oscFadeBelow)
+        {
+            oscFadeAbove = fadeAbove;
+            oscFadeBelow = fadeBelow;
+            repaint (oscView.getBounds());
+        }
     }
+
+    // Where the cards run on past the oscillator area (a Physical card is taller, so a second card can end under
+    // the module block), the edge fades into the page, so a row cut there reads as "scroll for more", not as a
+    // clipped label (UI review 29, B3). Cards keep their size; nothing folds.
+    void paintOverChildren (juce::Graphics& g) override
+    {
+        if (foldPicture.isVisible() || oscView.getHeight() <= 0)
+            return;
+        constexpr float fade = 22.0f;
+        const auto view = oscView.getBounds().toFloat();
+        // (The fold tab and the scroll bar stay on top of the fade.)
+        if (foldTab.isVisible())
+            g.excludeClipRegion (foldTab.getBounds());
+        if (oscBar.isVisible())
+            g.excludeClipRegion (oscBar.getBounds());
+        if (oscFadeBelow)
+        {
+            const auto band = view.withTop (view.getBottom() - fade);
+            g.setGradientFill (juce::ColourGradient (IlanaTheme::Ui::bg.withAlpha (0.0f), 0.0f, band.getY(),
+                                                     IlanaTheme::Ui::bg, 0.0f, band.getBottom(), false));
+            g.fillRect (band);
+        }
+        if (oscFadeAbove)
+        {
+            const auto band = view.withHeight (fade);
+            g.setGradientFill (juce::ColourGradient (IlanaTheme::Ui::bg, 0.0f, band.getY(),
+                                                     IlanaTheme::Ui::bg.withAlpha (0.0f), 0.0f, band.getBottom(), false));
+            g.fillRect (band);
+        }
+    }
+
+    bool oscFadeAbove = false, oscFadeBelow = false;
 
     void scrollBarMoved (juce::ScrollBar*, double newStart) override
     {
