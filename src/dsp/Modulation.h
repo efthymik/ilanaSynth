@@ -674,6 +674,15 @@ inline const std::vector<ParamDestination>& getParamDestinations()
             add (prefix + "_grain_pos", name + "Grain Position");
             add (prefix + "_grain_scan", name + "Grain Scan");
         }
+
+        // The modal exciters' SIZE and SCALE (append only, 2026-11-06).
+        for (int osc = 0; osc < 6; ++osc)
+        {
+            const juce::String prefix (prefixes[osc]);
+            const auto name = "Osc" + juce::String (osc + 1) + " ";
+            add (prefix + "_modal_size", name + "Modal Size");
+            add (prefix + "_modal_scale", name + "Modal Scale");
+        }
         return true;
     }();
     juce::ignoreUnused (extended);

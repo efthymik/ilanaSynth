@@ -1135,6 +1135,8 @@ class OscPage : public juce::Component,
               epPosition (state, prefix + "_ep_position", "OFFSET"),
               fbGain (state, prefix + "_fb_gain", "AMP GAIN"),
               fbDistance (state, prefix + "_fb_distance", "DISTANCE"),
+              modalSize (state, prefix + "_modal_size", "SIZE"),
+              modalScale (state, prefix + "_modal_scale", "SCALE"),
               // RESONANCE (review 23): the patch's sympathetic strings and soundboard model, as the strip below has them.
               resAmount (state, "sym_amount", "AMOUNT"),
               resOn (state, "sym_on", "SYMPATHETIC"),
@@ -1144,7 +1146,7 @@ class OscPage : public juce::Component,
         {
             for (auto* knob : { &stiffness, &pickup, &click, &excitePos, &hardness, &pickPos, &bowPressure, &bowSpeed,
                                 &bridgeBuzz, &fretRattle, &hammer, &couple, &damper, &registerMap,
-                                &epDistance, &epPosition, &fbGain, &fbDistance })
+                                &epDistance, &epPosition, &fbGain, &fbDistance, &modalSize, &modalScale })
                 knob->setIdentityColour (colour);
         }
 
@@ -1153,6 +1155,7 @@ class OscPage : public juce::Component,
         KnobControl hammer, couple, damper, registerMap;
         KnobControl epDistance, epPosition; // M7.3 Tine / Reed pickup
         KnobControl fbGain, fbDistance;     // M8.5 feedback amp
+        KnobControl modalSize, modalScale;  // the modal exciters' body and string (2026-11-06)
         ToggleControl slap;
         KnobControl resAmount;
         ToggleControl resOn;
@@ -1321,6 +1324,7 @@ public:
                                 physicalControls.damper, physicalControls.registerMap,
                                 physicalControls.epDistance, physicalControls.epPosition,
                                 physicalControls.fbGain, physicalControls.fbDistance,
+                                physicalControls.modalSize, physicalControls.modalScale,
                                 physicalControls.resAmount, physicalControls.resOn, physicalControls.resBoard);
             physicalControls.resAmount.setIdentityColour (juce::Colour (0xffe9724c));
             physicalControls.resOn.setSwitchColour (juce::Colour (0xffe9724c));
@@ -1332,7 +1336,7 @@ public:
                                 &physicalControls.pickPos, &physicalControls.bowPressure, &physicalControls.bowSpeed, &physicalControls.bridgeBuzz,
                                 &physicalControls.fretRattle, &physicalControls.hammer, &physicalControls.couple, &physicalControls.damper,
                                 &physicalControls.registerMap, &physicalControls.epDistance, &physicalControls.epPosition, &physicalControls.fbGain,
-                                &physicalControls.fbDistance })
+                                &physicalControls.fbDistance, &physicalControls.modalSize, &physicalControls.modalScale })
                 knob->setInlineKnob (true);
             physicalControls.slap.setInlineLabel (true);
             // (The short names the grid has room for, as the list names them.)
@@ -1364,6 +1368,8 @@ public:
             lookup["_bow_speed"] = &physicalControls.bowSpeed;
             lookup["_fb_gain"] = &physicalControls.fbGain;
             lookup["_fb_distance"] = &physicalControls.fbDistance;
+            lookup["_modal_size"] = &physicalControls.modalSize;
+            lookup["_modal_scale"] = &physicalControls.modalScale;
             lookup["_string_pickup"] = &physicalControls.pickup;
             lookup["_string_click"] = &physicalControls.click;
             lookup["_bridge_buzz"] = &physicalControls.bridgeBuzz;
@@ -2529,7 +2535,11 @@ private:
             { "Reed", "Electric piano. A struck reed and its pickup.", { { "M2 4H16L11 11H2ZM2 14H16M3 6H11", 1.5f } } },
             { "Piano", "Strike. A felt strike; HAMMER sets brightness.", { { "M1 3H17V14H1ZM6 3V14M12 3V14", 1.1f }, { "M4 3H7V9H4ZM10 3H13V9H10Z", 0.0f } } },
             { "Feedback", "Driven. The amp pushes sound back at the string.", { { "M15 5A6 6 0 1 0 15 11M12 2L16 5 12 7M5 8H11", 1.5f } } },
-            { "Modal Piano", "Strike. A measured grand, partial by partial.", { { "M1 8H17V15H1ZM6 8V15M12 8V15", 1.1f }, { "M1 4Q3 1 5 4T9 4T13 4T17 4", 1.2f } } } };
+            { "Modal Piano", "Strike. A measured grand, partial by partial.", { { "M1 8H17V15H1ZM6 8V15M12 8V15", 1.1f }, { "M1 4Q3 1 5 4T9 4T13 4T17 4", 1.2f } } },
+            { "Modal Guitar", "Pluck. A measured nylon guitar, partial by partial; SIZE the box, SCALE the neck.",
+              { { "M3 10A4 4 0 1 0 9 14A3 3 0 1 0 9 8L16 2", 1.5f }, { "M6 11H6.1", 2.0f } } },
+            { "Modal Bowed", "Bow. A bowed string's modes in a body: SIZE flows violin, viola, cello.",
+              { { "M7 2Q4 5 6 8Q4 11 7 15H10Q13 11 11 8Q13 5 10 2Z", 1.4f }, { "M1 13L17 5", 1.2f } } } };
     }
 
     juce::String physicalHint (int osc) const
@@ -2546,8 +2556,10 @@ private:
             "A struck reed and its pickup.",
             "A felt strike; HAMMER sets brightness.",
             "The amp pushes sound back at the string.",
-            "A measured grand, partial by partial." };
-        return hints[juce::jlimit (0, 11, juce::roundToInt (readFloat (juce::String (OscillatorIds::prefixes[(size_t) osc]) + "_excite")))];
+            "A measured grand, partial by partial.",
+            "A measured nylon guitar; SIZE the box, SCALE the neck.",
+            "A bowed string's modes; SIZE flows violin, viola, cello." };
+        return hints[juce::jlimit (0, 13, juce::roundToInt (readFloat (juce::String (OscillatorIds::prefixes[(size_t) osc]) + "_excite")))];
     }
 
     bool unisonShown (int osc) const
@@ -4504,7 +4516,7 @@ private:
                  &phys.stiffness, &phys.pickup, &phys.click, &phys.excitePos, &phys.hardness,
                  &phys.pickPos, &phys.bowPressure, &phys.bowSpeed, &phys.bridgeBuzz, &phys.fretRattle,
                  &phys.hammer, &phys.couple, &phys.damper, &phys.registerMap, &phys.slap,
-                 &phys.epDistance, &phys.epPosition, &phys.fbGain, &phys.fbDistance, &waveDisplay (i), &scrubbers[(size_t) i], &loadButton (i), editButtons[(size_t) i].get(),
+                 &phys.epDistance, &phys.epPosition, &phys.fbGain, &phys.fbDistance, &phys.modalSize, &phys.modalScale, &waveDisplay (i), &scrubbers[(size_t) i], &loadButton (i), editButtons[(size_t) i].get(),
                  bounceButtons[(size_t) i].get(), &pieces.stringView, &pieces.opEnvGraph, &pieces.spreadView, &pieces.partials, &pieces.status,
                  &pieces.opEnvButton, &pieces.sampleLoadButton, &pieces.sampleSliceButton, &pieces.sampleExportButton, &pieces.sampleZonesButton, &pieces.sampleDetectButton, &pieces.sampleNameButton,
                  &pieces.removeButton, &pieces.typeBar, &pieces.routeBar, &pieces.outBar, &pieces.prevTable, &pieces.nextTable, &pieces.exciterPills,
@@ -4550,7 +4562,7 @@ private:
         auto& phys = *physical[(size_t) index];
         for (auto* knob : { &phys.stiffness, &phys.pickup, &phys.click, &phys.excitePos, &phys.hardness, &phys.pickPos, &phys.bowPressure, &phys.bowSpeed,
                             &phys.bridgeBuzz, &phys.fretRattle, &phys.hammer, &phys.couple, &phys.damper, &phys.registerMap,
-                            &phys.epDistance, &phys.epPosition, &phys.fbGain, &phys.fbDistance, &phys.resAmount,
+                            &phys.epDistance, &phys.epPosition, &phys.fbGain, &phys.fbDistance, &phys.modalSize, &phys.modalScale, &phys.resAmount,
                             &osc.stringDecay, &osc.stringDamp, &osc.stringSustain })
             knob->setPackedDial (string ? (float) mainDial : 0.0f);
         phys.slap.setPackedName (string ? ToggleControl::NamePlace::leftFlush : ToggleControl::NamePlace::none);
@@ -4625,7 +4637,11 @@ private:
             auto& osc = *controls[(size_t) index];
             auto& pieces = *aux[(size_t) index];
             const juce::String prefix (OscillatorIds::prefixes[(size_t) index]);
-            osc.stringSustain.setLabelText (juce::roundToInt (readFloat (prefix + "_excite")) == 10 ? "FEEDBACK" : "SUSTAIN");
+            const auto exciteNow = juce::roundToInt (readFloat (prefix + "_excite"));
+            osc.stringSustain.setLabelText (exciteNow == 10 ? "FEEDBACK" : "SUSTAIN");
+            // (The modal guitar's HAMMER is its pluck; the bowed string's SLAP its pizzicato.)
+            physical[(size_t) index]->hammer.setLabelText (exciteNow == 12 ? "PLUCK" : "HAMMER");
+            physical[(size_t) index]->slap.setLabelText (exciteNow == 13 ? "PIZZ" : "SLAP");
 
             for (const auto& slot : slotsFor (index))
                 slot.item->setVisible (true);
@@ -4773,7 +4789,8 @@ private:
                                &physicalControls.hammer, &physicalControls.couple,
                                &physicalControls.damper, &physicalControls.registerMap,
                                &physicalControls.epDistance, &physicalControls.epPosition,
-                               &physicalControls.fbGain, &physicalControls.fbDistance }, enabled);
+                               &physicalControls.fbGain, &physicalControls.fbDistance,
+                               &physicalControls.modalSize, &physicalControls.modalScale }, enabled);
 
             auto& osc = *controls[(size_t) index];
             setGroupEnabled ({ &osc.mode, &osc.table, &osc.frameBlend, &osc.excite, &osc.level,

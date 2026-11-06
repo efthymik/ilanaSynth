@@ -3909,6 +3909,16 @@ public:
         button.repaint();
     }
 
+    // A new name (one switch, two meanings: the bowed string's SLAP is PIZZ).
+    void setLabelText (const juce::String& text)
+    {
+        if (button.getButtonText() != text)
+        {
+            button.setButtonText (text);
+            repaint();
+        }
+    }
+
     // The name to the right of the switch, on one line (a row of knobs and
     // switches in a card: "TUNED", "LOOP").
     void setInlineLabel (bool shouldBeInline)

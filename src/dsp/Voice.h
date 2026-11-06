@@ -230,6 +230,8 @@ struct VoiceParams
         float hammerHardness = 0.5f, couple = 0.0f, damper = 0.0f, registerMap = 0.0f;
         float epDistance = 0.5f, epPosition = 0.5f; // M7.3 tine/reed pickup
         float fbGain = 0.5f, fbDistance = 0.5f;     // M8.5 feedback amp
+        // The modal exciters' SIZE (body) and SCALE (string length) as factors, 1 as recorded.
+        float modalSize = 1.0f, modalScale = 1.0f;
         // Stereo routes into the string knobs (Mod::StereoString): the left
         // strings get + these and the right ones minus; one string plays as a
         // left / right twin while any such route is set.
@@ -544,6 +546,8 @@ public:
             case 8:  return 0.708f; // Reed, -3 dB
             case 9:  return 2.0f;   // Piano, +6 dB (heard 2-6 dB under Hammer; the drive takes some back)
             case 11: return 10.0f;  // Modal Piano, +20 dB (the table is in Piano V's dBFS; level with Piano and a wavetable osc at C4)
+            case 12: return 25.0f;  // Modal Guitar, +28 dB (the Iowa guitar's dBFS; level with Piano and Bow at C3-C5)
+            case 13: return 1.0f;   // Modal Bowed (ModalBowed::outputGain sets it level with Piano and Bow)
             default: return 1.0f;
         }
     }

@@ -3,6 +3,8 @@
 #include <juce_core/juce_core.h>
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <utility>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -359,6 +361,21 @@ inline juce::String offAtZero (const juce::String&, float value) { return juce::
 
 inline juce::String rotate (const juce::String&, float value) { return "+" + juce::String (juce::roundToInt (value)); }
 
+// The modal exciters' SIZE (x0.25..x4) and SCALE (x0.5..x2) as factors;
+// SIZE names the violin family's sizes on the way.
+inline juce::String modalSize (const juce::String&, float factor)
+{
+    const auto text = juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) + juce::String (factor, 2);
+    for (const auto& [at, name] : { std::pair { 1.0f, "violin" }, std::pair { 1.17f, "viola" }, std::pair { 2.1f, "cello" } })
+        if (juce::String (factor, 2) == juce::String (at, 2))
+            return text + " " + name;
+    return text;
+}
+inline juce::String modalScale (const juce::String&, float factor)
+{
+    return juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) + juce::String (factor, 2);
+}
+
 inline juce::String rangeAboveRoot (const juce::String&, float value)
 {
     return juce::roundToInt (value) == 0 ? juce::String ("root") : "+" + juce::String (juce::roundToInt (value)) + " st";
@@ -517,6 +534,8 @@ inline const ValueRow valueRows[] {
     // (Sampler amounts that read "0" and "0.20" without a unit, review 21.)
     { ends ("_sample_loop_xfade|_sample_start_rand|_sample_vel_blend"), Unit::percent },
     { ends ("_fb_gain|_fb_distance"), Unit::percent },
+    { ends ("_modal_size"), ValueTexts::modalSize },
+    { ends ("_modal_scale"), ValueTexts::modalScale },
 
     { ends ("_pan"), ValueTexts::pan },
     { ends ("_string_excite_pos"), ValueTexts::autoAtZero },
@@ -968,6 +987,8 @@ inline const HelpRow helpRows[] {
     { ends ("_spectral_amt"), "How far the spectral warp goes. For Formant, the middle leaves the vowel where it was. "
       "Changes rebuild the table in the background (64 steps), so modulating it follows with a short lag. "
       "Routed from an envelope, velocity, key track or random, every note morphs by its own amount (32 steps, up to 16 tables shared)." },
+    { ends ("_modal_size"), "Modal exciters: the body's size. Its resonances move down as it grows (x1 is the recorded instrument). On Modal Bowed it flows violin (x1), viola (x1.17), cello (x2.1) and on past them; on the guitar it is the box, on the piano the soundboard." },
+    { ends ("_modal_scale"), "Modal exciters: the string's length at the same pitch. Longer strings are less stiff and ring longer (x1 is the recorded instrument): a ukulele's short neck to a baritone's long one." },
     { ends ("_scale").also (starts ("osc|sub")), "Snaps the pitch to a scale. The played note plus SEMI moves to the nearest scale note, so a chord "
       "or a held cluster always lands in key. Off leaves the pitch alone." },
     { ends ("_scale_root").also (starts ("osc|sub")), "The scale's root note (C to B) for this oscillator's scale snap." },

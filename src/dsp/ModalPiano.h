@@ -28,6 +28,14 @@
 //   HAMMER  plays the timbre of a softer or harder strike at the same loudness
 //   DAMPER  how fast the dampers stop the note on release (0 rings on)
 // Eco keeps the first half of the partials.
+//
+// The same engine plays the Modal Guitar (a nylon-string guitar's table,
+// setTable), and two shape knobs move either instrument away from the
+// recording, which they reproduce at 1 (setShape):
+//   SIZE    the body (soundboard, guitar box): its resonances sit at their
+//           measured Hz divided by SIZE (a bigger body rings lower)
+//   SCALE   the string's length at the same pitch: longer strings are less
+//           stiff (the stretch falls as SCALE^-3) and ring longer (x SCALE)
 
 #include <juce_core/juce_core.h>
 
@@ -82,6 +90,7 @@ public:
     {
         sampleRate = newSampleRate;
         useAvx(); // (its first call reads the environment: here, not on the audio thread)
+        ModalPianoTable::guitar(); // (parsed here too, not on the audio thread)
         designNoise();
         reset();
     }
@@ -102,6 +111,28 @@ public:
         pitchDirty = true;
     }
 
+    // Which instrument's measurements play (the grand by default).
+    void setTable (const ModalPianoTable& newTable)
+    {
+        if (&newTable == tableData)
+            return;
+        tableData = &newTable;
+        reset();
+    }
+
+    // SIZE and SCALE as factors (1: the recording).
+    void setShape (float newSize, float newScale)
+    {
+        newSize = juce::jlimit (0.1f, 10.0f, newSize);
+        newScale = juce::jlimit (0.1f, 10.0f, newScale);
+        if (newSize == bodySize && newScale == stringScale)
+            return;
+        bodySize = newSize;
+        stringScale = newScale;
+        stretchScale = 1.0f / (newScale * newScale * newScale);
+        pitchDirty = true;
+    }
+
     void setParams (float newDecay, float newDamp, float newStiffness, float newHardness, float newDamper, bool newEco)
     {
         timeScale = std::exp2 ((juce::jlimit (0.0f, 1.0f, newDecay) - 0.5f) * 3.0f);
@@ -119,7 +150,7 @@ public:
 
     void trigger (float velocity, float randomUnit)
     {
-        const auto& table = ModalPianoTable::get();
+        const auto& table = *tableData;
         count = slots = 0;
         attackLeft = 0;
         silent = true;
@@ -179,7 +210,7 @@ public:
         for (int m = 0; m < modes; ++m)
         {
             const auto k = slots++;
-            modeHz[m] = modeA->modes[(size_t) m];
+            modeHz[m] = modeA->modes[(size_t) m] / bodySize;
             seed = seed * 1664525u + 22695477u;
             const auto phase = (float) (seed >> 8) * (juce::MathConstants<float>::twoPi / 16777216.0f);
             re[k] = std::cos (phase);
@@ -488,7 +519,7 @@ private:
         pitchDirty = false;
         for (int k = 0; k < count; ++k)
         {
-            const auto ratio = harmonic[k] + (measured[k] - harmonic[k]) * stiffness;
+            const auto ratio = harmonic[k] + (measured[k] - harmonic[k]) * (stiffness * stretchScale);
             hz[k] = (float) (ratio * frequency);
             const auto w = juce::MathConstants<double>::twoPi * juce::jmin ((double) hz[k], sampleRate * 0.49) / sampleRate;
             rotCos[k] = (float) std::cos (w);
@@ -497,7 +528,7 @@ private:
         }
         for (int k = count; k < slots; ++k)
         {
-            hz[k] = modeHz[k - count];
+            hz[k] = modeA != nullptr ? modeA->modes[(size_t) (k - count)] / bodySize : modeHz[k - count];
             const auto w = juce::MathConstants<double>::twoPi * hz[k] / sampleRate;
             rotCos[k] = (float) std::cos (w);
             rotSin[k] = (float) std::sin (w);
@@ -513,10 +544,10 @@ private:
         if (pitchDirty)
             updatePitch();
 
-        const auto& table = ModalPianoTable::get();
+        const auto& table = *tableData;
         const auto times = (int) table.times.size();
         const auto now = (double) (elapsed + blockSize) / sampleRate;
-        const auto t = now / timeScale;
+        const auto t = now / (timeScale * stringScale);
 
         auto s = 0;
         while (s < times - 2 && t >= table.times[(size_t) s + 1])
@@ -633,7 +664,6 @@ private:
             // then to the variance each band's filter needs at this rate
             // (the filters overlap: a few Gauss-Seidel passes find the
             // non-negative powers that come closest).
-            const auto& table = ModalPianoTable::get();
             std::array<float, ModalPianoTable::noiseBandCount> variance {};
             const auto toVariance = (float) ModalPianoTable::noiseFftSize / 6.0f * (float) (sampleRate / table.rate) / 0.6931472f;
             for (int b = 0; b < ModalPianoTable::noiseBandCount; ++b)
@@ -684,6 +714,8 @@ private:
     int note = 60;
     float timeScale = 1.0f, dampRate = 0.0f, stiffness = 1.0f, hardness = 0.5f, damper = 0.5f;
     bool eco = false, pitchDirty = true, silent = true;
+    const ModalPianoTable* tableData = &ModalPianoTable::get();
+    float bodySize = 1.0f, stringScale = 1.0f, stretchScale = 1.0f;
     // The table's sinusoid levels are the reference's in dBFS (about 20 dB
     // quiet); Voice::exciterTrim brings the Modal Piano up to the other
     // oscillators' level, so this stays 1 (Modal Grand, saved without the

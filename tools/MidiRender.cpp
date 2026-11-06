@@ -40,10 +40,15 @@ int main (int argc, char** argv)
             mode->setValueNotifyingHost (mode->convertTo0to1 (1.0f)); // Physical
         p->setValueNotifyingHost (p->convertTo0to1 (11.0f));
     }
-    // ILANA_SET="id=value,id=value": parameters set after the preset loads.
+    // ILANA_SET="id=value,id=value": parameters set after the preset loads
+    // (a value that isn't a number is a choice's text: mod1_dst=Osc1 Modal Size).
     for (auto pair : juce::StringArray::fromTokens (juce::SystemStats::getEnvironmentVariable ("ILANA_SET", ""), ",", ""))
         if (auto* p = processor.apvts.getParameter (pair.upToFirstOccurrenceOf ("=", false, false).trim()))
-            p->setValueNotifyingHost (p->convertTo0to1 (pair.fromFirstOccurrenceOf ("=", false, false).getFloatValue()));
+        {
+            const auto text = pair.fromFirstOccurrenceOf ("=", false, false).trim();
+            p->setValueNotifyingHost (text.containsOnly ("0123456789.-") ? p->convertTo0to1 (text.getFloatValue())
+                                                                          : p->getValueForText (text));
+        }
     processor.setPlayConfigDetails (0, 2, rate, blockSize);
     processor.prepareToPlay (rate, blockSize);
 

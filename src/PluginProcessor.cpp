@@ -222,6 +222,7 @@ IlanaSynthAudioProcessor::IlanaSynthAudioProcessor()
                                           prefix + "_damper", prefix + "_register" };
             electricParamIds[(size_t) i] = { prefix + "_ep_distance", prefix + "_ep_position" };
             feedbackParamIds[(size_t) i] = { prefix + "_fb_gain", prefix + "_fb_distance" };
+            modalShapeIds[(size_t) i] = { prefix + "_modal_size", prefix + "_modal_scale" };
             grainLiveIds[(size_t) i] = prefix + "_grain_live";
             sampleParamIds[(size_t) i] = { prefix + "_sample_tuned", prefix + "_sample_loop",
                                            prefix + "_sample_reverse", prefix + "_sample_start",
@@ -1579,6 +1580,11 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
         osc.epPosition = getParam (electric[1]);
         osc.stringStereo = stringStereoRouted[(size_t) oscIndex];
         osc.stringStereoOffsets = stringStereoOffsets[(size_t) oscIndex];
+        if (osc.stringExcite >= 11)
+        {
+            osc.modalSize = getParam (modalShapeIds[(size_t) oscIndex][0]);
+            osc.modalScale = getParam (modalShapeIds[(size_t) oscIndex][1]);
+        }
         if (osc.stringExcite == 10)
         {
             osc.fbGain = getParam (feedbackParamIds[(size_t) oscIndex][0]);

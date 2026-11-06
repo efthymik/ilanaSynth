@@ -3721,6 +3721,7 @@ void Voice::configureString (KarplusStrong& string, const VoiceParams::OscParams
     string.setKeysParams (hammer, settings.damper);
     string.setEco (params.quality == 0);
     string.setFeedbackParams (settings.fbGain, settings.fbDistance);
+    string.setModalShape (settings.modalSize, settings.modalScale);
     if (string.isElectric())
         string.setElectricParams (settings.epDistance, settings.epPosition);
 }
@@ -3989,7 +3990,7 @@ bool Voice::heldSleepAllowed() const
         if (! settings.stringMode || settings.liveMode || settings.granularMode || settings.sampleMode)
             return false;
         const auto excite = (E) settings.stringExcite;
-        if (excite == E::Bow || excite == E::External || excite == E::Feedback || settings.stringSustain > 0.0f)
+        if (excite == E::Bow || excite == E::ModalBowed || excite == E::External || excite == E::Feedback || settings.stringSustain > 0.0f)
             return false;
     }
     // A route into a filter or the WEST gate could push it into
