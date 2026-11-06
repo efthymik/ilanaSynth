@@ -399,7 +399,8 @@ public:
     void migrateModDepthRanges();
     // The Dense soundboard's MIX reaches 5.6x further since 2026-11-05
     // (DenseSoundboard::mixRange): a patch on the Dense board from before
-    // gets its MIX divided by that, so its wood stays where it was heard.
+    // gets its MIX, and the depth of every route or macro into MIX, divided
+    // by that, so its wood stays where it was heard.
     // Returns 1 if it changed the value.
     static int migrateDenseBoardMix (const std::function<float (const juce::String&, float)>& get,
                                      const std::function<void (const juce::String&, float)>& set);

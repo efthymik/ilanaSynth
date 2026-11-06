@@ -576,6 +576,19 @@ int IlanaSynthAudioProcessor::migrateDenseBoardMix (const std::function<float (c
         return 0;
 
     set ("sb_mix", get ("sb_mix", 0.5f) / DenseSoundboard::mixRange);
+
+    // Routes and macros into MIX were heard at the old reach too (Toy Grand's and
+    // Dense Board Piano's BOARD macro): their depths shrink by the same factor,
+    // so turning a macro fades the wood as it did instead of cutting it off.
+    const auto mixDestination = Mod::destinationForParamId ("sb_mix");
+    for (int slot = 1; slot <= Mod::maxSlots && mixDestination > 0; ++slot)
+    {
+        const auto prefix = "mod" + juce::String (slot);
+        if (juce::roundToInt (get (prefix + "_dst", 0.0f)) != mixDestination)
+            continue;
+        if (const auto depth = get (prefix + "_amt", 0.0f); depth != 0.0f)
+            set (prefix + "_amt", depth / DenseSoundboard::mixRange);
+    }
     return 1;
 }
 
