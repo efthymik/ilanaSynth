@@ -359,6 +359,37 @@ void runM4Tests()
             target.restoreWholePatch (source.captureWholePatch());
             check (std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.56f) < 0.002f,
                    "a Dense patch saved now keeps its MIX");
+
+            // A route (a macro) into MIX shrinks by the same factor, so the macro fades the wood as it did.
+            {
+                IlanaSynthAudioProcessor routed;
+                setParam (routed, "sb_on", 1.0f);
+                setParam (routed, "sb_model", 1.0f);
+                setParam (routed, "sb_mix", 0.56f);
+                setParam (routed, "mod40_src", 1.0f);
+                setParam (routed, "mod40_dst", (float) Mod::destinationForParamId ("sb_mix"));
+                setParam (routed, "mod40_amt", -0.28f);
+                auto routedOld = routed.captureWholePatch();
+                routedOld.removeProperty ("boardMixSchema", nullptr);
+                target.restoreWholePatch (routedOld);
+                check (std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.05f) < 0.002f,
+                       "a route into a Dense patch's MIX saved before loads scaled with the MIX");
+                target.restoreWholePatch (routed.captureWholePatch());
+                check (std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.28f) < 0.002f,
+                       "a route into MIX saved now keeps its depth");
+
+                // Dense Board Piano's BOARD macro (-0.3 on MIX in the recipe, x3.781 by its macro trim: -1) loads at the new reach's scale.
+                IlanaSynthAudioProcessor factory;
+                const auto index = factory.getFactoryPresetNames().indexOf ("Dense Board Piano");
+                factory.loadFactoryPreset (index);
+                auto depth = 0.0f;
+                for (int slot = 1; slot <= Mod::maxSlots; ++slot)
+                    if (juce::roundToInt (factory.apvts.getRawParameterValue ("mod" + juce::String (slot) + "_dst")->load())
+                        == Mod::destinationForParamId ("sb_mix"))
+                        depth = factory.apvts.getRawParameterValue ("mod" + juce::String (slot) + "_amt")->load();
+                check (index >= 0 && std::abs (depth + 1.0f / DenseSoundboard::mixRange) < 0.002f,
+                       "Dense Board Piano's BOARD macro depth is scaled with its MIX (" + juce::String (depth, 4) + ")");
+            }
             setParam (source, "sb_model", 0.0f);
             old = source.captureWholePatch();
             old.removeProperty ("boardMixSchema", nullptr);

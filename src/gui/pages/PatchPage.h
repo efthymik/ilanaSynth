@@ -2566,7 +2566,26 @@ private:
             refusedUntil = 0;
             repaint (hint);
         }
-        view.repaint(); // the CPU readouts
+        // The boxes' live lines (CPU, an LFO's rate, a stage's state), the loop guards and the LFO waves: the canvas
+        // redraws only when one of them moved. (It used to redraw every tick: ~14 ms a paint over 72 % of the window
+        // at 175 % in software, while the page sat idle.)
+        {
+            auto live = false;
+            juce::String readouts;
+            for (const auto& node : shown.nodes())
+            {
+                live = live || isLfo (node); // (an LFO box draws its wave and moving dot)
+                readouts << statusOf (node) << '|';
+            }
+            if (processorRef.isFxPatcherOn())
+                for (const auto& cable : shown.cables())
+                    readouts << (processorRef.getFxLoopGuard (cable.from.node, cable.from.port, cable.to.node, cable.to.port) < 0.98f ? '!' : '.');
+            if (live || readouts != lastReadouts)
+            {
+                lastReadouts = readouts;
+                view.repaint();
+            }
+        }
         repaint (inspector);
         updateZoomLabel();
     }
@@ -2625,7 +2644,7 @@ private:
     std::unique_ptr<FxLfoAmounts> lfoAmounts;
     juce::TextButton lfoButton { "+ LFO" }, openTargetButton { "OPEN ITS WINDOW" }, openLfoButton { "OPEN WINDOW" }, removeLfoButton { "REMOVE" };
     std::vector<std::unique_ptr<FxLfoWindow>> lfoWindows;
-    juce::String lastSignature, lastState, refusal;
+    juce::String lastSignature, lastState, refusal, lastReadouts;
     juce::uint32 refusedUntil = 0;
     int shownNodes = -1;
 
