@@ -91,6 +91,18 @@ uvec4 sampleTransformed (ivec2 p, ivec2 size)
     return fetch (lo);
 }
 
+// PixelARGB::blend adds (dest * (256 - srcAlpha)) >> 8, which truncates;
+// the blend unit rounds to nearest. Lowering a translucent source's colour
+// by just under half a level turns that rounding into truncation wherever
+// the colour channel is above zero (flags & 4: a blending draw).
+vec4 blendOutput (uvec4 c)
+{
+    vec4 v = vec4 (c);
+    if ((pc.flags & 4) != 0 && c.a < 255u)
+        v.rgb = max (v.rgb - 0.49, vec3 (0.0));
+    return v / 255.0;
+}
+
 void main()
 {
     ivec2 p = ivec2 (gl_FragCoord.xy);
@@ -98,7 +110,9 @@ void main()
 
     if (pc.mode == 0)
     {
-        outColour = vColour; // already scaled on the CPU
+        // already scaled on the CPU
+        src = uvec4 (vColour * 255.0 + 0.5);
+        outColour = blendOutput (src);
         return;
     }
     else if (pc.mode == 1)
@@ -145,5 +159,5 @@ void main()
     if (vScale < 256u)
         src = (src * vScale) >> 8;
 
-    outColour = vec4 (src) / 255.0;
+    outColour = blendOutput (src);
 }
