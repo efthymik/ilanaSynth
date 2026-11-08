@@ -2023,6 +2023,14 @@ public:
     }
 
     bool isTuningShown() const { return tuningPopover.isVisible(); }
+    // Esc, from the editor: closes the tuning pop-over if it is open.
+    bool closeTuning()
+    {
+        if (! tuningPopover.isVisible() || tuningGrow.isClosing())
+            return false;
+        showTuning (false);
+        return true;
+    }
 
     // The fold's moving parts at the slide's place: the tab on the block's top edge, the folded line, and while
     // sliding the block's picture.

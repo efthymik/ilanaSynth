@@ -900,7 +900,7 @@ private:
         {
             const auto why = processorRef.getLastSampleError();
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Load sample",
-                                                    why.isNotEmpty() ? why : "Could not load \"" + entry.file.getFileName() + "\".");
+                                                    why.isNotEmpty() ? why : "Could not load \"" + entry.file.getFileName() + "\".", juce::String(), this);
             return;
         }
 
