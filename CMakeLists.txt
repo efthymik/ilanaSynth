@@ -19,6 +19,7 @@ FetchContent_Declare(JUCE
 )
 FetchContent_MakeAvailable(JUCE)
 include(cmake/JuceLayerClip.cmake) # greyed-out controls draw through small layers (animation frame rate)
+include(cmake/BuildInfo.cmake) # git hash and date for src/BuildInfo.h and build/build-label.txt
 
 # Step 40 follow-up: the TIME menu's high-quality stretchers, rendered in the
 # background (src/dsp/stretch). Pinned sources, only downloaded: Signalsmith
@@ -740,3 +741,11 @@ endforeach()
 
 ilana_big_stack (ilanaMidiRender)
 target_link_libraries(ilanaMidiRender PRIVATE ilanaStretch ilanaWavetables)
+
+# src/BuildInfo.h reads the hash and date that cmake/BuildInfo.cmake generated.
+foreach(target ilanaSynth ilanaSynthFX ilanaTableTest ilanaSnapshot ilanaFingerprint ilanaStress ilanaPolishRepro
+               ilanaPresetRender ilanaMidiRender ilanaKnobAudit ilanaFxTest ilanaFxCpuBench ilanaRefHost)
+    if (TARGET ${target})
+        target_include_directories(${target} PRIVATE "${ILANA_GENERATED_DIR}")
+    endif()
+endforeach()

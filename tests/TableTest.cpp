@@ -10,6 +10,7 @@
 
 #include "Presets.h"
 #include "PluginProcessor.h"
+#include "BuildInfo.h"
 #include "gui/ParamInfo.h"
 #include "dsp/GranularPitchShift.h"
 #include "dsp/FilterUnit.h"

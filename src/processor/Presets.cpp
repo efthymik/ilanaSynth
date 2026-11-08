@@ -1,4 +1,5 @@
 #include "ProcessorInternal.h"
+#include "../SamplePaths.h"
 
 #include <cstring>
 #include <map>
@@ -445,7 +446,10 @@ void IlanaSynthAudioProcessor::handleAsyncUpdate()
             if (path.isEmpty())
                 continue;
 
-            const juce::File file (path);
+            // The path, or the same place under this home folder (a set saved on the other OS).
+            const auto file = SamplePaths::findFile (path);
+            if (file.existsAsFile() && file.getFullPathName() != path)
+                retargetSampleOptions (i, file.getFullPathName()); // an edited zone map follows its file
 
             if (! file.existsAsFile() || ! loadUserSample (i, file))
             {
@@ -457,7 +461,7 @@ void IlanaSynthAudioProcessor::handleAsyncUpdate()
                     missingSamplePaths[(size_t) i] = path; // a save keeps the path
                     ++missingSamplesVersion;
                     tableNotice = (tableNotice.isEmpty() ? juce::String() : tableNotice + "\n")
-                                  + "Sample not loaded (missing or unreadable): " + file.getFullPathName();
+                                  + "Sample not loaded (missing or unreadable): " + path;
                 }
                 ++tableNoticeVersion;
             }
@@ -487,7 +491,7 @@ void IlanaSynthAudioProcessor::handleAsyncUpdate()
             if (path.isEmpty())
                 continue;
 
-            const juce::File file (path);
+            const auto file = SamplePaths::findFile (path);
 
             if (! file.existsAsFile() || ! loadUserWavetable (i, file, (Wavetable::LoadMode) juce::jlimit (0, 4, mode)))
             {
@@ -499,7 +503,7 @@ void IlanaSynthAudioProcessor::handleAsyncUpdate()
                     missingTablePaths[(size_t) i] = path;
                     missingTableModes[i] = mode;
                     tableNotice = (tableNotice.isEmpty() ? juce::String() : tableNotice + "\n")
-                                  + "Wavetable not loaded (missing or unreadable): " + file.getFullPathName();
+                                  + "Wavetable not loaded (missing or unreadable): " + path;
                 }
                 ++tableNoticeVersion;
             }

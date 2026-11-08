@@ -1,4 +1,5 @@
 #include "ProcessorInternal.h"
+#include "../SamplePaths.h"
 
 // Portable sample presets (roadmap step 31): embedding a sample in the patch,
 // collecting the files a patch plays into a folder (an SFZ with the audio it
@@ -318,7 +319,7 @@ std::vector<std::pair<int, juce::File>> IlanaSynthAudioProcessor::findMissingSam
     std::map<juce::String, std::vector<int>> wanted; // lower-case file name -> oscillators
     for (const auto& missing : getMissingSamples())
         if (missing.partial.isEmpty())
-            wanted[juce::File (missing.path).getFileName().toLowerCase()].push_back (missing.osc);
+            wanted[SamplePaths::fileNameOf (missing.path).toLowerCase()].push_back (missing.osc); // a Windows path on the Mac too
 
     std::vector<std::pair<int, juce::File>> found;
     if (wanted.empty() || ! folder.isDirectory())

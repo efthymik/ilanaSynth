@@ -1,17 +1,32 @@
 #include "ProcessorInternal.h"
+#include "../BuildInfo.h"
+
+namespace
+{
+    // The migration stamps a state saved now carries. One above these means a
+    // newer build wrote it.
+    struct SavedSchema { const char* name; int version; };
+    constexpr SavedSchema savedSchemas[] = {
+        { "osc3Schema", 2 }, { "grainPosSchema", 2 }, { "lorenzSchema", 2 }, { "stringSchema", 2 },
+        { "redundantKnobsSchema", 2 }, { "modRangeSchema", 2 }, { "destSchema", 2 }, { "tableSchema", 4 },
+        { "boardMixSchema", 3 },
+    };
+
+    bool savedByNewerBuild (const juce::ValueTree& state)
+    {
+        for (const auto& schema : savedSchemas)
+            if ((int) state.getProperty (schema.name, 0) > schema.version)
+                return true;
+        return false;
+    }
+}
 
 juce::ValueTree IlanaSynthAudioProcessor::buildFullState()
 {
     auto state = apvts.copyState();
-    state.setProperty ("osc3Schema", 2, nullptr);
-    state.setProperty ("grainPosSchema", 2, nullptr);
-    state.setProperty ("lorenzSchema", 2, nullptr);
-    state.setProperty ("stringSchema", 2, nullptr);
-    state.setProperty ("redundantKnobsSchema", 2, nullptr);
-    state.setProperty ("modRangeSchema", 2, nullptr);
-    state.setProperty ("destSchema", 2, nullptr);
-    state.setProperty ("tableSchema", 4, nullptr);
-    state.setProperty ("boardMixSchema", 2, nullptr);
+    for (const auto& schema : savedSchemas)
+        state.setProperty (schema.name, schema.version, nullptr);
+    state.setProperty ("build", ilana::buildLabel(), nullptr);
     state.setProperty ("exciterLevels", exciterLevels.load(), nullptr);
 
     for (int lfo = 0; lfo < numLfos; ++lfo)
@@ -570,12 +585,14 @@ int IlanaSynthAudioProcessor::migrateStringKnobs (const std::function<float (con
 }
 
 int IlanaSynthAudioProcessor::migrateDenseBoardMix (const std::function<float (const juce::String&, float)>& get,
-                                                   const std::function<void (const juce::String&, float)>& set)
+                                                   const std::function<void (const juce::String&, float)>& set,
+                                                   bool mixKnob)
 {
     if (juce::roundToInt (get ("sb_model", 0.0f)) != 1)
         return 0;
 
-    set ("sb_mix", get ("sb_mix", 0.5f) / DenseSoundboard::mixRange);
+    if (mixKnob)
+        set ("sb_mix", get ("sb_mix", 0.5f) / DenseSoundboard::mixRange);
 
     // Routes and macros into MIX were heard at the old reach too (Toy Grand's and
     // Dense Board Piano's BOARD macro): their depths shrink by the same factor,
@@ -1503,7 +1520,9 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
     }
 
     // A patch on the Dense board saved before its MIX reached further keeps its wood.
-    if ((int) state.getProperty ("boardMixSchema", 1) < 2)
+    // Schema 2 was stamped by the 2026-11-05 build, which divided MIX but not the
+    // routes and macros into it: those states get only the routes' part.
+    if (const auto boardMixSchema = (int) state.getProperty ("boardMixSchema", 1); boardMixSchema < 3)
     {
         const auto find = [&state] (const juce::String& id)
         {
@@ -1523,8 +1542,9 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
                                       child.setProperty ("value", value, nullptr);
                                   else
                                       state.appendChild (juce::ValueTree ("PARAM", { { "id", id }, { "value", value } }), nullptr);
-                              });
-        state.setProperty ("boardMixSchema", 2, nullptr);
+                              },
+                              boardMixSchema < 2);
+        state.setProperty ("boardMixSchema", 3, nullptr);
     }
 
     // A patch saved before 100 % meant the knob's whole range keeps its
@@ -1645,7 +1665,59 @@ void IlanaSynthAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     const auto state = buildFullState();
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
+
+    {
+        const juce::ScopedLock lock (stateLoadLock);
+        if (! unreadableState.isEmpty())
+        {
+            // Nothing changed since the state that couldn't be read: save it back as it came.
+            if (xml->toString() == unreadableStateBase)
+            {
+                destData = unreadableState;
+                return;
+            }
+            unreadableState.reset();
+            unreadableStateBase.clear();
+            stateLoadNotice.clear();
+            ++stateLoadNoticeVersion;
+        }
+    }
+
     copyXmlToBinary (*xml, destData);
+}
+
+juce::String IlanaSynthAudioProcessor::getStateLoadNotice() const
+{
+    const juce::ScopedLock lock (stateLoadLock);
+    return stateLoadNotice;
+}
+
+void IlanaSynthAudioProcessor::setStateLoadNotice (const juce::String& text)
+{
+    const juce::ScopedLock lock (stateLoadLock);
+    unreadableState.reset();
+    unreadableStateBase.clear();
+    if (text != stateLoadNotice)
+    {
+        stateLoadNotice = text;
+        ++stateLoadNoticeVersion;
+    }
+}
+
+void IlanaSynthAudioProcessor::keepUnreadableState (const void* data, int sizeInBytes)
+{
+    if (data == nullptr || sizeInBytes <= 0)
+        return;
+
+    std::unique_ptr<juce::XmlElement> xml (buildFullState().createXml());
+    const auto base = xml->toString();
+
+    const juce::ScopedLock lock (stateLoadLock);
+    unreadableState.replaceAll (data, (size_t) sizeInBytes);
+    unreadableStateBase = base;
+    stateLoadNotice = "This track's saved patch could not be read and was not loaded. "
+                      "Its saved data is kept unchanged until you edit the patch.";
+    ++stateLoadNoticeVersion;
 }
 
 void IlanaSynthAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
@@ -1662,17 +1734,32 @@ void IlanaSynthAudioProcessor::setStateInformation (const void* data, int sizeIn
         {
             const auto length = (int) juce::ByteOrder::littleEndianInt (bytes + 4);
             if (length < 0 || length > sizeInBytes - 8 || ! juce::CharPointer_UTF8::isValidString (bytes + 8, length))
+            {
+                keepUnreadableState (data, sizeInBytes);
                 return;
+            }
         }
     }
 
     std::unique_ptr<juce::XmlElement> xml (getXmlFromBinary (data, sizeInBytes));
 
     if (xml == nullptr || ! xml->hasTagName (apvts.state.getType()))
+    {
+        keepUnreadableState (data, sizeInBytes);
         return;
+    }
 
-    applyFullState (juce::ValueTree::fromXml (*xml));
+    const auto state = juce::ValueTree::fromXml (*xml);
+    const auto newer = savedByNewerBuild (state);
+    const auto savedBy = state.getProperty ("build").toString();
+    applyFullState (state);
     loadedPresetFile = juce::File(); // the host's session, not a preset file
+
+    setStateLoadNotice (newer ? "This track was saved by a newer ilanaSynth build"
+                                    + (savedBy.isNotEmpty() ? " (" + savedBy + ")" : juce::String())
+                                    + ". What this build (" + ilana::buildLabel() + ") doesn't know is left out, "
+                                    "and saving the set here drops it."
+                              : juce::String());
 }
 
 // ---- Undo for gestures and for data that isn't a parameter ----------------

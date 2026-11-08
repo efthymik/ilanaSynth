@@ -764,6 +764,43 @@ void runStateFuzzTest()
     check (badRuns == 0, "hostile saved states load, play finite and save again (" + bad.joinIntoString (", ") + ")");
 }
 
+// A host state that can't be read is not replaced by Init on the next save:
+// its bytes go back to the host until the patch is edited, with a notice.
+// A state from a newer build loads with a notice too.
+void runUnreadableStateTest()
+{
+    IlanaSynthAudioProcessor processor;
+    processor.flushAsyncUpdates();
+    const juce::String garbage ("not an ilanaSynth state, but someone's patch");
+    processor.setStateInformation (garbage.toRawUTF8(), (int) garbage.getNumBytesAsUTF8());
+    processor.flushAsyncUpdates();
+    const auto noticed = processor.getStateLoadNotice().isNotEmpty();
+    const auto version = processor.getStateLoadNoticeVersion();
+    juce::MemoryBlock kept;
+    processor.getStateInformation (kept);
+    check (noticed && kept == juce::MemoryBlock (garbage.toRawUTF8(), garbage.getNumBytesAsUTF8()),
+           "an unreadable host state is saved back unchanged, with a notice");
+
+    setParam (processor, "f1_cutoff", 700.0f);
+    juce::MemoryBlock edited;
+    processor.getStateInformation (edited);
+    std::unique_ptr<juce::XmlElement> xml (juce::AudioProcessor::getXmlFromBinary (edited.getData(), (int) edited.getSize()));
+    check (xml != nullptr && processor.getStateLoadNotice().isEmpty() && processor.getStateLoadNoticeVersion() != version,
+           "after an edit the patch is saved instead and the notice goes");
+    check (xml != nullptr && xml->getStringAttribute ("build") == ilana::buildLabel(), "a saved state names the build");
+
+    auto newer = processor.captureWholePatch();
+    newer.setProperty ("boardMixSchema", 99, nullptr);
+    juce::MemoryBlock newerData;
+    if (auto out = newer.createXml())
+        juce::AudioProcessor::copyXmlToBinary (*out, newerData);
+    IlanaSynthAudioProcessor older;
+    older.setStateInformation (newerData.getData(), (int) newerData.getSize());
+    check (older.getStateLoadNotice().contains ("newer"), "a state from a newer build loads with a notice");
+    older.setStateInformation (edited.getData(), (int) edited.getSize());
+    check (older.getStateLoadNotice().isEmpty(), "a state from this build loads with no notice");
+}
+
 // A host sending NaN for parameters (JUCE's parameters don't clamp it):
 // several presets with every parameter, or a random third of them, set to
 // NaN still play finite.
@@ -1262,6 +1299,7 @@ void runTests()
     timedRun ("Polish::runTuningAcrossRatesTest", [] { runTuningAcrossRatesTest(); });
     timedRun ("Polish::runStateRoundTripTest", [] { runStateRoundTripTest(); });
     timedRun ("Polish::runStateFuzzTest", [] { runStateFuzzTest(); });
+    timedRun ("Polish::runUnreadableStateTest", [] { runUnreadableStateTest(); });
     timedRun ("Polish::runNanParameterTest", [] { runNanParameterTest(); });
     timedRun ("Polish::runConcurrencyTest", [] { runConcurrencyTest(); });
     timedRun ("Polish::runMonoTest", [] { runMonoTest(); });

@@ -148,6 +148,11 @@ public:
 
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
+    // A line for the editor about the last host state load (empty: nothing to
+    // say): a state that could not be read (its bytes are saved back unchanged
+    // until the patch is edited), or one saved by a newer build.
+    juce::String getStateLoadNotice() const;
+    int getStateLoadNoticeVersion() const { return stateLoadNoticeVersion.load(); }
 
    #if JUCE_LINUX || JUCE_BSD
     // Keeps the VST3 host's run loop alive; see HostRunLoopKeepAlive in
@@ -404,9 +409,11 @@ public:
     // (DenseSoundboard::mixRange): a patch on the Dense board from before
     // gets its MIX, and the depth of every route or macro into MIX, divided
     // by that, so its wood stays where it was heard.
-    // Returns 1 if it changed the value.
+    // Returns 1 if it changed the value. mixKnob false divides only the routes
+    // (a state the 2026-11-05 build saved: its MIX was already divided).
     static int migrateDenseBoardMix (const std::function<float (const juce::String&, float)>& get,
-                                     const std::function<void (const juce::String&, float)>& set);
+                                     const std::function<void (const juce::String&, float)>& set,
+                                     bool mixKnob = true);
     // The same on the live parameters (after a bounce or a factory preset).
     void migrateOperatorModes();
     bool clearModSlotsForTarget (int destination);
@@ -1195,6 +1202,17 @@ private:
     std::array<std::shared_ptr<const WavetableDoc>, (size_t) numUserSlots> userTableDocs; // null: default
     juce::String tableNotice;
     std::atomic<int> tableNoticeVersion { 0 };
+
+    // A host state setStateInformation could not read, kept so saving the set
+    // doesn't replace it with Init; with the state as it was right after (XML
+    // text), so the first edit lets the patch be saved instead.
+    void keepUnreadableState (const void* data, int sizeInBytes);
+    void setStateLoadNotice (const juce::String& text);
+    juce::MemoryBlock unreadableState;
+    juce::String unreadableStateBase;
+    juce::String stateLoadNotice;
+    std::atomic<int> stateLoadNoticeVersion { 0 };
+    juce::CriticalSection stateLoadLock;
     mutable juce::SpinLock tableLock;
 
     std::array<std::array<ParamRef, 11>, OscillatorIds::count> stringParamIds;
