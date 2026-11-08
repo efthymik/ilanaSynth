@@ -565,6 +565,100 @@ LfoSimSettings IlanaSynthAudioProcessor::readLfoSimSettings (int lfo) const
     return settings;
 }
 
+// The macros' and learned parameters' CCs (and MIDI learn itself), at the
+// start of the block: the audio thread takes the value at once (ccOverrides,
+// read by getParam) and the message thread then sets the parameter, for the
+// host and the knobs (sound review 7; before, only the message thread set
+// it, a block or more later, and offline exports could run far ahead of it).
+void IlanaSynthAudioProcessor::takeLearnedCcs (const juce::MidiBuffer& midiMessages)
+{
+    for (const auto metadata : midiMessages)
+    {
+        const auto message = metadata.getMessage();
+
+        if (! message.isController())
+            continue;
+
+        const auto controllerNumber = message.getControllerNumber();
+        const auto controllerValue = (float) message.getControllerValue() / 127.0f;
+        const auto learnTarget = macroLearn.load();
+
+        if (learnTarget >= 0)
+        {
+            macroCc[juce::jlimit (0, Mod::numMacros - 1, learnTarget)].store (controllerNumber);
+            macroLearn.store (-1);
+            triggerAsyncUpdate();
+        }
+
+        for (int macro = 0; macro < Mod::numMacros; ++macro)
+        {
+            if (macroCc[macro].load() == controllerNumber)
+            {
+                const auto* entry = macroIds[(size_t) macro].entry.load (std::memory_order_relaxed);
+                if (entry == nullptr)
+                    entry = findParam (macroIds[(size_t) macro].toRawUTF8());
+                if (entry != nullptr && entry->parameterIndex >= 0)
+                    if (const auto* parameter = rangedParameters[(size_t) entry->parameterIndex])
+                        setCcOverride (entry->parameterIndex, parameter->convertTo0to1 (controllerValue));
+
+                pendingMacros[macro].store (controllerValue);
+                macroPendingFlags[macro].store (true);
+                macrosPending.store (true);
+                triggerAsyncUpdate();
+            }
+        }
+
+        // Any other parameter's learned CC (one CC per parameter).
+        if (juce::isPositiveAndBelow (controllerNumber, (int) ccParameter.size()))
+        {
+            if (const auto learning = paramLearn.exchange (-1); learning >= 0)
+            {
+                for (auto& mapped : ccParameter)
+                    if (mapped.load() == learning)
+                        mapped.store (-1);
+
+                ccParameter[(size_t) controllerNumber].store (learning);
+            }
+
+            if (const auto index = ccParameter[(size_t) controllerNumber].load(); index >= 0)
+            {
+                setCcOverride (index, controllerValue);
+                pendingCcValues[(size_t) controllerNumber].store (controllerValue);
+                pendingCcParameter[(size_t) controllerNumber].store (index);
+                ccValuePending[(size_t) controllerNumber].store (true);
+                ccPending.store (true);
+                triggerAsyncUpdate();
+            }
+        }
+    }
+}
+
+// Audio thread: the parameter's value as the CC sets it (normalised in).
+void IlanaSynthAudioProcessor::setCcOverride (int parameterIndex, float normalised) noexcept
+{
+    if (juce::isPositiveAndBelow (parameterIndex, (int) rangedParameters.size()))
+        if (const auto* parameter = rangedParameters[(size_t) parameterIndex])
+            ccOverrides[(size_t) parameterIndex].store (parameter->convertFrom0to1 (juce::jlimit (0.0f, 1.0f, normalised)));
+}
+
+// Message thread: sets the parameter (host, knobs, saved state) and lets go
+// of the audio thread's copy, unless a newer CC value has replaced it since.
+// Not an undo step: it is not her edit (stability review 4).
+void IlanaSynthAudioProcessor::applyCcOverride (int parameterIndex, float normalised)
+{
+    if (! juce::isPositiveAndBelow (parameterIndex, (int) rangedParameters.size()))
+        return;
+
+    auto* parameter = rangedParameters[(size_t) parameterIndex];
+    if (parameter == nullptr)
+        return;
+
+    normalised = juce::jlimit (0.0f, 1.0f, normalised);
+    parameter->setValueNotifyingHost (normalised);
+    auto heard = parameter->convertFrom0to1 (normalised);
+    ccOverrides[(size_t) parameterIndex].compare_exchange_strong (heard, std::numeric_limits<float>::quiet_NaN());
+}
+
 void IlanaSynthAudioProcessor::renderLfos (int numSamples, const juce::MidiBuffer& midiMessages)
 {
     if (lfoBuffers.getNumSamples() < numSamples)
@@ -617,46 +711,6 @@ void IlanaSynthAudioProcessor::renderLfos (int numSamples, const juce::MidiBuffe
                 msegKeysDown = 0;
             }
 
-            const auto learnTarget = macroLearn.load();
-
-            if (learnTarget >= 0)
-            {
-                macroCc[juce::jlimit (0, Mod::numMacros - 1, learnTarget)].store (controllerNumber);
-                macroLearn.store (-1);
-                triggerAsyncUpdate();
-            }
-
-            for (int macro = 0; macro < Mod::numMacros; ++macro)
-            {
-                if (macroCc[macro].load() == controllerNumber)
-                {
-                    pendingMacros[macro].store (controllerValue);
-                    macroPendingFlags[macro].store (true);
-                    macrosPending.store (true);
-                    triggerAsyncUpdate();
-                }
-            }
-
-            // Any other parameter's learned CC (one CC per parameter).
-            if (juce::isPositiveAndBelow (controllerNumber, (int) ccParameter.size()))
-            {
-                if (const auto learning = paramLearn.exchange (-1); learning >= 0)
-                {
-                    for (auto& mapped : ccParameter)
-                        if (mapped.load() == learning)
-                            mapped.store (-1);
-
-                    ccParameter[(size_t) controllerNumber].store (learning);
-                }
-
-                if (ccParameter[(size_t) controllerNumber].load() >= 0)
-                {
-                    pendingCcValues[(size_t) controllerNumber].store (controllerValue);
-                    ccValuePending[(size_t) controllerNumber].store (true);
-                    ccPending.store (true);
-                    triggerAsyncUpdate();
-                }
-            }
         }
         else if (message.isChannelPressure())
         {

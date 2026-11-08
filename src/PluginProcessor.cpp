@@ -177,6 +177,7 @@ IlanaSynthAudioProcessor::IlanaSynthAudioProcessor()
     {
         ccParameter[cc].store (-1);
         pendingCcValues[cc].store (0.0f);
+        pendingCcParameter[cc].store (-1);
         ccValuePending[cc].store (false);
     }
 
@@ -410,6 +411,13 @@ void IlanaSynthAudioProcessor::buildParamCache()
     const auto& parameters = getParameters();
     std::uint32_t size = 1;
 
+    rangedParameters.clear();
+    for (auto* parameter : parameters)
+        rangedParameters.push_back (dynamic_cast<juce::RangedAudioParameter*> (parameter));
+    ccOverrides.reset (new std::atomic<float>[(size_t) juce::jmax (1, parameters.size())]);
+    for (int i = 0; i < juce::jmax (1, parameters.size()); ++i)
+        ccOverrides[(size_t) i].store (std::numeric_limits<float>::quiet_NaN());
+
     while (size < (std::uint32_t) parameters.size() * 4)
         size <<= 1;
 
@@ -442,6 +450,8 @@ void IlanaSynthAudioProcessor::buildParamCache()
                              || dynamic_cast<juce::AudioParameterBool*> (parameter) != nullptr;
             if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (parameter))
                 entry.fallback = ranged->convertFrom0to1 (ranged->getDefaultValue());
+            if (parameter != nullptr)
+                entry.parameterIndex = parameter->getParameterIndex();
         }
 
         if (const auto found = rawToParamDestination.find (entry.value); found != rawToParamDestination.end())
@@ -512,6 +522,9 @@ float IlanaSynthAudioProcessor::readParam (const ParamCacheEntry& entry) const
 {
     auto& thread = audioThreadParams;
     auto result = entry.value->load();
+    if (entry.parameterIndex >= 0)
+        if (const auto heard = ccOverrides[(size_t) entry.parameterIndex].load (std::memory_order_relaxed); heard == heard)
+            result = heard;
     if (thread.fxValues != nullptr && entry.index >= 0)
         if (const auto own = thread.fxValues[entry.index]; own == own)
             result = own;
@@ -568,6 +581,9 @@ float IlanaSynthAudioProcessor::getRawParam (const ParamRef& ref) const
     }
 
     auto value = entry->value->load();
+    if (entry->parameterIndex >= 0)
+        if (const auto heard = ccOverrides[(size_t) entry->parameterIndex].load (std::memory_order_relaxed); heard == heard)
+            value = heard;
     if (const auto* own = audioThreadParams.fxValues; own != nullptr && entry->index >= 0 && own[entry->index] == own[entry->index])
         value = own[entry->index];
     if (! std::isfinite (value))
@@ -1301,6 +1317,10 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
         addPreview (scope.startIndex1, scope.blockSize1);
         addPreview (scope.startIndex2, scope.blockSize2);
     }
+
+    // Learned and macro CCs reach the sound in this block (before anything
+    // reads the parameters).
+    takeLearnedCcs (midiMessages);
 
     {
         if (wantedOversamplingFactor() != oversamplingFactor.load() || BuiltInTables::anyWanted())
