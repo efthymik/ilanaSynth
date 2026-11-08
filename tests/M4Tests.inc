@@ -378,6 +378,20 @@ void runM4Tests()
                 check (std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.28f) < 0.002f,
                        "a route into MIX saved now keeps its depth");
 
+                // The 2026-11-05 build stamped schema 2 after dividing MIX only: its routes are divided once, MIX not again.
+                auto halfMigrated = routed.captureWholePatch();
+                halfMigrated.setProperty ("boardMixSchema", 2, nullptr);
+                target.restoreWholePatch (halfMigrated);
+                check (std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.05f) < 0.002f
+                           && std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.56f) < 0.002f,
+                       "a Dense patch stamped schema 2 gets its MIX routes divided once and keeps its MIX");
+                const auto repaired = target.captureWholePatch();
+                check ((int) repaired.getProperty ("boardMixSchema") == 3, "a repaired Dense patch saves schema 3");
+                target.restoreWholePatch (repaired);
+                check (std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.05f) < 0.002f
+                           && std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.56f) < 0.002f,
+                       "a Dense patch stamped schema 3 loads untouched");
+
                 // Dense Board Piano's BOARD macro (-0.3 on MIX in the recipe, x3.781 by its macro trim: -1) loads at the new reach's scale.
                 IlanaSynthAudioProcessor factory;
                 const auto index = factory.getFactoryPresetNames().indexOf ("Dense Board Piano");

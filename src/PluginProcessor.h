@@ -404,9 +404,11 @@ public:
     // (DenseSoundboard::mixRange): a patch on the Dense board from before
     // gets its MIX, and the depth of every route or macro into MIX, divided
     // by that, so its wood stays where it was heard.
-    // Returns 1 if it changed the value.
+    // Returns 1 if it changed the value. mixKnob false divides only the routes
+    // (a state the 2026-11-05 build saved: its MIX was already divided).
     static int migrateDenseBoardMix (const std::function<float (const juce::String&, float)>& get,
-                                     const std::function<void (const juce::String&, float)>& set);
+                                     const std::function<void (const juce::String&, float)>& set,
+                                     bool mixKnob = true);
     // The same on the live parameters (after a bounce or a factory preset).
     void migrateOperatorModes();
     bool clearModSlotsForTarget (int destination);

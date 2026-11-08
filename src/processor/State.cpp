@@ -11,7 +11,7 @@ juce::ValueTree IlanaSynthAudioProcessor::buildFullState()
     state.setProperty ("modRangeSchema", 2, nullptr);
     state.setProperty ("destSchema", 2, nullptr);
     state.setProperty ("tableSchema", 4, nullptr);
-    state.setProperty ("boardMixSchema", 2, nullptr);
+    state.setProperty ("boardMixSchema", 3, nullptr);
     state.setProperty ("exciterLevels", exciterLevels.load(), nullptr);
 
     for (int lfo = 0; lfo < numLfos; ++lfo)
@@ -570,12 +570,14 @@ int IlanaSynthAudioProcessor::migrateStringKnobs (const std::function<float (con
 }
 
 int IlanaSynthAudioProcessor::migrateDenseBoardMix (const std::function<float (const juce::String&, float)>& get,
-                                                   const std::function<void (const juce::String&, float)>& set)
+                                                   const std::function<void (const juce::String&, float)>& set,
+                                                   bool mixKnob)
 {
     if (juce::roundToInt (get ("sb_model", 0.0f)) != 1)
         return 0;
 
-    set ("sb_mix", get ("sb_mix", 0.5f) / DenseSoundboard::mixRange);
+    if (mixKnob)
+        set ("sb_mix", get ("sb_mix", 0.5f) / DenseSoundboard::mixRange);
 
     // Routes and macros into MIX were heard at the old reach too (Toy Grand's and
     // Dense Board Piano's BOARD macro): their depths shrink by the same factor,
@@ -1503,7 +1505,9 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
     }
 
     // A patch on the Dense board saved before its MIX reached further keeps its wood.
-    if ((int) state.getProperty ("boardMixSchema", 1) < 2)
+    // Schema 2 was stamped by the 2026-11-05 build, which divided MIX but not the
+    // routes and macros into it: those states get only the routes' part.
+    if (const auto boardMixSchema = (int) state.getProperty ("boardMixSchema", 1); boardMixSchema < 3)
     {
         const auto find = [&state] (const juce::String& id)
         {
@@ -1523,8 +1527,9 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
                                       child.setProperty ("value", value, nullptr);
                                   else
                                       state.appendChild (juce::ValueTree ("PARAM", { { "id", id }, { "value", value } }), nullptr);
-                              });
-        state.setProperty ("boardMixSchema", 2, nullptr);
+                              },
+                              boardMixSchema < 2);
+        state.setProperty ("boardMixSchema", 3, nullptr);
     }
 
     // A patch saved before 100 % meant the knob's whole range keeps its
