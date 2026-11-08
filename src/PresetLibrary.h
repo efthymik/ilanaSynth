@@ -356,15 +356,17 @@ public:
         return mod (source, Target (destination, amount), curveAmount, via);
     }
 
+    // Macros 1-8 (5-8 are the appended Macro 5..8 sources).
     Builder& macro (int index, const char* name, std::initializer_list<Target> targets, float curveAmount = 0.0f)
     {
-        if (preset.macroNames.size() < 4)
-            preset.macroNames.resize (4, nullptr);
+        index = juce::jlimit (1, Mod::numMacros, index);
+        if (preset.macroNames.size() < (size_t) juce::jmax (4, index))
+            preset.macroNames.resize ((size_t) juce::jmax (4, index), nullptr);
 
         preset.macroNames[(size_t) index - 1] = name;
 
         for (const auto& target : targets)
-            mod (M1 + index - 1, target, curveAmount);
+            mod ((int) Mod::macroSourceFor (index - 1), target, curveAmount);
 
         return *this;
     }
