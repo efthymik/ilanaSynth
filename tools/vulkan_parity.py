@@ -14,7 +14,9 @@ Pairs come from:
                    where D/<name>.software2.png (software again, after the
                    Vulkan capture) differs from D/<name>.png moved on their
                    own (playhead dots, readouts): they are left out of the
-                   numbers and reported as "unstable".
+                   numbers and reported as masked; a big cluster next to
+                   such pixels (the live view caught at another moment) is
+                   masked too and listed as a live cluster.
   --pair A B       every A/<name>.png with B/<name>.png (two runs; A is the
                    reference, "software", B the candidate); --unstable DIR
                    (another run of A) masks what moves between runs
@@ -153,23 +155,43 @@ def compare(name, ref_path, cand_path, unstable_paths, args, out):
         result["why"] = "size differs"
         return result
 
-    diff = np.abs(ref - cand)
-    # --unstable: pixels where another run of the reference differs from it
-    # (live views, timers) don't count, grown by --unstable-grow px.
-    unstable = np.zeros(ref.shape[:2], dtype=bool)
+    raw_diff = np.abs(ref - cand)
+    # Pixels where another software capture of the same state differs from
+    # the reference moved on their own (live views, timers): they don't count.
+    moved = np.zeros(ref.shape[:2], dtype=bool)
     for other in unstable_paths:
         if other.exists():
             o = load(other)
             if o.shape == ref.shape:
-                unstable |= np.abs(o - ref).max(axis=2) > 0
+                moved |= np.abs(o - ref).max(axis=2) > 0
             else:
-                unstable[:] = True
-    if unstable.any() and args.unstable_grow > 0:
-        unstable = grow(unstable, args.unstable_grow)
+                moved[:] = True
+    unstable = grow(moved, args.unstable_grow) if moved.any() and args.unstable_grow > 0 else moved.copy()
+
+    # A big cluster with moved pixels within --live-pad px is the same live
+    # view caught at another moment (a dot, a readout, a simulation): its
+    # padded box joins the mask and it is reported as "live", not failed.
+    live = []
+    while True:
+        diff = raw_diff.copy()
+        diff[unstable] = 0
+        diff_max = diff.max(axis=2)
+        clusters = label_clusters(diff_max > args.cluster_level)
+        clusters.sort(key=lambda c: (-c[4], c[1], c[0]))
+        big = [c for c in clusters if (c[2] - c[0]) > args.max_cluster or (c[3] - c[1]) > args.max_cluster]
+        pad = args.live_pad
+        h, w = moved.shape
+        newly = [c for c in big if pad >= 0 and moved[max(0, c[1] - pad):c[3] + pad, max(0, c[0] - pad):c[2] + pad].any()]
+        if not newly:
+            break
+        for c in newly:
+            live.append(c)
+            unstable[max(0, c[1] - pad):min(h, c[3] + pad), max(0, c[0] - pad):min(w, c[2] + pad)] = True
+
+    result["moved_px"] = int(moved.sum())
     result["unstable_px"] = int(unstable.sum())
     result["pct_unstable"] = float(unstable.mean() * 100.0)
-    diff[unstable] = 0
-    diff_max = diff.max(axis=2)
+    result["live_clusters"] = [{"x": c[0], "y": c[1], "w": c[2] - c[0], "h": c[3] - c[1], "pixels": c[4]} for c in live]
     total = diff_max.size - int(unstable.sum()) if not unstable.all() else 1
     result["max_abs"] = int(diff.max())
     result["mean_abs"] = float(diff.sum() / (total * diff.shape[2]))
@@ -180,10 +202,11 @@ def compare(name, ref_path, cand_path, unstable_paths, args, out):
     # Stable pixels by their largest channel difference: 0, 1, 2, 3, 4, 5+ levels (percent).
     stable = diff_max[~unstable]
     result["hist_pct"] = [float((stable == v).sum() * 100.0 / total) for v in range(5)] + [float((stable >= 5).sum() * 100.0 / total)]
+    # Of the stable pixels that differ, how many the candidate draws brighter (summed RGB).
+    signed = (cand - ref)[..., :3].sum(axis=2)
+    result["brighter_px"] = int(((signed > 0) & ~unstable).sum())
+    result["darker_px"] = int(((signed < 0) & ~unstable).sum())
 
-    clusters = label_clusters(diff_max > args.cluster_level)
-    clusters.sort(key=lambda c: (-c[4], c[1], c[0]))
-    big = [c for c in clusters if (c[2] - c[0]) > args.max_cluster or (c[3] - c[1]) > args.max_cluster]
     result["clusters_total"] = len(clusters)
     result["clusters_big"] = len(big)
     result["clusters"] = [{"x": c[0], "y": c[1], "w": c[2] - c[0], "h": c[3] - c[1], "pixels": c[4],
@@ -264,7 +287,9 @@ def main():
     ap.add_argument("--max-cluster", type=int, default=4, help="largest allowed bounding box side of a cluster of big differences")
     ap.add_argument("--unstable", action="append", metavar="DIR",
                     help="another run of the reference: pixels where it differs from the reference are left out (repeatable)")
-    ap.add_argument("--unstable-grow", type=int, default=1, help="px the --unstable mask is grown by")
+    ap.add_argument("--unstable-grow", type=int, default=1, help="px the moved-pixel mask is grown by")
+    ap.add_argument("--live-pad", type=int, default=12,
+                    help="a big cluster with moved pixels this close is a live view caught at another moment (-1: never)")
     ap.add_argument("--exact", action="store_true", help="require identical pixels (software baseline check)")
     ap.add_argument("--amplify", type=float, default=8.0, help="heatmap gain")
     ap.add_argument("--crop-pad", type=int, default=24, help="context around the worst region in the side-by-side crop")
@@ -289,16 +314,16 @@ def main():
         return 2
 
     header = ("| picture | size | max | mean | >2 % | >8 % | >32 % | 0 / 1 / 2 / 3 / 4 / 5+ levels (% px) | big clusters | "
-              "worst clusters (x,y wxh) | unstable px (%) | result |")
+              "worst clusters (x,y wxh) | live clusters | masked px (%) | result |")
     lines = [header, "|---" * (header.count("|") - 1) + "|"]
     for r in results:
         if not r.get("size_match"):
-            lines.append(f"| {r['name']} | {r.get('size_reference')} vs {r.get('size_candidate')} | | | | | | | | | | FAIL: {r['why']} |")
+            lines.append(f"| {r['name']} | {r.get('size_reference')} vs {r.get('size_candidate')} | | | | | | | | | | | FAIL: {r['why']} |")
             continue
         worst = ", ".join(f"{c['x']},{c['y']} {c['w']}x{c['h']}" for c in r["clusters"][:3])
         lines.append(f"| {r['name']} | {r['size_reference'][0]}x{r['size_reference'][1]} | {r['max_abs']} | {r['mean_abs']:.4f} | "
                      f"{r['pct_over_2']:.3f} | {r['pct_over_8']:.3f} | {r['pct_over_32']:.3f} | {' / '.join(f'{v:.2f}' for v in r['hist_pct'])} | {r['clusters_big']}/{r['clusters_total']} | "
-                     f"{worst} | {r['unstable_px']} ({r['pct_unstable']:.2f}) | {'pass' if r['pass'] else 'FAIL: ' + r['why']} |")
+                     f"{worst} | {len(r['live_clusters'])} | {r['unstable_px']} ({r['pct_unstable']:.2f}) | {'pass' if r['pass'] else 'FAIL: ' + r['why']} |")
     failed = [r for r in results if not r["pass"]]
     lines.append("")
     lines.append(f"{len(results) - len(failed)}/{len(results)} pass"
@@ -306,7 +331,7 @@ def main():
     table = "\n".join(lines)
     print(table)
     if out is not None:
-        thresholds = {k: getattr(args, k) for k in ("within", "min_within", "cluster_level", "max_cluster", "exact", "unstable_grow")}
+        thresholds = {k: getattr(args, k) for k in ("within", "min_within", "cluster_level", "max_cluster", "exact", "unstable_grow", "live_pad")}
         (out / "summary.json").write_text(json.dumps({"thresholds": thresholds, "pass": not failed,
                                                        "pictures": results}, indent=1))
         (out / "summary.md").write_text(table + "\n")
