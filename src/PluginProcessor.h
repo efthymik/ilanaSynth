@@ -148,6 +148,11 @@ public:
 
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
+    // A line for the editor about the last host state load (empty: nothing to
+    // say): a state that could not be read (its bytes are saved back unchanged
+    // until the patch is edited), or one saved by a newer build.
+    juce::String getStateLoadNotice() const;
+    int getStateLoadNoticeVersion() const { return stateLoadNoticeVersion.load(); }
 
    #if JUCE_LINUX || JUCE_BSD
     // Keeps the VST3 host's run loop alive; see HostRunLoopKeepAlive in
@@ -1197,6 +1202,17 @@ private:
     std::array<std::shared_ptr<const WavetableDoc>, (size_t) numUserSlots> userTableDocs; // null: default
     juce::String tableNotice;
     std::atomic<int> tableNoticeVersion { 0 };
+
+    // A host state setStateInformation could not read, kept so saving the set
+    // doesn't replace it with Init; with the state as it was right after (XML
+    // text), so the first edit lets the patch be saved instead.
+    void keepUnreadableState (const void* data, int sizeInBytes);
+    void setStateLoadNotice (const juce::String& text);
+    juce::MemoryBlock unreadableState;
+    juce::String unreadableStateBase;
+    juce::String stateLoadNotice;
+    std::atomic<int> stateLoadNoticeVersion { 0 };
+    juce::CriticalSection stateLoadLock;
     mutable juce::SpinLock tableLock;
 
     std::array<std::array<ParamRef, 11>, OscillatorIds::count> stringParamIds;
