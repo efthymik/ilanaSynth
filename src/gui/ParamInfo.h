@@ -1017,7 +1017,9 @@ inline const HelpRow helpRows[] {
     { is ("vec_on"), "Vector pad on: the four corner oscillators crossfade by where the dot is (X / Y are also mod sources)." },
     { is ("vec_x"), "Vector position left to right." },
     { is ("vec_y"), "Vector position bottom to top." },
-    { is ("vec_a|vec_b|vec_c|vec_d"), "The oscillator at this corner of the vector pad." },
+    { is ("vec_a|vec_b|vec_c|vec_d|vec_e|vec_f"), "The oscillator at this corner of the vector pad." },
+    { is ("vec_shape"), "The vector pad's shape: one corner per oscillator. A slider for two, a triangle for three, the square for four, "
+                        "a pentagon for five, a hexagon for six." },
     { is ("vec_path"), "Moves the dot round the drawn path at PATH RATE (X / Y then offset the whole path)." },
     { is ("vec_rate"), "How fast the dot goes round the path." },
     { starts ("vec_px|vec_py"), "A point of the vector path; drag the points on the pad." },

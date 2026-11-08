@@ -25,6 +25,7 @@
 #include "dsp/Svf.h"
 #include "dsp/TableFactory.h"
 #include "dsp/UnisonBank.h"
+#include "dsp/VectorShape.h"
 #include "dsp/Voice.h"
 #include "dsp/Wavetable.h"
 #include "dsp/TableFFT.h"

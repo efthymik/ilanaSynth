@@ -168,6 +168,9 @@ public:
     static std::array<float, 4> vectorWeights (float x, float y);
     juce::Point<float> getVectorPosition() const { return { vectorX.load(), vectorY.load() }; }
     int getVectorCorner (int corner) const;
+    // The pad's shape (VectorShape::Shape: Slider .. Hexagon, Square in every older patch) and its corner count.
+    int getVectorShape() const;
+    int getVectorCornerCount() const;
     bool isVectorPathOn() const;
     juce::Point<float> getVectorPathPoint (int point) const;
     float getMacroDrift (int macro) const { return macroDrift[(size_t) juce::jlimit (0, Mod::numMacros - 1, macro)].load(); }

@@ -402,11 +402,12 @@ private:
     juce::Rectangle<int> picture;
 };
 
-// M8.5: the VECTOR page: the vector pad (four oscillators at the corners,
+// M8.5: the VECTOR page: the vector pad (oscillators at the corners,
 // moved by hand, by a path or by its wander). EVOLVE (a macro drifting
 // within a range) moved onto the macro's own card in the bottom strip, and
 // VECTOR X / Y are dragged from the source bar, their one home (review 8:
-// I8-13, I8-14, S8-20).
+// I8-13, I8-14, S8-20). Since UI review 29 the pad has a SHAPE, one corner per
+// oscillator (ilana: "a triangle if only using 3 oscs, and a slider if two").
 class VectorPage : public juce::Component,
                    private IlanaAnim::FrameTimer
 {
@@ -416,10 +417,7 @@ public:
           pad (p),
           on (p.apvts, "vec_on", "ON"),
           path (p.apvts, "vec_path", "PATH"),
-          cornerA (p.apvts, "vec_a", "TOP LEFT"),
-          cornerB (p.apvts, "vec_b", "TOP RIGHT"),
-          cornerC (p.apvts, "vec_c", "BOTTOM LEFT"),
-          cornerD (p.apvts, "vec_d", "BOTTOM RIGHT"),
+          shape (p.apvts, "vec_shape", "SHAPE"),
           x (p.apvts, "vec_x", "X", colour(), true),
           y (p.apvts, "vec_y", "Y", colour(), true),
           rate (p.apvts, "vec_rate", "PATH RATE", colour(), true),
@@ -428,11 +426,21 @@ public:
           drift (p.apvts, "vec_drift", "WANDER", colour(), true),
           driftRate (p.apvts, "vec_drift_rate", "WANDER RATE", colour(), true)
     {
-        addAll (*this, pad, cornerWaves[0], cornerWaves[1], cornerWaves[2], cornerWaves[3], on, path, cornerA, cornerB, cornerC, cornerD, x, y, rate, drift, driftRate);
+        const char* ids[] { "vec_a", "vec_b", "vec_c", "vec_d", "vec_e", "vec_f" };
+        for (int c = 0; c < VectorShape::maxCorners; ++c)
+        {
+            cornerMenus[(size_t) c] = std::make_unique<ComboControl> (p.apvts, ids[c], cornerName (VectorShape::square, c));
+            cornerWaves[(size_t) c] = std::make_unique<VectorCornerWave> (p, c);
+            addAndMakeVisible (*cornerMenus[(size_t) c]);
+            addAndMakeVisible (*cornerWaves[(size_t) c]);
+        }
+        addAll (*this, pad, on, path, shape, x, y, rate, drift, driftRate);
         path.showAsSwitch();
+        // (One box with its name inside, on the CORNERS box's title line.)
+        shape.setPackedMenu (true);
 
         // The corners name the oscillators as the pad does ("OSC 1").
-        for (auto* corner : { &cornerA, &cornerB, &cornerC, &cornerD })
+        for (auto& corner : cornerMenus)
         {
             auto& box = corner->getComboBox();
             // (Read first: it only matches while the shown text is the item's.)
@@ -443,15 +451,20 @@ public:
             box.setSelectedId (selectedId, juce::dontSendNotification);
         }
 
+        // Switched on with the pad still as it comes (a square on OSC 1-4), the shape follows the patch: one corner
+        // for each oscillator it has, those oscillators at the corners (ilana's idea, UI review 29).
+        on.getButton().onClick = [this] { if (on.getButton().getToggleState()) fitShapeToPatch(); };
+
         // Off, the whole block dims and says why, as every card's controls
         // do (one rule, EffectRules: UI review 7, V7-21).
-        for (juce::Component* control : { (juce::Component*) &path, (juce::Component*) &cornerA, (juce::Component*) &cornerB,
-                                          (juce::Component*) &cornerC, (juce::Component*) &cornerD, (juce::Component*) &x,
+        for (juce::Component* control : { (juce::Component*) &path, (juce::Component*) &shape, (juce::Component*) &x,
                                           (juce::Component*) &y, (juce::Component*) &drift, (juce::Component*) &driftRate })
             effectRules.add (*control, effectRules.isOn ("vec_on"), "VECTOR is off", [] { return FilterColours::offAlpha; });
+        for (auto& corner : cornerMenus)
+            effectRules.add (*corner, effectRules.isOn ("vec_on"), "VECTOR is off", [] { return FilterColours::offAlpha; });
         // (The corners' pictures too, as the pad: off, nothing in the card stays lit, UI review 26.)
         for (auto& wave : cornerWaves)
-            effectRules.add (wave, effectRules.isOn ("vec_on"), "VECTOR is off", [] { return FilterColours::offAlpha; });
+            effectRules.add (*wave, effectRules.isOn ("vec_on"), "VECTOR is off", [] { return FilterColours::offAlpha; });
         // At the module-off alpha while VECTOR is off, the lighter dim of one
         // idle control while only its PATH is (V7-34 with V7-21).
         effectRules.add (rate, [this] { return readParam ("vec_on") > 0.5f && readParam ("vec_path") > 0.5f; },
@@ -464,6 +477,19 @@ public:
     // Not modulation sources, so not in a source's colour: the accent.
     static juce::Colour colour() { return IlanaTheme::accent(); }
 
+    // Each corner's name on its menu, by where it sits on the shape.
+    static juce::String cornerName (int shapeIndex, int corner)
+    {
+        switch (shapeIndex)
+        {
+            case VectorShape::slider:   { const char* n[] { "LEFT", "RIGHT" }; return n[juce::jlimit (0, 1, corner)]; }
+            case VectorShape::triangle: { const char* n[] { "TOP", "BOTTOM RIGHT", "BOTTOM LEFT" }; return n[juce::jlimit (0, 2, corner)]; }
+            case VectorShape::pentagon: { const char* n[] { "TOP", "RIGHT", "BOTTOM RIGHT", "BOTTOM LEFT", "LEFT" }; return n[juce::jlimit (0, 4, corner)]; }
+            case VectorShape::hexagon:  { const char* n[] { "TOP", "UPPER RIGHT", "LOWER RIGHT", "BOTTOM", "LOWER LEFT", "UPPER LEFT" }; return n[juce::jlimit (0, 5, corner)]; }
+            default:                    { const char* n[] { "TOP LEFT", "TOP RIGHT", "BOTTOM LEFT", "BOTTOM RIGHT" }; return n[juce::jlimit (0, 3, corner)]; }
+        }
+    }
+
     void paint (juce::Graphics& g) override
     {
         IlanaTheme::paintPageBackground (g, getLocalBounds());
@@ -472,12 +498,11 @@ public:
         // The switch is at the header's right like every card's own module
         // (UI-CONVENTIONS; V13-10), the caption after the title.
         auto header = vectorCard.reduced (12, 0).removeFromTop (28);
-        IlanaTheme::paintCardHeader (g, header, "VECTOR", readParam ("vec_on") > 0.5f ? "four oscillators at the corners; drag VECTOR X or Y from the source bar onto a knob"
-                                                                                       : "four oscillators at the corners", colour());
+        IlanaTheme::paintCardHeader (g, header, "VECTOR", readParam ("vec_on") > 0.5f ? "one oscillator at each corner; drag VECTOR X or Y from the source bar onto a knob"
+                                                                                       : "one oscillator at each corner", colour());
 
-        // The controls in three boxes, as SEQ's GENERATE has them (UI review
-        // 9, V9-7): where the four oscillators sit, where the point is and
-        // how it moves.
+        // The controls in two boxes, as SEQ's GENERATE has them (UI review
+        // 9, V9-7): where the oscillators sit, and where the point is and how it moves.
         const struct { juce::Rectangle<int> box; const char* title; } boxes[] {
             { cornersBox, "CORNERS" }, { motionBox, "POSITION AND MOTION" } };
         for (const auto& part : boxes)
@@ -497,13 +522,6 @@ public:
         auto inner = vectorCard.reduced (12, 0);
         inner.removeFromTop (30);
         inner.removeFromBottom (12);
-        // The pad fills the card's height; the controls take the width left.
-        // The pad starts right under the header and the controls column is
-        // as tall as the pad: the menus at its top, the knob rows at its
-        // foot (UI review 8, V8-26, S8-38: no band above the pad, no empty
-        // foot under the controls).
-        // (The pad is not kept square: the page's spare width is the pad's,
-        // not the boxes': V10-14.)
         // (The pad is a square: it takes the card's height and the controls
         // the rest of the width, so no bare strip stands beside it, V12-3.)
         const auto padWidth = juce::jlimit (200, juce::jmax (200, inner.getWidth() - 330 - 12), inner.getHeight());
@@ -512,40 +530,79 @@ public:
         // The vector's on switch in its header, like every card's.
         on.setBounds (IlanaTheme::cardSwitchBounds (vectorCard, vectorCard.getY() + 14));
         // Two boxes fill the controls column's height (no empty foot): CORNERS
-        // (the four menus, two by two, each over a picture of its oscillator,
-        // V14-2) over POSITION AND MOTION in one row (X, Y, PATH, its rate,
-        // WANDER and its rate).
+        // (the menus, each over a picture of its oscillator, V14-2) over
+        // POSITION AND MOTION in one row (X, Y, PATH, its rate, WANDER and its rate).
         constexpr int gap = 8, padding = 12;
         const auto motionHeight = boxHeaderHeight + 2 + 72 + 8; // (a row of PLAY's rings, UI review 26)
         cornersBox = inner.removeFromTop (juce::jmax (boxHeaderHeight + 2 * 90, inner.getHeight() - gap - motionHeight));
         inner.removeFromTop (gap);
         motionBox = inner;
 
-        auto corners = cornersBox.reduced (padding, 0).withTrimmedTop (boxHeaderHeight + 2).withTrimmedBottom (8);
-        // A row whose two corners name no oscillator ("OSC 4: none") keeps only its menus: its pictures
-        // would be two empty boxes (UI review 27), so the other row's pictures take the room.
+        // SHAPE closes the CORNERS box's title line.
+        shape.setBounds (juce::Rectangle<int> (200, 26).withPosition (cornersBox.getRight() - padding - 200, cornersBox.getY() + 6));
+
+        // The corners in rows: two for a slider, three for a triangle, two by two for the square, three over two
+        // for a pentagon, three by two for a hexagon. Each row spans the box, so no cell stands empty.
+        const auto shapeIndex = processorRef.getVectorShape();
+        const auto count = VectorShape::cornerCount (shapeIndex);
+        std::vector<int> rows;
+        switch (count)
+        {
+            case 2:  rows = { 2 }; break;
+            case 3:  rows = { 3 }; break;
+            case 5:  rows = { 3, 2 }; break;
+            case 6:  rows = { 3, 3 }; break;
+            default: rows = { 2, 2 }; break;
+        }
+
+        auto corners = cornersBox.reduced (padding, 0).withTrimmedTop (boxHeaderHeight + 10).withTrimmedBottom (8);
+        // A row whose corners all name no oscillator ("OSC 4: none") keeps only its menus: its pictures would be
+        // empty boxes (UI review 27), so the other rows' pictures take the room.
         const auto missing = [this] (int corner)
         {
             const auto osc = processorRef.getVectorCorner (corner);
             return ! (osc >= 0 && osc < OscillatorIds::count && processorRef.isOscillatorShown (osc));
         };
-        const auto menuOnly = 46 + 4;
-        const auto bare1 = missing (0) && missing (1), bare2 = missing (2) && missing (3);
-        const auto rowHeight = bare1 == bare2 ? corners.getHeight() / 2 : bare1 ? menuOnly : corners.getHeight() - menuOnly;
-        auto row1 = corners.removeFromTop (rowHeight);
-        auto row2 = corners;
-        const auto cell = [] (juce::Rectangle<int> area, ComboControl& menu, VectorCornerWave& wave)
+        constexpr int menuOnly = 46 + 4;
+        std::vector<bool> bare;
+        auto first = 0, fullRows = 0;
+        for (const auto inRow : rows)
         {
-            area = area.reduced (3, 2);
-            menu.setBounds (area.removeFromTop (46));
-            area.removeFromTop (2);
-            wave.setBounds (area);
-            wave.setVisible (area.getHeight() > 20);
-        };
-        cell (row1.removeFromLeft (row1.getWidth() / 2), cornerA, cornerWaves[0]);
-        cell (row1, cornerB, cornerWaves[1]);
-        cell (row2.removeFromLeft (row2.getWidth() / 2), cornerC, cornerWaves[2]);
-        cell (row2, cornerD, cornerWaves[3]);
+            auto all = true;
+            for (int c = first; c < first + inRow; ++c)
+                all = all && missing (c);
+            bare.push_back (all);
+            fullRows += all ? 0 : 1;
+            first += inRow;
+        }
+        const auto bareHeight = menuOnly * (int) std::count (bare.begin(), bare.end(), true);
+        const auto fullHeight = fullRows > 0 ? (corners.getHeight() - bareHeight) / fullRows : 0;
+
+        first = 0;
+        for (size_t r = 0; r < rows.size(); ++r)
+        {
+            auto row = corners.removeFromTop (bare[r] ? menuOnly : (r + 1 == rows.size() ? corners.getHeight() : fullHeight));
+            const auto inRow = rows[r];
+            const auto cellWidth = row.getWidth() / inRow;
+            for (int i = 0; i < inRow; ++i)
+            {
+                auto cell = (i + 1 == inRow ? row : row.removeFromLeft (cellWidth)).reduced (3, 2);
+                auto& menu = *cornerMenus[(size_t) (first + i)];
+                auto& wave = *cornerWaves[(size_t) (first + i)];
+                menu.setBounds (cell.removeFromTop (46));
+                cell.removeFromTop (2);
+                wave.setBounds (cell);
+                wave.setVisible (cell.getHeight() > 20);
+            }
+            first += inRow;
+        }
+        for (int c = 0; c < VectorShape::maxCorners; ++c)
+        {
+            cornerMenus[(size_t) c]->setVisible (c < count);
+            cornerMenus[(size_t) c]->setLabelText (cornerName (shapeIndex, c));
+            if (c >= count)
+                cornerWaves[(size_t) c]->setVisible (false);
+        }
 
         auto knobs = motionBox.reduced (padding, 0).withTrimmedTop (boxHeaderHeight + 2).withTrimmedBottom (6);
         // (Every name on one line, the PATH switch under its own: the row no longer drops it, S1-14.)
@@ -560,6 +617,47 @@ public:
         path.setBelowNameSize (x.packedNameUnits());
         path.setBounds (x.getBounds().withX (path.getBounds().getCentreX() - x.getWidth() / 2).withTop (middle - 7));
         path.setNameDrop (juce::jmax (0, nameTop - (middle - 7 + 15 + 1)));
+    }
+
+    // The pad as it comes (a square on OSC 1-4) takes one corner per oscillator the patch has, those oscillators
+    // in order. A pad already shaped or re-cornered keeps what it has. (Public: the tests and snapshots call it.)
+    void fitShapeToPatch()
+    {
+        if (processorRef.getVectorShape() != VectorShape::square)
+            return;
+        for (int c = 0; c < 4; ++c)
+            if (processorRef.getVectorCorner (c) != c)
+                return;
+
+        std::vector<int> shown;
+        for (int osc = 0; osc < OscillatorIds::count; ++osc)
+            if (processorRef.isOscillatorShown (osc))
+                shown.push_back (osc);
+        if (shown.size() < 2 || shown.size() == 4)
+            return;
+
+        const auto fitted = shown.size() == 2 ? VectorShape::slider : shown.size() == 3 ? VectorShape::triangle
+                          : shown.size() == 5 ? VectorShape::pentagon : VectorShape::hexagon;
+        processorRef.performEdit ("Vector shape", [this, fitted, shown]
+        {
+            const auto write = [this] (const juce::String& id, float value)
+            {
+                if (auto* parameter = processorRef.apvts.getParameter (id))
+                {
+                    parameter->beginChangeGesture();
+                    parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
+                    parameter->endChangeGesture();
+                }
+            };
+            write ("vec_shape", (float) fitted);
+            const char* ids[] { "vec_a", "vec_b", "vec_c", "vec_d", "vec_e", "vec_f" };
+            for (size_t c = 0; c < shown.size(); ++c)
+                write (ids[c], (float) shown[c]);
+            // The point at the shape's balance, where every corner sounds.
+            const auto centre = VectorShape::balance (fitted);
+            write ("vec_x", centre.x);
+            write ("vec_y", centre.y);
+        });
     }
 
 private:
@@ -581,8 +679,9 @@ private:
             shown |= processorRef.isOscillatorShown (osc) && readParam (juce::String (OscillatorIds::prefixes[(size_t) osc]) + "_on") < 0.5f ? 1 << (osc + 8) : 0;
         }
 
-        auto corners = 0;
-        for (int corner = 0; corner < 4; ++corner)
+        // (The shape and the corners' picks: a change relayouts the corner rows.)
+        auto corners = (juce::int64) processorRef.getVectorShape();
+        for (int corner = 0; corner < VectorShape::maxCorners; ++corner)
             corners = corners * 16 + processorRef.getVectorCorner (corner) + 1;
         if (corners != cornerKey)
         {
@@ -594,7 +693,7 @@ private:
         {
             shownOscillators = shown;
             resized(); // (a corner row with no oscillator folds to its menus)
-            for (auto* corner : { &cornerA, &cornerB, &cornerC, &cornerD })
+            for (auto& corner : cornerMenus)
             {
                 auto& box = corner->getComboBox();
                 const auto selected = box.getSelectedId();
@@ -610,7 +709,7 @@ private:
             }
         }
 
-        for (auto* corner : { &cornerA, &cornerB, &cornerC, &cornerD })
+        for (auto& corner : cornerMenus)
         {
             const auto id = corner->getComboBox().getSelectedId();
             if (id >= 1 && id <= OscillatorIds::count)
@@ -632,16 +731,16 @@ private:
     IlanaSynthAudioProcessor& processorRef;
     EffectRules effectRules { processorRef };
     VectorPadDisplay pad;
-    std::array<VectorCornerWave, 4> cornerWaves { VectorCornerWave (processorRef, 0), VectorCornerWave (processorRef, 1),
-                                                  VectorCornerWave (processorRef, 2), VectorCornerWave (processorRef, 3) };
+    std::array<std::unique_ptr<VectorCornerWave>, VectorShape::maxCorners> cornerWaves;
+    std::array<std::unique_ptr<ComboControl>, VectorShape::maxCorners> cornerMenus;
     ToggleControl on, path;
-    ComboControl cornerA, cornerB, cornerC, cornerD;
+    ComboControl shape;
     KnobControl x, y, rate, drift, driftRate;
     juce::Rectangle<int> vectorCard, cornersBox, motionBox;
     static constexpr int boxHeaderHeight = 24;
     bool shownActive = false;
     int shownOscillators = -1;
-    int cornerKey = -1; // (the four corners' picks: a change relayouts the corner rows)
+    juce::int64 cornerKey = -1; // (the shape and the corners' picks: a change relayouts the corner rows)
 };
 
 } // namespace
