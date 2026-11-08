@@ -361,6 +361,9 @@ public:
     // A factory preset that routes neither the mod wheel nor aftertouch gets
     // one route each, chosen by category. Silent until they are touched.
     void applyDefaultExpression (const char* presetName, const juce::String& category);
+    // Plucks, keys, basses and leads with no velocity on their timbre get a
+    // steep velocity route to FILTER 1's cutoff (bright on hard hits).
+    void applyDefaultVelocity (const char* presetName, const juce::String& category);
 
     static void migrateLegacyOsc3 (const std::function<float (const juce::String&, float)>& get,
                                    const std::function<void (const juce::String&, float)>& set);

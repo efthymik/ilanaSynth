@@ -759,6 +759,42 @@ void IlanaSynthAudioProcessor::applyDefaultExpression (const char* presetName, c
     }
 }
 
+// Velocity brightens a hard hit on plucks, keys, basses and leads that had
+// no velocity on their timbre (more than half the library only got louder).
+// A steep curve keeps it out of the way at ordinary velocities: up to 1.5
+// octaves of cutoff at 127, about 0.2 at 100, next to nothing below 90.
+// Only where FILTER 1 is closed enough for that to be heard; the same
+// presets as applyDefaultExpression are left alone.
+void IlanaSynthAudioProcessor::applyDefaultVelocity (const char* presetName, const juce::String& category)
+{
+    using S = Mod::Source;
+
+    if (! (category == "Pluck" || category == "Keys" || category == "Bass" || category == "Lead") || isIlanaPackPreset (presetName))
+        return;
+    if (getParam ("filter_velocity") > 0.0f)
+        return;
+    for (int i = 0; i < Mod::maxSlots; ++i)
+    {
+        const auto slot = readModSlot (i);
+        if (slot.source == S::Velocity || slot.aux == S::Velocity)
+            return;
+    }
+
+    // Low passes only: a comb, formant or band pass would move in pitch or
+    // vowel, not brightness. An open filter: the FM depth instead, if any.
+    static const std::set<int> lowPasses { 0, 4, 6, 7, 13, 14, 15, 18, 25, 26, 29, 32, 33, 34, 35, 37 };
+    const auto filter = getParam ("f1_cutoff") < 8000.0f && getParam ("f1_reso") <= 0.8f
+                        && lowPasses.count ((int) getParam ("f1_type")) > 0;
+    const auto fm = getParam ("fm_amount");
+    auto slot = -1;
+    if (filter)
+        slot = assignModSlot ((int) S::Velocity, (int) Mod::Destination::Filter1Cutoff, 0.25f);
+    else if (getParam ("osc2_on") > 0.5f && fm > 0.01f && fm < 0.8f)
+        slot = assignModSlot ((int) S::Velocity, (int) Mod::Destination::FmAmount, 0.25f);
+    if (slot >= 0)
+        setModSlotValue (slot, "curve", 1.0f);
+}
+
 namespace
 {
 // The voicing table's lines, parsed once (or ILANA_PRESET_VOICING's file,
@@ -1471,7 +1507,11 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
     }
 
     if (index > 0)
-        applyDefaultExpression (presets[(size_t) index].name, getFactoryPresetCategories()[index]);
+    {
+        const auto category = getFactoryPresetCategories()[index];
+        applyDefaultExpression (presets[(size_t) index].name, category);
+        applyDefaultVelocity (presets[(size_t) index].name, category);
+    }
 
     // A recipe, its voicing and the default macros can each route the same
     // source to the same knob: one row each in the matrix. They load as one
