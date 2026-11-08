@@ -114,8 +114,12 @@ std::function<void()>& beforeSave()
 //   (unset) / software  createComponentSnapshot, JUCE's software renderer
 //   vulkan              ilana::vulkan::renderComponent (the Vulkan renderer,
 //                       offscreen); exits non-zero if Vulkan can't run
-//   both                <name>.png from software and <name>.vulkan.png from
-//                       Vulkan, of the same UI state (tools/vulkan_parity.py)
+//   both                <name>.png from software, <name>.vulkan.png from
+//                       Vulkan, then <name>.software2.png from software
+//                       again: of the same UI state, except what moves on
+//                       its own while painting (playhead dots, readouts),
+//                       which shows as .png vs .software2.png differences
+//                       that tools/vulkan_parity.py leaves out
 enum class SnapshotRenderer { software, vulkan, both };
 
 SnapshotRenderer snapshotRenderer()
@@ -162,7 +166,7 @@ void save (juce::Component& editor, const juce::File& file)
     const auto zoom = IlanaTheme::uiScaleRef();
     IlanaTheme::uiScaleRef() = zoom * pixels;
     IlanaTheme::notifyUiScaleListeners();
-    juce::Image image, gpuImage;
+    juce::Image image, gpuImage, image2;
     if (renderer != SnapshotRenderer::vulkan)
         image = editor.createComponentSnapshot (editor.getLocalBounds(), true, pixels);
    #if ILANA_VULKAN
@@ -175,13 +179,18 @@ void save (juce::Component& editor, const juce::File& file)
                       << "); no picture written for " << file.getFullPathName() << std::endl;
             std::exit (4);
         }
+        if (renderer == SnapshotRenderer::both)
+            image2 = editor.createComponentSnapshot (editor.getLocalBounds(), true, pixels);
     }
    #endif
     IlanaTheme::uiScaleRef() = zoom;
     IlanaTheme::notifyUiScaleListeners();
     writePng (renderer == SnapshotRenderer::vulkan ? gpuImage : image, file);
     if (renderer == SnapshotRenderer::both)
+    {
         writePng (gpuImage, file.getSiblingFile (file.getFileNameWithoutExtension() + ".vulkan" + file.getFileExtension()));
+        writePng (image2, file.getSiblingFile (file.getFileNameWithoutExtension() + ".software2" + file.getFileExtension()));
+    }
 }
 int uiFailures = 0;
 

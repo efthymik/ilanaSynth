@@ -10,14 +10,21 @@ summary and a Markdown table. Exits 1 when any picture fails.
 
 Pairs come from:
   --dir D          every D/<name>.vulkan.png with its D/<name>.png (one
-                   `ILANA_SNAPSHOT_RENDERER=both` run: same UI state)
+                   `ILANA_SNAPSHOT_RENDERER=both` run: same UI state). Pixels
+                   where D/<name>.software2.png (software again, after the
+                   Vulkan capture) differs from D/<name>.png moved on their
+                   own (playhead dots, readouts): they are left out of the
+                   numbers and reported as "unstable".
   --pair A B       every A/<name>.png with B/<name>.png (two runs; A is the
-                   reference, "software", B the candidate)
+                   reference, "software", B the candidate); --unstable DIR
+                   (another run of A) masks what moves between runs
 Both may be given more than once.
 
 Pass/fail (all thresholds are arguments):
-  --within 2 --min-within 99.9   at least 99.9 % of pixels have every channel
-                                 within 2 levels
+  --within 5 --min-within 99.9   at least 99.9 % of stable pixels have every
+                                 channel within 5 levels (GPU blending rounds
+                                 where JUCE's PixelARGB::blend truncates: a
+                                 level per stacked translucent layer)
   --cluster-level 32 --max-cluster 4
                                  no 8-connected cluster of pixels off by more
                                  than 32 whose bounding box is wider or taller
@@ -100,6 +107,18 @@ def label_clusters(mask):
     return [tuple(int(v) for v in b) for b in boxes.values()]
 
 
+def grow(mask, r):
+    """Dilates a boolean mask by r px (square)."""
+    out = mask.copy()
+    h, w = mask.shape
+    for dy in range(-r, r + 1):
+        for dx in range(-r, r + 1):
+            ys, yd = (slice(0, h - dy), slice(dy, h)) if dy >= 0 else (slice(-dy, h), slice(0, h + dy))
+            xs, xd = (slice(0, w - dx), slice(dx, w)) if dx >= 0 else (slice(-dx, w), slice(0, w + dx))
+            out[yd, xd] |= mask[ys, xs]
+    return out
+
+
 def heatmap(diff_max, amplify):
     """Black where equal; dim blue for small, yellow/red for big differences."""
     d = np.clip(diff_max.astype(np.float32) * amplify, 0, 255) / 255.0
@@ -123,7 +142,7 @@ def side_by_side(ref, cand, diff_max, box, zoom, amplify):
     return sheet
 
 
-def compare(name, ref_path, cand_path, args, out):
+def compare(name, ref_path, cand_path, unstable_paths, args, out):
     result = {"name": name, "reference": str(ref_path), "candidate": str(cand_path)}
     ref, cand = load(ref_path), load(cand_path)
     result["size_reference"] = [ref.shape[1], ref.shape[0]]
@@ -135,14 +154,32 @@ def compare(name, ref_path, cand_path, args, out):
         return result
 
     diff = np.abs(ref - cand)
+    # --unstable: pixels where another run of the reference differs from it
+    # (live views, timers) don't count, grown by --unstable-grow px.
+    unstable = np.zeros(ref.shape[:2], dtype=bool)
+    for other in unstable_paths:
+        if other.exists():
+            o = load(other)
+            if o.shape == ref.shape:
+                unstable |= np.abs(o - ref).max(axis=2) > 0
+            else:
+                unstable[:] = True
+    if unstable.any() and args.unstable_grow > 0:
+        unstable = grow(unstable, args.unstable_grow)
+    result["unstable_px"] = int(unstable.sum())
+    result["pct_unstable"] = float(unstable.mean() * 100.0)
+    diff[unstable] = 0
     diff_max = diff.max(axis=2)
-    total = diff_max.size
+    total = diff_max.size - int(unstable.sum()) if not unstable.all() else 1
     result["max_abs"] = int(diff.max())
-    result["mean_abs"] = float(diff.mean())
+    result["mean_abs"] = float(diff.sum() / (total * diff.shape[2]))
     for level in (2, 8, 32):
         result[f"pct_over_{level}"] = float((diff_max > level).sum() * 100.0 / total)
-    result["pct_within"] = float((diff_max <= args.within).sum() * 100.0 / total)
+    result["pct_within"] = float(((diff_max <= args.within) & ~unstable).sum() * 100.0 / total)
     result["identical"] = bool(result["max_abs"] == 0)
+    # Stable pixels by their largest channel difference: 0, 1, 2, 3, 4, 5+ levels (percent).
+    stable = diff_max[~unstable]
+    result["hist_pct"] = [float((stable == v).sum() * 100.0 / total) for v in range(5)] + [float((stable >= 5).sum() * 100.0 / total)]
 
     clusters = label_clusters(diff_max > args.cluster_level)
     clusters.sort(key=lambda c: (-c[4], c[1], c[0]))
@@ -194,23 +231,24 @@ def collect_pairs(args):
         for cand in sorted(d.glob("*.vulkan.png")):
             ref = cand.with_name(cand.name[: -len(".vulkan.png")] + ".png")
             prefix = (d.name + "/") if len(args.dir) + len(args.pair or []) > 1 else ""
-            pairs.append((prefix + ref.stem, ref, cand))
+            pairs.append((prefix + ref.stem, ref, cand, [ref.with_name(ref.stem + ".software2.png")]))
     for a, b in args.pair or []:
         a, b = Path(a), Path(b)
         prefix = (a.name + "/") if len(args.dir or []) + len(args.pair) > 1 else ""
+        derived = (".vulkan.png", ".software2.png")
         for ref in sorted(a.glob("*.png")):
-            if ref.name.endswith(".vulkan.png"):
+            if ref.name.endswith(derived):
                 continue
             cand = b / ref.name
             if cand.exists():
-                pairs.append((prefix + ref.stem, ref, cand))
+                pairs.append((prefix + ref.stem, ref, cand, [Path(d) / ref.name for d in args.unstable or []]))
             else:
                 print(f"missing in {b}: {ref.name}", file=sys.stderr)
-                pairs.append((prefix + ref.stem, ref, None))
+                pairs.append((prefix + ref.stem, ref, None, []))
         for cand in sorted(b.glob("*.png")):
-            if not (a / cand.name).exists() and not cand.name.endswith(".vulkan.png"):
+            if not (a / cand.name).exists() and not cand.name.endswith(derived):
                 print(f"missing in {a}: {cand.name}", file=sys.stderr)
-                pairs.append((prefix + cand.stem, None, cand))
+                pairs.append((prefix + cand.stem, None, cand, []))
     return pairs
 
 
@@ -220,10 +258,13 @@ def main():
     ap.add_argument("--pair", nargs=2, action="append", metavar=("REFERENCE", "CANDIDATE"),
                     help="two directories of same-named PNGs")
     ap.add_argument("--out", help="where heatmaps, crops, summary.json and summary.md go")
-    ap.add_argument("--within", type=int, default=2, help="levels a pixel's channels may differ and still count as equal")
+    ap.add_argument("--within", type=int, default=5, help="levels a pixel's channels may differ and still count as equal")
     ap.add_argument("--min-within", type=float, default=99.9, help="percent of pixels that must be within --within")
     ap.add_argument("--cluster-level", type=int, default=32, help="a 'big' difference, in levels")
     ap.add_argument("--max-cluster", type=int, default=4, help="largest allowed bounding box side of a cluster of big differences")
+    ap.add_argument("--unstable", action="append", metavar="DIR",
+                    help="another run of the reference: pixels where it differs from the reference are left out (repeatable)")
+    ap.add_argument("--unstable-grow", type=int, default=1, help="px the --unstable mask is grown by")
     ap.add_argument("--exact", action="store_true", help="require identical pixels (software baseline check)")
     ap.add_argument("--amplify", type=float, default=8.0, help="heatmap gain")
     ap.add_argument("--crop-pad", type=int, default=24, help="context around the worst region in the side-by-side crop")
@@ -237,26 +278,27 @@ def main():
         out.mkdir(parents=True, exist_ok=True)
 
     results = []
-    for name, ref, cand in collect_pairs(args):
+    for name, ref, cand, unstable in collect_pairs(args):
         if ref is None or cand is None:
             results.append({"name": name, "pass": False, "why": "missing pair", "size_match": False})
             continue
-        results.append(compare(name, ref, cand, args, out))
+        results.append(compare(name, ref, cand, unstable, args, out))
 
     if not results:
         print("no picture pairs found", file=sys.stderr)
         return 2
 
-    header = "| picture | size | max | mean | >2 % | >8 % | >32 % | big clusters | worst clusters (x,y wxh) | result |"
+    header = ("| picture | size | max | mean | >2 % | >8 % | >32 % | 0 / 1 / 2 / 3 / 4 / 5+ levels (% px) | big clusters | "
+              "worst clusters (x,y wxh) | unstable px (%) | result |")
     lines = [header, "|---" * (header.count("|") - 1) + "|"]
     for r in results:
         if not r.get("size_match"):
-            lines.append(f"| {r['name']} | {r.get('size_reference')} vs {r.get('size_candidate')} | | | | | | | | FAIL: {r['why']} |")
+            lines.append(f"| {r['name']} | {r.get('size_reference')} vs {r.get('size_candidate')} | | | | | | | | | | FAIL: {r['why']} |")
             continue
         worst = ", ".join(f"{c['x']},{c['y']} {c['w']}x{c['h']}" for c in r["clusters"][:3])
         lines.append(f"| {r['name']} | {r['size_reference'][0]}x{r['size_reference'][1]} | {r['max_abs']} | {r['mean_abs']:.4f} | "
-                     f"{r['pct_over_2']:.3f} | {r['pct_over_8']:.3f} | {r['pct_over_32']:.3f} | {r['clusters_big']}/{r['clusters_total']} | "
-                     f"{worst} | {'pass' if r['pass'] else 'FAIL: ' + r['why']} |")
+                     f"{r['pct_over_2']:.3f} | {r['pct_over_8']:.3f} | {r['pct_over_32']:.3f} | {' / '.join(f'{v:.2f}' for v in r['hist_pct'])} | {r['clusters_big']}/{r['clusters_total']} | "
+                     f"{worst} | {r['unstable_px']} ({r['pct_unstable']:.2f}) | {'pass' if r['pass'] else 'FAIL: ' + r['why']} |")
     failed = [r for r in results if not r["pass"]]
     lines.append("")
     lines.append(f"{len(results) - len(failed)}/{len(results)} pass"
@@ -264,7 +306,7 @@ def main():
     table = "\n".join(lines)
     print(table)
     if out is not None:
-        thresholds = {k: getattr(args, k) for k in ("within", "min_within", "cluster_level", "max_cluster", "exact")}
+        thresholds = {k: getattr(args, k) for k in ("within", "min_within", "cluster_level", "max_cluster", "exact", "unstable_grow")}
         (out / "summary.json").write_text(json.dumps({"thresholds": thresholds, "pass": not failed,
                                                        "pictures": results}, indent=1))
         (out / "summary.md").write_text(table + "\n")
