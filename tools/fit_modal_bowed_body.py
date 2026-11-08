@@ -18,7 +18,11 @@ loud.
 
 Each DIR holds the University of Iowa 2012 arco mf files of that instrument
 (theremin.music.uiowa.edu, MISviolin2012 / MISviola2012 / MIScello2012),
-or one WAV per note. Needs numpy, scipy and soundfile; numba speeds the
+or one WAV per note named like Iowa's (x.D4D4.stereo.wav), with half a
+second of silence before the note. The bodies in the repo are fitted to
+ilana's renders of render-midi/<violin|viola|cello>-arco-full-range.mid
+(Spitfire String Quartet, Long Normale, dynamics 90, reverb off; the
+velocity 80 pass): --source names them in the header. Needs numpy, scipy and soundfile; numba speeds the
 string up about fifty times.
 """
 
@@ -216,6 +220,8 @@ def main():
     parser.add_argument("--viola", required=True)
     parser.add_argument("--cello", required=True)
     parser.add_argument("--out", default="src/dsp/ModalBowedBodies.h")
+    parser.add_argument("--source", default="the University of Iowa 2012 violin, viola and cello (arco, mf)",
+                        help="what the recordings are, for the generated header's comment")
     args = parser.parse_args()
 
     fitted, errors = {}, {}
@@ -236,11 +242,11 @@ def main():
     text = """#pragma once
 
 // The Modal Bowed exciter's bodies (ModalBowed.h), fitted by
-// tools/fit_modal_bowed_body.py to the University of Iowa 2012 violin, viola
-// and cello (arco, mf): one grid of resonators (Hz and bandwidth for a
-// violin; a viola's and a cello's are divided by their size), and each
-// instrument's gains in dB. Partial error after the fit: violin %.1f dB,
-// viola %.1f dB, cello %.1f dB. Generated: edit the tool, not this file.
+// tools/fit_modal_bowed_body.py to %s:
+// one grid of resonators (Hz and bandwidth for a violin; a viola's and a
+// cello's are divided by their size), and each instrument's gains in dB.
+// Partial error after the fit: violin %.1f dB, viola %.1f dB, cello %.1f dB.
+// Generated: edit the tool, not this file.
 struct ModalBowedBodies
 {
     static constexpr int count = %d;
@@ -251,7 +257,7 @@ struct ModalBowedBodies
     static constexpr float violas[count] { %s };
     static constexpr float cellos[count] { %s };
 };
-""" % (errors["violin"], errors["viola"], errors["cello"], len(GRID), SIZES["viola"], SIZES["cello"],
+""" % (args.source, errors["violin"], errors["viola"], errors["cello"], len(GRID), SIZES["viola"], SIZES["cello"],
        row([f for f, _ in GRID], "%.2ff"), row([b for _, b in GRID], "%.2ff"),
        row(fitted["violin"], "%.2ff"), row(fitted["viola"], "%.2ff"), row(fitted["cello"], "%.2ff"))
     with open(args.out, "w") as f:

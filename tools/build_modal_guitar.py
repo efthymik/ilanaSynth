@@ -10,9 +10,10 @@ Two kinds of source:
                 every file Guitar.<pp|mf|ff>.<string>.<range>.stereo.aif in
                 DIR, several notes per file. Each note is taken from the
                 string where it sits lowest on the neck.
-  --render WAV  a render of a guitar plugin from
+  --render WAV --midi MID
+                a render of a guitar plugin playing
                 ilanasynth/modal-guitar-violin-research/render-midi/guitar-full-range.mid
-                (E2..E6, velocities 40/80/120, one note per --slot seconds).
+                (E2..E6 one note at a time, velocities 40/80/120 = pp/mf/ff).
 
 Recorded notes are often cut short (Iowa's by the next note after 1 to 3 s):
 each level curve past the end of its note carries on along the slope of its
@@ -148,15 +149,42 @@ def iowa_notes(folder):
     return found
 
 
+def render_notes(path, midi_path):
+    """{(midi, dynamic): (0, "render", segment, rate, f0)} from a render of a
+    MIDI file (one note at a time; velocities 40/80/120 are pp/mf/ff)."""
+    import mido
+    x, rate = sf.read(path, always_2d=True)
+    x = highpass(x, rate)
+    events, t, held = [], 0.0, {}
+    for msg in mido.MidiFile(midi_path):
+        t += msg.time
+        if msg.type == "note_on" and msg.velocity > 0:
+            held[msg.note] = (t, msg.velocity)
+        elif msg.type in ("note_off", "note_on") and msg.note in held:
+            start, velocity = held.pop(msg.note)
+            events.append((start, t, msg.note, velocity))
+    level = {40: "pp", 80: "mf", 120: "ff"}
+    found = {}
+    for start, end, note, velocity in events:
+        seg = x[int(start * rate):min(len(x), int((end + 0.9) * rate))]
+        seg = seg[mp.onset(seg, rate):]
+        found[(note, level[velocity])] = (0, "render", seg, rate, pitch(seg, rate))
+    return found
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--iowa", help="folder of the Iowa guitar's stereo AIFF files")
+    parser.add_argument("--render", help="a render of guitar-full-range.mid (WAV or FLAC)")
+    parser.add_argument("--midi", help="the MIDI file the render played")
     parser.add_argument("--out", default="content/guitar/modal-guitar.bin")
     args = parser.parse_args()
-    if not args.iowa:
-        sys.exit("give --iowa DIR")
-
-    found = iowa_notes(args.iowa)
+    if args.render and args.midi:
+        found = render_notes(args.render, args.midi)
+    elif args.iowa:
+        found = iowa_notes(args.iowa)
+    else:
+        sys.exit("give --iowa DIR, or --render WAV --midi MID")
     notes = sorted({m for (m, d) in found if all((m, dd) in found for dd in DYNAMICS)})
     print("notes:", notes)
     rate = found[(notes[0], "mf")][3]
