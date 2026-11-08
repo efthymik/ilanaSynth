@@ -678,7 +678,7 @@ private:
     void syncSamplePlayers();
     const SampleData* stretchCopyFor (int osc, const SampleData* origin);
     void updateSubBlock (const float* mods, float filterEnvValue, float filter2EnvValue, const float* envelopeValues);
-    double advanceGlideAndDrift (float driftMod);
+    double advanceGlideAndDrift (float driftMod, int samples);
     void tuneBody (double driftedFrequency);
     /** True when the voice cable graph routes audio through the physical body. */
     bool bodyIsInChain() const;

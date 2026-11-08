@@ -3799,7 +3799,7 @@ void Voice::updateSubBlock (const float* mods, float filterEnvValue, float filte
 {
     using D = Mod::Destination;
 
-    const auto driftedFrequency = advanceGlideAndDrift (mods[(int) D::Drift]);
+    const auto driftedFrequency = advanceGlideAndDrift (mods[(int) D::Drift], 16);
 
     // Warp amounts move at sub-block rate: the table-level choice behind them
     // is too costly to redo every sample.
@@ -3942,21 +3942,35 @@ void Voice::updateSubBlock (const float* mods, float filterEnvValue, float filte
     updateFilterCoefficients (mods, filterEnvValue, filter2EnvValue);
 }
 
-// One sub-block's glide and drift (the drift's random walk steps here, so it
-// stays in step whether the voice renders in full or only its body's tail).
-double Voice::advanceGlideAndDrift (float driftMod)
+// One sub-block's glide and drift over its samples (the drift's random walk
+// steps here, so it stays in step whether the voice renders in full or only
+// its body's tail).
+double Voice::advanceGlideAndDrift (float driftMod, int samples)
 {
-    currentFrequency += (baseFrequency - currentFrequency) * (double) glideCoeff;
+    const auto glideStep = samples == 16 || glideSamples <= 0.0f ? glideCoeff
+                                                                 : 1.0f - std::exp (-(float) samples / glideSamples);
+    currentFrequency += (baseFrequency - currentFrequency) * (double) glideStep;
 
     auto driftFactor = 1.0;
     const auto drift = juce::jlimit (0.0f, 1.0f, params.drift + driftMod);
 
     if (drift > 0.0f)
     {
-        if (driftRandom.nextFloat() > 0.995f)
+        // The walk was tuned as 16 samples at 48 kHz a step: a new target
+        // about 15 times a second, a slew of about 0.17 s. Other rates, the
+        // oversampled voices and shorter steps scale the chance and the slew
+        // by the time the step covers (exactly the old numbers at 48 kHz).
+        const auto steps = (double) samples * 3000.0 / sampleRate;
+        auto threshold = 0.995f, slew = 0.002f;
+        if (steps != 1.0)
+        {
+            threshold = (float) (1.0 - 0.005 * steps);
+            slew = (float) (1.0 - std::pow (0.998, steps));
+        }
+        if (driftRandom.nextFloat() > threshold)
             driftTarget = driftRandom.nextFloat() * 2.0f - 1.0f;
 
-        driftValue += (driftTarget - driftValue) * 0.002f;
+        driftValue += (driftTarget - driftValue) * slew;
         driftFactor = std::exp2 ((double) driftValue * (double) drift * 0.25 / 12.0);
     }
 
@@ -4111,7 +4125,7 @@ void Voice::renderBodyTail (float* left, float* right, int startSample, int numS
     for (int i = 0; i < numSamples; ++i)
     {
         if ((i & 15) == 0)
-            tuneBody (advanceGlideAndDrift (blockMod (D::Drift)));
+            tuneBody (advanceGlideAndDrift (blockMod (D::Drift), 16));
         if (fadeTotal > 0)
             ampGainFade = fadeRemaining > 0 ? (float) --fadeRemaining / (float) fadeTotal : 0.0f;
         const auto wetL = materialBodyL.process (0.0f) * wetGain * ampGainFade;
