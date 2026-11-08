@@ -167,11 +167,22 @@ void save (juce::Component& editor, const juce::File& file)
     IlanaTheme::uiScaleRef() = zoom * pixels;
     IlanaTheme::notifyUiScaleListeners();
     juce::Image image, gpuImage, image2;
+    // In both mode each capture waits 250 ms first (the message loop doesn't
+    // run, so nothing else changes): the live views' trackers (PhaseTracker,
+    // EnvTracker in gui/AnimationUtils.h) predict from the time since their
+    // last paint and restart from the published value after 150 ms, so with
+    // the wait every capture shows the same phase instead of one moved on
+    // by however long the previous renderer took.
+    const auto settleTrackers = [renderer] { if (renderer == SnapshotRenderer::both) juce::Thread::sleep (250); };
     if (renderer != SnapshotRenderer::vulkan)
+    {
+        settleTrackers();
         image = editor.createComponentSnapshot (editor.getLocalBounds(), true, pixels);
+    }
    #if ILANA_VULKAN
     if (renderer != SnapshotRenderer::software)
     {
+        settleTrackers();
         gpuImage = ilana::vulkan::renderComponent (editor, editor.getLocalBounds(), pixels);
         if (! gpuImage.isValid())
         {
@@ -180,7 +191,10 @@ void save (juce::Component& editor, const juce::File& file)
             std::exit (4);
         }
         if (renderer == SnapshotRenderer::both)
+        {
+            settleTrackers();
             image2 = editor.createComponentSnapshot (editor.getLocalBounds(), true, pixels);
+        }
     }
    #endif
     IlanaTheme::uiScaleRef() = zoom;
