@@ -358,6 +358,9 @@ public:
     // drive, space), chosen from what the patch uses. Silent at macro 0.
     // Macros marked in keep (the preset voicing's own) are left alone.
     void applyDefaultMacros (const std::array<bool, 4>& keep = {});
+    // A factory preset that routes neither the mod wheel nor aftertouch gets
+    // one route each, chosen by category. Silent until they are touched.
+    void applyDefaultExpression (const char* presetName, const juce::String& category);
 
     static void migrateLegacyOsc3 (const std::function<float (const juce::String&, float)>& get,
                                    const std::function<void (const juce::String&, float)>& set);

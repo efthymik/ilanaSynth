@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <map>
+#include <set>
 
 namespace
 {
@@ -616,6 +617,145 @@ void IlanaSynthAudioProcessor::applyDefaultMacros (const std::array<bool, 4>& ke
     else
     {
         map (3, "SWELL", { { (int) D::AmpAttack, 0.3f } });
+    }
+}
+
+namespace
+{
+// ilana's own pack (PresetPackIlana.h): the defaults below leave it as she made it.
+bool isIlanaPackPreset (const char* name)
+{
+    static const auto names = []
+    {
+        std::set<std::string> set;
+        Presets::Library::addIlanaPresets ([&set] (const Presets::FactoryPreset& preset) { set.insert (preset.name); });
+        return set;
+    }();
+    return name != nullptr && names.count (name) > 0;
+}
+} // namespace
+
+// The mod wheel and aftertouch, on a factory preset that routes neither: one
+// route each, picked by category, the way a player expects them to act
+// there (most of the library ignored the wheel). Silent at wheel and
+// pressure 0, so the preset sounds as written until they are touched. Init
+// (an empty matrix by design), the DX7 voices (they already add vibrato)
+// and ilana's own presets are left alone.
+void IlanaSynthAudioProcessor::applyDefaultExpression (const char* presetName, const juce::String& category)
+{
+    using D = Mod::Destination;
+    using S = Mod::Source;
+
+    if (category == "DX7" || isIlanaPackPreset (presetName))
+        return;
+
+    auto wheel = false, pressure = false;
+    std::array<bool, (size_t) numLfos> lfoUsed {};
+    auto anyLfo = -1;
+
+    for (int i = 0; i < Mod::maxSlots; ++i)
+    {
+        const auto slot = readModSlot (i);
+        if (slot.source == S::None)
+            continue;
+        for (const auto source : { slot.source, slot.aux })
+        {
+            wheel = wheel || source == S::ModWheel;
+            pressure = pressure || source == S::Aftertouch || source == S::Expression;
+            auto lfo = Mod::lfoIndexFor (source);
+            if (lfo < 0)
+                lfo = Mod::lfoBIndexFor (source);
+            if (juce::isPositiveAndBelow (lfo, numLfos))
+            {
+                lfoUsed[(size_t) lfo] = true;
+                if (anyLfo < 0 && source == slot.source && slot.destination != 0)
+                    anyLfo = lfo;
+            }
+        }
+    }
+
+    pressure = pressure || getParam ("mpe_mode") > 0.5f;
+    if (wheel && pressure)
+        return;
+
+    const auto route = [this] (S source, int destination, float depth, S via = S::None)
+    {
+        const auto slot = assignModSlot ((int) source, destination, depth);
+        if (slot >= 0 && via != S::None)
+            setModSlotValue (slot, "aux", (float) (int) via);
+    };
+
+    // Brightness: open a closed filter, close an open one.
+    const auto cutoff = (int) D::Filter1Cutoff;
+    const auto closed = getParam ("f1_cutoff") < 8000.0f;
+    const auto bright = [&] (S source, float open, float close) { route (source, cutoff, closed ? open : close); };
+
+    if (category == "Lead")
+    {
+        // Vibrato, on an LFO of its own (one the preset leaves unused and at
+        // its default shape), on every playing oscillator.
+        auto lfo = -1;
+        for (int k = numLfos; k-- > 0;)
+            if (! lfoUsed[(size_t) k] && (int) getParam (lfoIds[(size_t) k].shape) == 0)
+            {
+                lfo = k;
+                break;
+            }
+
+        if (! wheel && lfo >= 0)
+        {
+            const auto prefix = "lfo" + juce::String (lfo + 1);
+            const std::pair<const char*, float> settings[] { { "_rate", 5.2f }, { "_sync", 0.0f }, { "_retrig", 0.0f } };
+            for (const auto& [field, value] : settings)
+                if (auto* parameter = apvts.getParameter (prefix + field))
+                    parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
+
+            const std::pair<const char*, D> pitches[] { { "osc1_on", D::Osc1Pitch }, { "osc2_on", D::Osc2Pitch },
+                                                        { "sub_on", D::SubPitch },   { "osc4_on", D::Osc4Pitch },
+                                                        { "osc5_on", D::Osc5Pitch }, { "osc6_on", D::Osc6Pitch } };
+            for (const auto& [on, destination] : pitches)
+                if (getParam (on) > 0.5f)
+                    route (Mod::lfoSourceFor (lfo), (int) destination, 0.012f, S::ModWheel);
+        }
+
+        if (! pressure && closed)
+            route (S::Aftertouch, cutoff, 0.25f);
+        return;
+    }
+
+    if (category == "Pad" || category == "Chords")
+    {
+        if (! wheel)
+            bright (S::ModWheel, 0.3f, -0.35f);
+        if (! pressure && closed)
+            route (S::Aftertouch, cutoff, 0.2f);
+        return;
+    }
+
+    if (wheel)
+        return;
+
+    if (category == "Pluck" || category == "Keys" || category == "Arp")
+    {
+        const auto fm = getParam ("fm_amount");
+        if (fm > 0.01f && fm < 0.8f)
+            route (S::ModWheel, (int) D::FmAmount, 0.3f);
+        else
+            bright (S::ModWheel, 0.3f, -0.35f);
+    }
+    else if (category == "Bass")
+    {
+        route (S::ModWheel, (int) D::Filter1Drive, 0.5f);
+        if (closed)
+            route (S::ModWheel, cutoff, 0.2f);
+    }
+    else if (category == "Drone")
+    {
+        // Motion: the wheel speeds up an LFO the drone already moves with.
+        if (anyLfo >= 0)
+            route (S::ModWheel, (int) Mod::lfoRateDestinationFor (anyLfo), 0.3f);
+        else
+            bright (S::ModWheel, 0.3f, -0.35f);
     }
 }
 
@@ -1317,6 +1457,9 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
             keep[macro] = voicedMacroNames[macro].isNotEmpty();
         applyDefaultMacros (keep);
     }
+
+    if (index > 0)
+        applyDefaultExpression (presets[(size_t) index].name, getFactoryPresetCategories()[index]);
 
     // A recipe, its voicing and the default macros can each route the same
     // source to the same knob: one row each in the matrix. They load as one

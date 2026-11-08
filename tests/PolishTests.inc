@@ -1254,8 +1254,68 @@ void runStatePresetTest()
     }
 }
 
+// Blind spots: factory presets that routed neither the mod wheel nor
+// aftertouch get one route each by category (applyDefaultExpression). They
+// must not move the sound at wheel and pressure 0: the preset renders bit for
+// bit as it does with those routes taken out again.
+void runDefaultExpressionTest()
+{
+    fixedRandomSeeds() = true;
+    struct Restore { ~Restore() { fixedRandomSeeds() = false; } } restore;
+    using S = Mod::Source;
+    const auto expressive = [] (const Mod::Slot& slot)
+    {
+        return slot.source == S::ModWheel || slot.aux == S::ModWheel || slot.source == S::Aftertouch || slot.aux == S::Aftertouch;
+    };
+
+    for (const auto* name : { "Ring Lead", "Warm Analog Pad", "Quad Mod Pluck", "Mellow Rhodes", "Rip Bass", "Ring Drone" })
+    {
+        const auto render = [name, &expressive] (bool strip, int& routes)
+        {
+            IlanaSynthAudioProcessor processor;
+            processor.setNonRealtime (true);
+            processor.prepareToPlay (48000.0, 256);
+            processor.loadFactoryPreset (processor.getFactoryPresetNames().indexOf (name));
+            routes = 0;
+            for (int i = 0; i < Mod::maxSlots; ++i)
+                if (expressive (processor.readModSlot (i)))
+                {
+                    ++routes;
+                    if (strip)
+                        processor.clearModSlot (i);
+                }
+            processor.panic();
+            processor.releaseResources();
+            processor.prepareToPlay (48000.0, 256);
+            std::vector<float> out;
+            juce::AudioBuffer<float> buffer (2, 256);
+            for (int block = 0; block < 200; ++block)
+            {
+                buffer.clear();
+                juce::MidiBuffer midi;
+                if (block == 0)
+                    for (const auto note : { 48, 60, 64 })
+                        midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 100), 0);
+                if (block == 120)
+                    for (const auto note : { 48, 60, 64 })
+                        midi.addEvent (juce::MidiMessage::noteOff (1, note), 0);
+                processor.processBlock (buffer, midi);
+                for (int c = 0; c < 2; ++c)
+                    out.insert (out.end(), buffer.getReadPointer (c), buffer.getReadPointer (c) + 256);
+            }
+            return out;
+        };
+        auto routes = 0, stripped = 0;
+        const auto loaded = render (false, routes);
+        const auto without = render (true, stripped);
+        check (routes > 0, juce::String (name) + " gets a mod wheel or aftertouch route");
+        check (loaded == without, juce::String (name) + ": its wheel and aftertouch routes are silent at 0");
+    }
+}
+
 void runTests()
 {
+    timedRun ("Polish::runDefaultExpressionTest", [] { runDefaultExpressionTest(); });
     timedRun ("Polish::runControllerSeedTest", [] { runControllerSeedTest(); });
     timedRun ("Polish::runTransportStopTest", [] { runTransportStopTest(); });
     timedRun ("Polish::runVoicesEndTest", [] { runVoicesEndTest(); });
