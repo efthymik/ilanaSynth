@@ -395,7 +395,13 @@ uint32_t Device::findMemoryType (uint32_t typeBits, VkMemoryPropertyFlags wanted
 std::shared_ptr<Device> sharedDevice()
 {
     // Created once per process; a failed attempt is not retried (each try
-    // costs a driver load). Kept alive by every canvas that uses it.
+    // costs a driver load). Closing and reopening the plugin window keeps
+    // it: a holder JUCE deletes at shutdown (before the DLL unloads, where
+    // Vulkan calls could deadlock on the loader lock) owns one reference.
+    struct Holder final : public juce::DeletedAtShutdown
+    {
+        std::shared_ptr<Device> device;
+    };
     static std::weak_ptr<Device> current;
     static bool failed = false;
     JUCE_ASSERT_MESSAGE_THREAD
@@ -415,6 +421,7 @@ std::shared_ptr<Device> sharedDevice()
     }
 
     current = device;
+    (new Holder())->device = device;
     return device;
 }
 
