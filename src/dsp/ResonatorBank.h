@@ -2,6 +2,8 @@
 
 #include <juce_core/juce_core.h>
 
+#include "RatePole.h"
+
 #include <cmath>
 #include <vector>
 
@@ -59,7 +61,9 @@ public:
 
         amount = clampedAmount;
         feedback = 0.5f + juce::jlimit (0.0f, 1.0f, newDecay) * 0.48f;
-        lowpassCoefficient = 1.0f - juce::jlimit (0.0f, 1.0f, newDamping) * 0.9f;
+        // Once a sample: kept at its 48 kHz sound at any rate (the feedback
+        // is once a trip round the loop, so it already is).
+        lowpassCoefficient = onePoleFrom48k (1.0f - juce::jlimit (0.0f, 1.0f, newDamping) * 0.9f, sampleRate);
     }
 
     // excite rings the delay lines without joining the dry mix (the live

@@ -216,6 +216,74 @@ void runPhysicalStringTest()
     }
 }
 
+// A plucked string's upper partials and the RES resonator ring as long at
+// 96 and 192 kHz (or with OVERSAMPLE) as at 48 kHz: their loop low-passes
+// run once a sample, and used to keep their per-sample pole, so a 96 kHz
+// string rang about twice as long at 2-4 kHz.
+void runLoopDecayAcrossRatesTest()
+{
+    // dB lost per second by the partial at hz, between two 0.1 s windows.
+    // RES is measured at 4180 Hz, the 19th harmonic of its 220 Hz line,
+    // where its 440 and 660 Hz lines have no partial.
+    const auto decayRate = [] (const std::vector<float>& samples, double rate, double hz, double from, double to)
+    {
+        const auto levelAt = [&] (double start)
+        {
+            double real = 0.0, imaginary = 0.0;
+            const auto first = (int) (start * rate), count = (int) (0.1 * rate);
+            for (int i = first; i < first + count; ++i)
+            {
+                const auto angle = juce::MathConstants<double>::twoPi * hz * (double) i / rate;
+                const auto hann = 0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * (double) (i - first) / (double) count);
+                real += hann * (double) samples[(size_t) i] * std::cos (angle);
+                imaginary += hann * (double) samples[(size_t) i] * std::sin (angle);
+            }
+            return 10.0 * std::log10 (real * real + imaginary * imaginary + 1.0e-30);
+        };
+        return (levelAt (from) - levelAt (to)) / (to - from);
+    };
+
+    const auto stringAt = [] (double rate)
+    {
+        KarplusStrong string (12345);
+        string.prepare (rate);
+        string.setFrequency (220.0);
+        string.setParams (KarplusStrong::Excite::Burst, 0.0f, 0.35f, 0.75f);
+        string.setPhysicalParams (0.0f, 0.0f, 0.0f, 1.0f, 0.0f, false);
+        string.trigger (1.0f);
+        std::vector<float> samples ((size_t) (rate * 0.5));
+        for (auto& sample : samples)
+            sample = string.process();
+        return samples;
+    };
+
+    const auto resonatorAt = [] (double rate)
+    {
+        ResonatorBank bank;
+        bank.prepare (rate);
+        bank.setTuning (220.0, 0.0f, 1.0f);
+        bank.setParams (1.0f, 0.75f, 0.35f);
+        std::vector<float> samples ((size_t) (rate * 0.4));
+        for (size_t i = 0; i < samples.size(); ++i)
+            samples[i] = bank.process (i == 0 ? 1.0f : 0.0f);
+        return samples;
+    };
+
+    const auto string48 = decayRate (stringAt (48000.0), 48000.0, 1980.0, 0.05, 0.2);
+    const auto res48 = decayRate (resonatorAt (48000.0), 48000.0, 4180.0, 0.02, 0.12);
+    for (const auto rate : { 96000.0, 192000.0 })
+    {
+        const auto stringRate = decayRate (stringAt (rate), rate, 1980.0, 0.05, 0.2);
+        check (std::abs (stringRate / string48 - 1.0) < 0.2,
+               "string's 9th partial decays as fast at " + juce::String (rate / 1000.0, 0) + " kHz as at 48 ("
+                   + juce::String (stringRate, 1) + " against " + juce::String (string48, 1) + " dB/s)");
+        const auto resRate = decayRate (resonatorAt (rate), rate, 4180.0, 0.02, 0.12);
+        check (std::abs (resRate / res48 - 1.0) < 0.2,
+               "RES at 4.18 kHz decays as fast at " + juce::String (rate / 1000.0, 0) + " kHz as at 48 ("
+                   + juce::String (resRate, 1) + " against " + juce::String (res48, 1) + " dB/s)");
+    }
+}
+
 void runPhysicalPatchMigrationTest()
 {
     IlanaSynthAudioProcessor source;

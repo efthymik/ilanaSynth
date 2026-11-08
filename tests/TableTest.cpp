@@ -700,6 +700,7 @@ int main()
     {
         runKarplusStrongTest();
         runPhysicalStringTest();
+        runLoopDecayAcrossRatesTest();
         std::cout << (failures == 0 ? "KS TESTS PASSED" : "KS TESTS FAILED") << " (" << failures << " failures)" << std::endl;
         return failures == 0 ? 0 : 1;
     }
@@ -800,6 +801,7 @@ int main()
     timedRun ("runGranularTests", [] { runGranularTests(); });
     timedRun ("runHeavyPresetCpuTest", [] { runHeavyPresetCpuTest(); });
     timedRun ("runPhysicalStringTest", [] { runPhysicalStringTest(); });
+    timedRun ("runLoopDecayAcrossRatesTest", [] { runLoopDecayAcrossRatesTest(); });
     timedRun ("runPhysicalPatchMigrationTest", [] { runPhysicalPatchMigrationTest(); });
     timedRun ("runScaleRandomReleaseTest", [] { runScaleRandomReleaseTest(); });
     timedRun ("runArpHostStopTests", [] { runArpHostStopTests(); });
