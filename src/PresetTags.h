@@ -728,6 +728,20 @@ inline const FactoryTagRow factoryTagRows[] {
     { "Vowel Strike Keys", "Vocal, Physical, Percussive, Echo, From Ilana" },
     { "Euclid Vowel Glass", "Vocal, Resonant, Evolving, Sustained, Spacious, From Ilana" },
     { "Feedback Bow Pluck", "Physical, Warm, Percussive, Wide, Spacious, From Ilana" },
+    { "Hexagon Choir Pad", "Vocal, Detuned, Evolving, Slow Attack, Spacious, Wavetable" },
+    { "Triangle Vector Lead", "Vocal, Resonant, Sustained, Echo, Mono, Wavetable" },
+    { "Pentagon Glass Keys", "E-Piano, Bell, Mallet, Evolving, Bright, Percussive" },
+    { "Hushed Grand", "Piano, Physical, Dark, Sustained" },
+    { "Octave Drop Bass", "Gritty, Detuned, Evolving, Dark, Mono, Wavetable" },
+    { "Trance Pluck", "Supersaw, Bright, Percussive, Echo, Wavetable" },
+    { "Rave Hoover", "Gritty, Detuned, Evolving, Glide, Sustained, Wavetable" },
+    { "Reese Screech", "Gritty, Detuned, Rhythmic, FM, Sustained, Mono" },
+    { "Synth Brass Lead", "Brass, Detuned, Warm, Sustained, Mono, Wavetable" },
+    { "Arcade Pulse Lead", "Chiptune, Lo-Fi, Bright, Sustained, Echo, Mono" },
+    { "Vox Glide Lead", "Vocal, Detuned, Evolving, Glide, Sustained, Echo" },
+    { "Rave Kick", "Percussion, Gritty, Dark, Percussive, Mono, Wavetable" },
+    { "Snap Clap", "Percussion, Noise, Warm, Percussive, Wavetable" },
+    { "Closed Hat", "Percussion, Noise, Metallic, FM, Bright, Percussive" },
 };
 
 // A factory preset's tags ("Bell, FM, Bright"), or "" for any other name.

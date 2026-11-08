@@ -1313,9 +1313,26 @@ void runDefaultExpressionTest()
     }
 }
 
+// The builder's macro() reaches macros 5-8 (their own Macro 5..8 sources):
+// Hexagon Choir Pad names and routes all eight.
+void runEightMacroPresetTest()
+{
+    IlanaSynthAudioProcessor processor;
+    processor.loadFactoryPreset (processor.getFactoryPresetNames().indexOf ("Hexagon Choir Pad"));
+    for (int macro = 4; macro < Mod::numMacros; ++macro)
+    {
+        auto routed = false;
+        for (int i = 0; i < Mod::maxSlots; ++i)
+            routed = routed || processor.readModSlot (i).source == Mod::macroSourceFor (macro);
+        check (processor.getMacroName (macro).isNotEmpty() && routed,
+               "Hexagon Choir Pad names and routes macro " + juce::String (macro + 1));
+    }
+}
+
 void runTests()
 {
     timedRun ("Polish::runDefaultExpressionTest", [] { runDefaultExpressionTest(); });
+    timedRun ("Polish::runEightMacroPresetTest", [] { runEightMacroPresetTest(); });
     timedRun ("Polish::runControllerSeedTest", [] { runControllerSeedTest(); });
     timedRun ("Polish::runTransportStopTest", [] { runTransportStopTest(); });
     timedRun ("Polish::runVoicesEndTest", [] { runVoicesEndTest(); });

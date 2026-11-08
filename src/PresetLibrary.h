@@ -603,6 +603,7 @@ namespace Library
 #include "PresetPackIlana.h"
 #include "PresetPackSearch.h"
 #include "PresetPackRecipes.h"
+#include "PresetPackShowcase.h"
 
 // The owner's blind A/B marked these presets bad in both their old and new
 // form (2026-09-30): rebuilt from scratch (content/analysis/rebuild-8.md).
@@ -2900,6 +2901,9 @@ inline std::vector<FactoryPreset> buildLaterPacks()
     // frames, envelopes and velocity on timbre, per-note random), baked by
     // tools/preset_gen.py bake --pack src/PresetPackRecipes.h --only ...
     addRecipePresets (add);
+
+    // The showcase pack: unplayed features and missing archetypes (blind-spots review).
+    addShowcasePresets (add);
 
     return list;
 }
