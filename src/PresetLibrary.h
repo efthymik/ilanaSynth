@@ -284,6 +284,8 @@ public:
     Builder& velocity (float amount) { return set ("amp_velocity", amount); }
 
     // Voicing ----------------------------------------------------------------
+    // (Glide times here are in the old 16x-slow units: loadFactoryPreset
+    // multiplies them by 16, migrateGlideTime.)
     Builder& mono (float glideTime = 0.0f) { set ("voice_mode", 1); return set ("glide", glideTime); }
     Builder& legato (float glideTime = 0.06f) { set ("voice_mode", 2); return set ("glide", glideTime); }
     Builder& voices (int count) { return set ("poly_voices", (float) count); }

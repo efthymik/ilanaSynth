@@ -1291,6 +1291,257 @@ void runStatePresetTest()
     }
 }
 
+// GLIDE takes the knob's time (it took 16 times that until 2026-11): a
+// glide's one-pole reaches 1 - 1/e of the way in GLIDE seconds. Old
+// patches and the factory recipes load with GLIDE x16, routes into it
+// scaled to reach as far, and glide as they did.
+double measureGlideTime (float glideTime, double sampleRate, int blockSize)
+{
+    struct Sound : public juce::SynthesiserSound
+    {
+        bool appliesToNote (int) override { return true; }
+        bool appliesToChannel (int) override { return true; }
+    };
+    IlanaSynth synth;
+    synth.addSound (new Sound());
+    synth.addVoice (new Voice());
+    synth.setCurrentPlaybackSampleRate (sampleRate);
+    VoiceParams params;
+    params.glideTime = glideTime;
+    auto* voice = static_cast<Voice*> (synth.getVoice (0));
+    voice->setParams (params);
+
+    juce::AudioBuffer<float> buffer (2, juce::jmax (16, blockSize));
+    juce::MidiBuffer none;
+    synth.noteOn (1, 48, 0.8f);
+    synth.renderNextBlock (buffer, none, 0, 16);
+    synth.noteOff (1, 48, 0.0f, false); // free, still at its pitch: the next note glides from there
+    synth.noteOn (1, 60, 0.8f);
+    const auto from = juce::MidiMessage::getMidiNoteInHertz (48), to = juce::MidiMessage::getMidiNoteInHertz (60);
+    for (int done = 0; done < (int) (sampleRate * 4.0 * glideTime) + blockSize;)
+    {
+        buffer.clear();
+        synth.renderNextBlock (buffer, none, 0, blockSize);
+        done += blockSize;
+        if ((voice->getCurrentFrequency() - to) / (from - to) <= std::exp (-1.0))
+            return done / sampleRate;
+    }
+    return -1.0;
+}
+
+void runGlideTimeTest()
+{
+    for (const auto glide : { 0.015f, 0.05f, 0.3f })
+    {
+        const auto measured = measureGlideTime (glide, 48000.0, 16);
+        check (std::abs (measured - glide) < 0.05 * glide + 16.0 / 48000.0,
+               "GLIDE " + juce::String (glide * 1000.0f) + " ms takes its time (" + juce::String (measured * 1000.0, 1) + " ms)");
+    }
+    // The same whatever the host's blocks (a MIDI event splits one): each
+    // sub-block steps by the samples it runs, not a whole 16.
+    const auto reference = measureGlideTime (0.05f, 48000.0, 16);
+    for (const auto blockSize : { 1, 7, 24, 512 })
+    {
+        const auto measured = measureGlideTime (0.05f, 48000.0, blockSize);
+        check (std::abs (measured - reference) < 0.02 * reference + (double) blockSize / 48000.0,
+               "GLIDE's time does not depend on the block size (" + juce::String (blockSize) + ": " + juce::String (measured * 1000.0, 1)
+                   + " ms against " + juce::String (reference * 1000.0, 1) + ")");
+    }
+}
+
+void runGlideMigrationTest()
+{
+    const auto near = [] (float a, float b) { return std::abs (a - b) < 1.0e-4f * juce::jmax (1.0f, std::abs (b)); };
+    const auto glideDst = (float) Mod::destinationForParamId ("glide");
+    const auto cutoffDst = (float) (int) Mod::Destination::Filter1Cutoff;
+    {
+        std::map<juce::String, float> values { { "glide", 0.01f }, { "mod1_dst", glideDst }, { "mod1_amt", 0.3f },
+                                               { "mod2_dst", cutoffDst }, { "mod2_amt", 0.3f } };
+        const auto get = [&values] (const juce::String& id, float fallback)
+        {
+            const auto found = values.find (id);
+            return found != values.end() ? found->second : fallback;
+        };
+        const auto set = [&values] (const juce::String& id, float value) { values[id] = value; };
+        check (IlanaSynthAudioProcessor::migrateGlideTime (get, set) == 2 && near (values["glide"], 0.16f)
+                   && near (values["mod1_amt"], 0.3f * std::pow (16.0f, 0.13f)) && near (values["mod2_amt"], 0.3f),
+               "glide migration: GLIDE x16, a route into it scaled by 16^skew, other routes alone");
+
+        // The route reaches as far in seconds: old base + route, x16, is the new base + route.
+        IlanaSynthAudioProcessor p;
+        auto* parameter = dynamic_cast<juce::RangedAudioParameter*> (p.apvts.getParameter ("glide"));
+        const auto oldAt = parameter->convertFrom0to1 (parameter->convertTo0to1 (0.01f) + 0.3f);
+        const auto newAt = parameter->convertFrom0to1 (parameter->convertTo0to1 (values["glide"]) + values["mod1_amt"]);
+        check (std::abs (newAt - 16.0f * oldAt) < 1.0e-3f * newAt,
+               "glide migration: a route into GLIDE reaches 16 times as far (" + juce::String (oldAt, 4) + " -> " + juce::String (newAt, 4) + " s)");
+
+        std::map<juce::String, float> off { { "glide", 0.0005f } }, slow { { "glide", 0.2f } };
+        IlanaSynthAudioProcessor::migrateGlideTime ([&off] (const juce::String& id, float f) { return off.count (id) ? off[id] : f; },
+                                                    [&off] (const juce::String& id, float v) { off[id] = v; });
+        IlanaSynthAudioProcessor::migrateGlideTime ([&slow] (const juce::String& id, float f) { return slow.count (id) ? slow[id] : f; },
+                                                    [&slow] (const juce::String& id, float v) { slow[id] = v; });
+        check (off["glide"] == 0.0005f && slow["glide"] == 2.0f, "glide migration: 1 ms or less stays off, past 125 ms stops at the knob's 2 s");
+    }
+
+    // Through a saved patch: once for a patch from before, never twice.
+    IlanaSynthAudioProcessor source;
+    auto* glide = dynamic_cast<juce::RangedAudioParameter*> (source.apvts.getParameter ("glide"));
+    glide->setValueNotifyingHost (glide->convertTo0to1 (0.01f));
+    const auto savedGlide = source.apvts.getRawParameterValue ("glide")->load();
+    auto state = source.captureWholePatch();
+    IlanaSynthAudioProcessor current;
+    current.restoreWholePatch (state);
+    check (current.apvts.getRawParameterValue ("glide")->load() == savedGlide, "glide migration: a patch saved since loads as it is");
+    state.removeProperty ("glideSchema", nullptr);
+    IlanaSynthAudioProcessor old;
+    old.restoreWholePatch (state);
+    const auto migrated = old.apvts.getRawParameterValue ("glide")->load();
+    check (near (migrated, 16.0f * savedGlide), "glide migration: an older patch loads GLIDE x16 (" + juce::String (migrated, 4) + " s)");
+    IlanaSynthAudioProcessor again;
+    again.restoreWholePatch (old.captureWholePatch());
+    check (again.apvts.getRawParameterValue ("glide")->load() == migrated, "glide migration: saved again, not scaled twice");
+
+    // The factory presets: x16 too. Those that hit the knob's end (their
+    // glide is shorter than before) are listed.
+    juce::StringArray clamped;
+    const auto names = old.getFactoryPresetNames();
+    for (int index = 0; index < names.size(); ++index)
+    {
+        old.loadFactoryPreset (index);
+        if (old.apvts.getRawParameterValue ("glide")->load() >= 1.999f)
+            clamped.add (names[index]);
+    }
+    std::cout << "  factory presets whose GLIDE stops at 2 s: " << (clamped.isEmpty() ? juce::String ("none") : clamped.joinIntoString (", ")) << std::endl;
+}
+
+// A big chord over full voices: the steals past the spares wait for their
+// voice's 8 ms fade instead of cutting it dead (a click), then all play.
+void runStealPastSparesTest()
+{
+    struct Sound : public juce::SynthesiserSound
+    {
+        bool appliesToNote (int) override { return true; }
+        bool appliesToChannel (int) override { return true; }
+    };
+    IlanaSynth synth;
+    synth.addSound (new Sound());
+    for (int i = 0; i < 40; ++i)
+        synth.addVoice (new Voice());
+    synth.setSpareVoices (8);
+    synth.setVoiceMode (IlanaSynth::Mode::Poly, 32, false);
+    synth.setCurrentPlaybackSampleRate (48000.0);
+    VoiceParams params;
+    for (int i = 0; i < synth.getNumVoices(); ++i)
+        static_cast<Voice*> (synth.getVoice (i))->setParams (params);
+
+    juce::AudioBuffer<float> buffer (2, 512);
+    juce::MidiBuffer none;
+    for (int note = 30; note < 62; ++note)
+        synth.noteOn (1, note, 0.8f);
+    synth.renderNextBlock (buffer, none, 0, 512);
+
+    const auto count = [&synth] (bool fading)
+    {
+        auto n = 0;
+        for (int i = 0; i < synth.getNumVoices(); ++i)
+            if (const auto* v = static_cast<Voice*> (synth.getVoice (i)); v->isVoiceActive() && v->isFadingOut() == fading)
+                ++n;
+        return n;
+    };
+    for (int note = 70; note < 82; ++note) // 12 steals, 8 spares
+        synth.noteOn (1, note, 0.8f);
+    check (count (true) == 12 && count (false) == 28,
+           "a 12-note chord over 32 voices: 12 fade, the 4 past the spares wait (" + juce::String (count (true)) + " fading, "
+               + juce::String (count (false)) + " playing)");
+    for (int block = 0; block < 4; ++block)
+    {
+        buffer.clear();
+        synth.renderNextBlock (buffer, none, 0, 128);
+    }
+    auto newNotes = 0;
+    for (int i = 0; i < synth.getNumVoices(); ++i)
+        if (const auto* v = synth.getVoice (i); v->isVoiceActive() && v->getCurrentlyPlayingNote() >= 70)
+            ++newNotes;
+    check (newNotes == 12 && count (false) == 32 && count (true) == 0,
+           "after the fades every note of the chord plays (" + juce::String (newNotes) + " of 12)");
+}
+
+// Knobs the processor sends once a block (FM, ring, cutoff, reso, drive,
+// pan) ease across the next block instead of stepping; held still they
+// render exactly as before.
+void runBlockGlideTest()
+{
+    struct Sound : public juce::SynthesiserSound
+    {
+        bool appliesToNote (int) override { return true; }
+        bool appliesToChannel (int) override { return true; }
+    };
+    struct One
+    {
+        IlanaSynth synth;
+        One()
+        {
+            synth.addSound (new Sound());
+            synth.addVoice (new Voice());
+            synth.setCurrentPlaybackSampleRate (48000.0);
+        }
+        Voice& voice() { return *static_cast<Voice*> (synth.getVoice (0)); }
+        void render (juce::AudioBuffer<float>& buffer)
+        {
+            buffer.clear();
+            synth.renderNextBlock (buffer, juce::MidiBuffer(), 0, buffer.getNumSamples());
+        }
+    };
+
+    VoiceParams params;
+    params.oscillatorEnabled[2] = false;
+    params.oscillators[0].pan = -1.0f;
+    params.filter1.cutoffHz = 2000.0f;
+    params.fmAmount = 0.2f;
+
+    // Held still: the same samples whether the knobs arrive every block or once.
+    {
+        One once, every;
+        once.voice().setParams (params);
+        every.voice().setParams (params);
+        once.synth.noteOn (1, 60, 0.8f);
+        every.synth.noteOn (1, 60, 0.8f);
+        juce::AudioBuffer<float> a (2, 512), b (2, 512);
+        auto same = true;
+        for (int block = 0; block < 8; ++block)
+        {
+            every.voice().setParams (params);
+            once.render (a);
+            every.render (b);
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < 512; ++i)
+                    same = same && a.getSample (ch, i) == b.getSample (ch, i);
+        }
+        check (same, "knobs held still render bit for bit the same, sent every block or once");
+    }
+
+    // PAN from hard left to hard right between blocks: the left side fades
+    // across the block instead of dropping at its start.
+    One one;
+    one.voice().setParams (params);
+    one.synth.noteOn (1, 60, 0.8f);
+    juce::AudioBuffer<float> buffer (2, 512);
+    for (int block = 0; block < 4; ++block)
+        one.render (buffer);
+    params.oscillators[0].pan = 1.0f;
+    one.voice().setParams (params);
+    one.render (buffer);
+    auto between = 0;
+    for (int window = 0; window < 8; ++window)
+    {
+        const auto l = buffer.getRMSLevel (0, window * 64, 64), r = buffer.getRMSLevel (1, window * 64, 64);
+        const auto share = l / juce::jmax (1.0e-9f, l + r);
+        if (share > 0.1f && share < 0.9f)
+            ++between;
+    }
+    check (between >= 3, "a PAN change eases across the block (" + juce::String (between) + " of 8 windows between the sides)");
+}
+
 void runTests()
 {
     timedRun ("Polish::runControllerSeedTest", [] { runControllerSeedTest(); });
@@ -1312,6 +1563,10 @@ void runTests()
     timedRun ("Polish::runRedundantKnobsMigrationTest", [] { runRedundantKnobsMigrationTest(); });
     timedRun ("Polish::runModDepthRangeTest", [] { runModDepthRangeTest(); });
     timedRun ("Polish::runFilterEnvVelocityTest", [] { runFilterEnvVelocityTest(); });
+    timedRun ("Polish::runGlideTimeTest", [] { runGlideTimeTest(); });
+    timedRun ("Polish::runStealPastSparesTest", [] { runStealPastSparesTest(); });
+    timedRun ("Polish::runBlockGlideTest", [] { runBlockGlideTest(); });
+    timedRun ("Polish::runGlideMigrationTest", [] { runGlideMigrationTest(); });
 }
 } // namespace Polish
 

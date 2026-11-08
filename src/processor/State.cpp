@@ -9,7 +9,7 @@ namespace
     constexpr SavedSchema savedSchemas[] = {
         { "osc3Schema", 2 }, { "grainPosSchema", 2 }, { "lorenzSchema", 2 }, { "stringSchema", 2 },
         { "redundantKnobsSchema", 2 }, { "modRangeSchema", 2 }, { "destSchema", 2 }, { "tableSchema", 4 },
-        { "boardMixSchema", 3 },
+        { "boardMixSchema", 3 }, { "glideSchema", 2 },
     };
 
     bool savedByNewerBuild (const juce::ValueTree& state)
@@ -1591,6 +1591,29 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
                                   if (auto child = find (id); child.isValid())
                                       child.setProperty ("value", value, nullptr);
                               });
+    }
+
+    // A patch saved while GLIDE took 16 times its knob's time glides as it did.
+    if ((int) state.getProperty ("glideSchema", 1) < 2)
+    {
+        const auto find = [&state] (const juce::String& id)
+        {
+            for (int i = 0; i < state.getNumChildren(); ++i)
+                if (state.getChild (i).getProperty ("id").toString() == id)
+                    return state.getChild (i);
+            return juce::ValueTree();
+        };
+        migrateGlideTime ([&find] (const juce::String& id, float fallback)
+                          {
+                              const auto child = find (id);
+                              return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
+                          },
+                          [&find] (const juce::String& id, float value)
+                          {
+                              if (auto child = find (id); child.isValid())
+                                  child.setProperty ("value", value, nullptr);
+                          });
+        state.setProperty ("glideSchema", 2, nullptr);
     }
 
     apvts.replaceState (state);
