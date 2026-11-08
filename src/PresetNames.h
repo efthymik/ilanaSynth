@@ -121,7 +121,9 @@ inline juce::String currentPresetName (const juce::String& name)
         { "Vocal Chops", "Vocal Stutter" }, { "Self Osc Drone", "Self-Osc Drone" },
         { "Formant Scream II", "Formant Scream" }, { "Glass Keys", "Crystal Keys" },
         { "Hypersaw Pad", "Supersaw Pad" }, { "Hypersaw Pluck", "Supersaw Pluck" },
-        { "Hypersaw Stab", "Supersaw Stab" }
+        { "Hypersaw Stab", "Supersaw Stab" },
+        // Blind-spots review (2026-11-08): next to Ring Lead, and a DSP word.
+        { "Rig Lead", "Amp Solo Lead" }, { "Product Supersaw", "Folded Supersaw" }
     };
 
     for (const auto& [before, after] : renamed)
@@ -132,14 +134,15 @@ inline juce::String currentPresetName (const juce::String& name)
 }
 
 // The settings keys that name presets (favourites "fav_<name>" and the
-// recent list), moved once from the old names to the new.
-inline void migrateRenamedPresetSettings (juce::PropertiesFile* settings)
+// recent list), moved once from the old names to the new: one round of
+// renames under each flag.
+inline void migrateRenamedPresetSettings (juce::PropertiesFile* settings, const char* flag,
+                                          std::initializer_list<const char*> renamedFrom)
 {
-    if (settings == nullptr || settings->getBoolValue ("presetRenames13", false))
+    if (settings == nullptr || settings->getBoolValue (flag, false))
         return;
 
-    for (const auto* before : { "Vocal Chops", "Self Osc Drone", "Formant Scream II", "Glass Keys",
-                                "Hypersaw Pad", "Hypersaw Pluck", "Hypersaw Stab" })
+    for (const auto* before : renamedFrom)
     {
         const auto key = "fav_" + juce::String (before);
         if (settings->containsKey (key))
@@ -155,7 +158,15 @@ inline void migrateRenamedPresetSettings (juce::PropertiesFile* settings)
     recent.removeDuplicates (false);
     recent.removeEmptyStrings();
     settings->setValue ("presetRecent", recent.joinIntoString ("\n"));
-    settings->setValue ("presetRenames13", true);
+    settings->setValue (flag, true);
     settings->saveIfNeeded();
+}
+
+inline void migrateRenamedPresetSettings (juce::PropertiesFile* settings)
+{
+    migrateRenamedPresetSettings (settings, "presetRenames13", { "Vocal Chops", "Self Osc Drone", "Formant Scream II", "Glass Keys",
+                                                                 "Hypersaw Pad", "Hypersaw Pluck", "Hypersaw Stab" });
+    // Blind-spots review, 2026-11-08.
+    migrateRenamedPresetSettings (settings, "presetRenames14", { "Rig Lead", "Product Supersaw" });
 }
 } // namespace Presets

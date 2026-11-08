@@ -358,15 +358,17 @@ public:
         return mod (source, Target (destination, amount), curveAmount, via);
     }
 
+    // Macros 1-8 (5-8 are the appended Macro 5..8 sources).
     Builder& macro (int index, const char* name, std::initializer_list<Target> targets, float curveAmount = 0.0f)
     {
-        if (preset.macroNames.size() < 4)
-            preset.macroNames.resize (4, nullptr);
+        index = juce::jlimit (1, Mod::numMacros, index);
+        if (preset.macroNames.size() < (size_t) juce::jmax (4, index))
+            preset.macroNames.resize ((size_t) juce::jmax (4, index), nullptr);
 
         preset.macroNames[(size_t) index - 1] = name;
 
         for (const auto& target : targets)
-            mod (M1 + index - 1, target, curveAmount);
+            mod ((int) Mod::macroSourceFor (index - 1), target, curveAmount);
 
         return *this;
     }
@@ -603,6 +605,7 @@ namespace Library
 #include "PresetPackIlana.h"
 #include "PresetPackSearch.h"
 #include "PresetPackRecipes.h"
+#include "PresetPackShowcase.h"
 
 // The owner's blind A/B marked these presets bad in both their old and new
 // form (2026-09-30): rebuilt from scratch (content/analysis/rebuild-8.md).
@@ -659,8 +662,8 @@ inline void rebuildLegacy (std::vector<FactoryPreset>& list)
               .gateSteps (D1_16, "9909900990990909", 0.25f, 0.0f, 0.45f)
               .delay (D1_8D, 0.35f, 0.2f, true).reverb (Plate, 0.35f, 0.12f));
 
-    // Rig Lead: a guitar-rig solo voice: tube amp, late vibrato, spring and echo.
-    swap (B ("Rig Lead", "Lead")
+    // Amp Solo Lead (was Rig Lead): a guitar-rig solo voice: tube amp, late vibrato, spring and echo.
+    swap (B ("Amp Solo Lead", "Lead")
               .osc1 (SoftSaw, 0.8f, 0.75f).unison (1, 2, 7.0f, 0.5f)
               .osc2 (SoftSquareT, 0.0f, 0.3f, -12)
               .filter1 (AwHolt, 1800.0f, 0.3f, 1.5f, 1.5f, 0.5f).morph (1, 0.4f)
@@ -671,7 +674,7 @@ inline void rebuildLegacy (std::vector<FactoryPreset>& list)
               .mod (Lfo1, Target (D::Osc1Pitch, 0.015f), 0.0f, M3).mod (Lfo1, Target (D::Osc2Pitch, 0.015f), 0.0f, M3)
               .legato (0.05f).bend (2.0f)
               .macro (1, "DRIVE", { { param ("fx_amp_drive"), 0.5f }, { D::Filter1Drive, 0.2f } })
-              .macro (2, "TONE", { { D::Filter1Cutoff, 0.6f }, { param ("fx_amp_treble"), 0.4f } })
+              .macro (2, "TONE", { { D::Filter1Cutoff, 0.8f }, { param ("fx_amp_treble"), 0.6f } })
               .macro (3, "VIBRATO", {})
               .macro (4, "SPACE", { { D::FxDelayMix, 0.3f }, { D::FxReverbMix, 0.3f } })
               .fx ({ FxAmp, FxDelay, FxReverb, FxLimiter })
@@ -1190,7 +1193,7 @@ inline std::vector<FactoryPreset> build()
              .lfo (2, Tri, 0.25f).mod (Lfo2, D::Osc1Frame, 0.25f)
              .macro (1, "OCTAVES", { { D::Osc1Blend, 0.3f }, { D::Osc2Level, 0.4f } })
              .macro (2, "SCREAM", { { D::FxDriveAmount, 0.5f }, { D::Filter1Drive, 0.3f } })
-             .macro (3, "TONE", { { D::Filter1Cutoff, 0.4f }, { D::Filter1Morph, 0.3f } })
+             .macro (3, "TONE", { { D::Filter1Cutoff, 0.7f }, { D::Filter1Morph, 0.5f } })
              .macro (4, "SPACE", { { D::FxDelayMix, 0.3f }, { D::FxReverbMix, 0.3f } })
              .fx ({ FxEq, FxDrive, FxAirwindows, FxDelay, FxReverb, FxLimiter })
              .eq (-4.0f, 900.0f, 5.0f, -1.0f, 140.0f, 6000.0f, 0.8f).driveFx (3.0f, 0.75f)
@@ -2122,7 +2125,7 @@ inline std::vector<FactoryPreset> build()
              .fenv (2.0f, 2.0f, 0.5f, 2.0f, 0.5f).amp (1.0f, 1.0f, 0.9f, 2.5f)
              .macro (1, "CUTOFF", { { D::Filter1Cutoff, 0.4f } })
              .macro (2, "SWELL", { { D::FeAttack, 0.4f } })
-             .macro (3, "RESO", { { D::Filter1Reso, 0.3f } })
+             .macro (3, "DRIVE", { { D::Filter1Drive, 0.8f }, { D::Osc2Level, 0.3f } })
              .macro (4, "SPACE", { { D::FxReverbMix, 0.3f } })
              .fx ({ FxChorus, FxReverb }).chorus (0.3f, 0.3f, 0.3f).reverb (Hall, 0.8f, 0.3f));
 
@@ -2424,9 +2427,9 @@ inline std::vector<FactoryPreset> build()
              .lfo (2, SmoothRandom, 0.3f).mod (Lfo2, D::Osc2Frame, 0.4f)
              .filter1 (LP, 1800.0f, 0.4f, 0.0f, 1.3f, 0.3f)
              .amp (0.9f, 1.5f, 0.85f, 2.0f)
-             .macro (1, "CHAOS", { { D::Lfo1Rate, 0.4f } })
+             .macro (1, "CHAOS", { { D::Lfo1Rate, 0.7f }, { D::Lfo2Rate, 0.5f }, { D::Osc2Frame, 0.3f } })
              .macro (2, "CUTOFF", { { D::Filter1Cutoff, 0.4f } })
-             .macro (3, "RESO", { { D::Filter1Reso, 0.35f } })
+             .macro (3, "RESO", { { D::Filter1Reso, 0.55f }, { D::Filter1Drive, 0.4f } })
              .macro (4, "SPACE", { { D::FxReverbMix, 0.35f } })
              .fx ({ FxPhaser, FxReverb }).phaser (0.2f, 0.5f, 0.4f, 0.3f).reverb (Hall, 0.8f, 0.3f));
 
@@ -2900,6 +2903,9 @@ inline std::vector<FactoryPreset> buildLaterPacks()
     // frames, envelopes and velocity on timbre, per-note random), baked by
     // tools/preset_gen.py bake --pack src/PresetPackRecipes.h --only ...
     addRecipePresets (add);
+
+    // The showcase pack: unplayed features and missing archetypes (blind-spots review).
+    addShowcasePresets (add);
 
     return list;
 }

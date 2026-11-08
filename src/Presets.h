@@ -579,7 +579,7 @@ inline const std::vector<FactoryPreset>& getLegacyPresets()
             { "fx_reverb_on", 1 }, { "fx_reverb_size", 0.9f }, { "fx_reverb_mix", 0.4f },
         } },
 
-        { "Rig Lead", {} }, // rebuilt in PresetLibrary.h (rebuildLegacy)
+        { "Amp Solo Lead", {} }, // rebuilt in PresetLibrary.h (rebuildLegacy)
 
         { "Shimmer Pad", {
             { "osc1_table", 10 }, { "osc1_frame", 0.3f }, { "osc1_level", 0.7f },

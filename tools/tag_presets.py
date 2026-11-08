@@ -34,27 +34,32 @@ VOCABULARY = [
     "Wide", "Spacious", "Echo", "Mono",
     # filler
     "Wavetable", "80s",
+    # where it comes from
+    "From Ilana",
 ]
+
+# ilana's packs: their presets carry "From Ilana" (always kept, as "80s" is on a DX7 voice).
+ILANA_PACKS = ["src/PresetPackIlana.h", "src/PresetPackSearch.h", "src/PresetPackRecipes.h"]
 
 # Name keywords (whole words or word starts, case-insensitive).
 NAME_TAGS = [
     ("E-Piano", r"e\.? ?piano|epiano|e-piano|rhodes|wurl|\btine|\bep\b|dx ?ep"),
-    ("Piano", r"piano|\bgrand\b|upright|honky"),
+    ("Piano", r"piano|\bgrand\b|upright|honky|hammer board"),
     ("Organ", r"organ|drawbar|\bb-?3\b|church|harmonium|calliope"),
     ("Clav", r"\bclav|harpsi"),
-    ("Bell", r"bell|chime|gong|\btubular"),
+    ("Bell", r"bell|chime|gong|\btubular|clang"),
     ("Mallet", r"marimba|vibe|vibra|xylo|glock|kalimba|celest|steel ?drum|mallet|\bmbira"),
-    ("Strings", r"string|violin|viola|cello|orch|ensemble|pizz|\bbowed"),
+    ("Strings", r"string|violin|viola|cello|orch|ensemble|pizz|\bbowed|fiddle"),
     ("Brass", r"brass|horn|trumpet|trombone|\btuba|\bbrs\b"),
     ("Woodwind", r"flute|clarinet|oboe|\bsax|bassoon|\breed|whis|ocarina|recorder|\bpan ?pipe|shakuhachi|harmonica"),
-    ("Vocal", r"choir|\bvox|voice|vocal|\bahh|\booh|formant|chant"),
-    ("Guitar", r"guitar|\bguit|\bgtr|banjo|mandolin|\bfunk ?gtr|\bpicked"),
-    ("Harp", r"\bharp\b|\bharp "),
+    ("Vocal", r"choir|\bvox|voice|vocal|\bahh|\booh|formant|chant|vowel|\btalk|speech"),
+    ("Guitar", r"guitar|\bguit|\bgtr|banjo|mandolin|\bfunk ?gtr|\bpicked|\blute"),
+    ("Harp", r"\bharp\b|\bharp |zither"),
     ("World", r"sitar|koto|shamisen|bouzouki|\btabla|\bshaku|gamelan|\bbalaf"),
     ("Percussion", r"\bdrum|\bdrm|\bkick|snar|\bhat\b|\bhats\b|\btom\b|\btoms\b|\bperc|\bclap|cymbal|conga|bongo|timpani|cowbell|\bwood ?block|\brim"),
     ("Chiptune", r"chip|8-?bit|retro|arcade|\bnes\b"),
-    ("Sweep", r"sweep|riser|\brise|\bfall|swoosh|\bzap|laser|\bwhoosh"),
-    ("Noise", r"noise|\bwind\b|ocean|\brain\b|\bsurf\b|static|\bdust"),
+    ("Sweep", r"sweep|riser|\brise|\bfall|swoosh|\bzap|laser|\bwhoosh|siren|lifter"),
+    ("Noise", r"noise|\bwind\b|ocean|\brain\b|\bsurf\b|static|\bdust|\bradio"),
     ("Acid", r"\bacid|\b303|squelch"),
     ("Supersaw", r"supersaw|hypersaw|\btrance"),
     ("Metallic", r"metal|clang|\bgong|anvil"),
@@ -77,7 +82,7 @@ def fx_slots(params):
     return {int(params[k]) for k in params if re.fullmatch(r"fx_slot\d+", k)}
 
 
-def tags_for(preset, print_row):
+def tags_for(preset, print_row, from_ilana=False):
     name = preset["name"]
     params = preset["params"]
     category = preset["category"]
@@ -110,7 +115,9 @@ def tags_for(preset, print_row):
     if reso >= 0.6 and env >= 2.0 and (glide > 0.0 or int(get("voice_mode")) > 0):
         add("Acid")
     if get("osc1_unison", 1) >= 5 or get("osc2_unison", 1) >= 5:
-        add("Supersaw" if int(get("osc1_table")) in (0, 1, 110) or "saw" in lower else "Detuned")
+        # (A Physical or Sample OSC 1 keeps table 0 too: only a wavetable one is a supersaw.)
+        wavetable = int(get("osc1_mode")) == 0
+        add("Supersaw" if wavetable and (int(get("osc1_table")) in (0, 1, 110) or "saw" in lower) else "Detuned")
     elif get("osc1_unison", 1) >= 3 and get("osc1_detune", 15) >= 8:
         add("Detuned")
     if get("ring_mod") > 0.2 or FX["RingMod"] in slots or FX["Comb"] in slots and "Bell" in found:
@@ -156,10 +163,14 @@ def tags_for(preset, print_row):
     if 3 in modes or "osc1_grain_size" in params or re.search(r"grain|granular", lower):
         add("Granular")
 
-    # Tone, from the rendered brightness.
+    # Tone, from the rendered brightness. Warm is a band of its own, not
+    # whatever is neither bright nor dark (it was on 61 % of the library);
+    # between Warm and Bright a sound gets no tone tag.
     centroid = print_row.get("centroid") if print_row else None
     if centroid is not None:
-        add("Bright" if centroid >= 2600 else "Dark" if centroid <= 550 else "Warm")
+        tone = tone_tag(centroid)
+        if tone:
+            add(tone)
 
     # Shape: the amp envelope, or for a DX7 voice the carriers' envelopes.
     if dx7:
@@ -190,8 +201,31 @@ def tags_for(preset, print_row):
 
     # Rank by the vocabulary's order, keep at most six; a sound with fewer
     # than three already has tone and shape, the engine fills the third.
+    # The markers at the end ("80s" on a DX7 voice, "From Ilana") always stay.
+    # (A sound with too few tags takes the nearer tone after all.)
+    if len(found) < 3 and centroid is not None and not {"Bright", "Dark", "Warm"} & set(found):
+        add("Warm" if centroid < 1900 else "Bright")
     found.sort(key=VOCABULARY.index)
-    return found[:6]
+    markers = (["80s"] if dx7 else []) + (["From Ilana"] if from_ilana else [])
+    return cap(found, markers)
+
+
+def tone_tag(centroid):
+    return "Bright" if centroid >= 2400 else "Dark" if centroid <= 700 else "Warm" if centroid <= 1400 else ""
+
+
+def cap(found, markers, most=6):
+    """At most six tags, in vocabulary order, with the markers kept."""
+    rest = [t for t in found if t not in markers]
+    return rest[:most - len(markers)] + markers
+
+
+def ilana_names(root):
+    names = set()
+    for path in ILANA_PACKS:
+        text = open(root + "/" + path, encoding="utf-8").read()
+        names |= set(re.findall(r'(?:FactoryPreset p \{ |B \()"((?:[^"\\]|\\.)*)"', text))
+    return names
 
 
 def main():
@@ -205,12 +239,14 @@ def main():
         for row in csv.DictReader(handle):
             prints[row["name"]] = {"centroid": float(row["centroid_hz"]), "side": float(row["side_ratio"])}
 
+    root = __file__.rsplit("/tools/", 1)[0] if "/tools/" in __file__ else "."
+    ilana = ilana_names(root)
     rows, seen = [], set()
     for preset in presets:
         if preset["name"] in seen:
             continue
         seen.add(preset["name"])
-        tags = tags_for(preset, prints.get(preset["name"]))
+        tags = tags_for(preset, prints.get(preset["name"]), preset["name"] in ilana)
         if not 3 <= len(tags) <= 6:
             print(f"warning: {preset['name']} has {len(tags)} tags: {tags}", file=sys.stderr)
         rows.append((preset["name"], tags))

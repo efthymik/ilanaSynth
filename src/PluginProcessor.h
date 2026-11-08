@@ -300,7 +300,7 @@ public:
     // from user preset files for the browser. Message thread only.
     static juce::StringArray getPresetCategoryChoices()
     {
-        return { "Bass", "Lead", "Brass", "Wind", "Pluck", "Pad", "Keys", "Chords", "Arp", "Drone", "FX", "Other" };
+        return { "Bass", "Lead", "Brass", "Wind", "Pluck", "Pad", "Keys", "Chords", "Arp", "Drone", "FX", "Generative", "Drums", "FX Input", "Other" };
     }
 
     void setPresetMeta (const juce::String& category, const juce::String& tags)
@@ -365,6 +365,12 @@ public:
     // drive, space), chosen from what the patch uses. Silent at macro 0.
     // Macros marked in keep (the preset voicing's own) are left alone.
     void applyDefaultMacros (const std::array<bool, 4>& keep = {});
+    // A factory preset that routes neither the mod wheel nor aftertouch gets
+    // one route each, chosen by category. Silent until they are touched.
+    void applyDefaultExpression (const char* presetName, const juce::String& category);
+    // Plucks, keys, basses and leads with no velocity on their timbre get a
+    // steep velocity route to FILTER 1's cutoff (bright on hard hits).
+    void applyDefaultVelocity (const char* presetName, const juce::String& category);
 
     static void migrateLegacyOsc3 (const std::function<float (const juce::String&, float)>& get,
                                    const std::function<void (const juce::String&, float)>& set);
