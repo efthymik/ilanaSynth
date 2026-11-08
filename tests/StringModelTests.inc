@@ -219,7 +219,7 @@ void runPhysicalStringTest()
 // A plucked string's upper partials and the RES resonator ring as long at
 // 96 and 192 kHz (or with OVERSAMPLE) as at 48 kHz: their loop low-passes
 // run once a sample, and used to keep their per-sample pole, so a 96 kHz
-// string rang about twice as long at 2-4 kHz.
+// string rang about twice as long at 2-4 kHz. Then RES's tuning.
 void runLoopDecayAcrossRatesTest()
 {
     // dB lost per second by the partial at hz, between two 0.1 s windows.
@@ -281,6 +281,38 @@ void runLoopDecayAcrossRatesTest()
         check (std::abs (resRate / res48 - 1.0) < 0.2,
                "RES at 4.18 kHz decays as fast at " + juce::String (rate / 1000.0, 0) + " kHz as at 48 ("
                    + juce::String (resRate, 1) + " against " + juce::String (res48, 1) + " dB/s)");
+    }
+
+    // RES in tune: its loop low-pass's phase delay is taken off the line
+    // (it sat 15 cents flat at 880 Hz, 48 kHz). The 880 Hz line's peak.
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    {
+        ResonatorBank bank;
+        bank.prepare (rate);
+        bank.setTuning (880.0, 0.0f, 1.0f);
+        bank.setParams (1.0f, 1.0f, 0.35f);
+        std::vector<float> samples ((size_t) (rate * 0.3));
+        for (size_t i = 0; i < samples.size(); ++i)
+            samples[i] = bank.process (i == 0 ? 1.0f : 0.0f);
+        auto best = 0.0, peak = 0.0;
+        for (auto hz = 860.0; hz <= 900.0; hz += 0.1)
+        {
+            double real = 0.0, imaginary = 0.0;
+            for (size_t i = 0; i < samples.size(); ++i)
+            {
+                const auto angle = juce::MathConstants<double>::twoPi * hz * (double) i / rate;
+                real += (double) samples[i] * std::cos (angle);
+                imaginary += (double) samples[i] * std::sin (angle);
+            }
+            if (real * real + imaginary * imaginary > best)
+            {
+                best = real * real + imaginary * imaginary;
+                peak = hz;
+            }
+        }
+        const auto cents = 1200.0 * std::log2 (peak / 880.0);
+        check (std::abs (cents) < 2.0, "RES 880 Hz line in tune at " + juce::String (rate / 1000.0, 1) + " kHz ("
+                                           + juce::String (cents, 2) + " cents)");
     }
 }
 
