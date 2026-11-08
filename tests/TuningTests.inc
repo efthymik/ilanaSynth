@@ -2,6 +2,8 @@
 // TableTest.cpp; ILANA_TUNING_TEST=1 runs these alone.
 
 #include "dsp/Tuning.h"
+#include "MtsEsp.h"
+#include "PresetNames.h"
 
 namespace TuningTests
 {
@@ -307,10 +309,50 @@ void runProcessorTests()
         check (play (onEmpty, 57, 0.5) == a, "tuning: on with no scale loaded renders as 12-TET");
     }
 }
+
+// Renamed presets in the settings file (favourites and the recent list move once), and the MTS-ESP client
+// with no master in the session (the usual case): it must say so and change nothing.
+void runSettingsAndMtsTests()
+{
+    {
+        const auto file = juce::File::createTempFile (".settings");
+        {
+            juce::PropertiesFile settings (file, juce::PropertiesFile::Options());
+            settings.setValue ("fav_Vocal Chops", true);
+            settings.setValue ("fav_Basic Saw", true);
+            settings.setValue ("presetRecent", "Glass Keys\nBasic Saw\nCrystal Keys\nHypersaw Pad");
+            Presets::migrateRenamedPresetSettings (&settings);
+
+            check (! settings.containsKey ("fav_Vocal Chops") && settings.getBoolValue ("fav_Vocal Stutter", false),
+                   "settings: a favourite follows its preset's new name");
+            check (settings.getBoolValue ("fav_Basic Saw", false), "settings: other favourites stay");
+            check (settings.getValue ("presetRecent") == "Crystal Keys\nBasic Saw\nSupersaw Pad",
+                   "settings: the recent list is renamed, in order, without duplicates");
+            check (settings.getBoolValue ("presetRenames13", false), "settings: the migration marks itself done");
+
+            // Done once: a later old-name entry is left alone, and nothing crashes.
+            settings.setValue ("fav_Vocal Chops", true);
+            Presets::migrateRenamedPresetSettings (&settings);
+            check (settings.containsKey ("fav_Vocal Chops"), "settings: the migration runs only once");
+            Presets::migrateRenamedPresetSettings (nullptr);
+        }
+        file.deleteFile();
+    }
+
+    {
+        MtsEspClient client;
+        check (! client.hasMaster(), "mts-esp: no master in the test session");
+        check (! client.shouldFilterNote (60) && ! client.shouldFilterNote (60, 3), "mts-esp: no master filters no note");
+        check (std::abs (client.noteToFrequency (69) - 440.0) < 0.01 && std::abs (client.noteToFrequency (57) - 220.0) < 0.01,
+               "mts-esp: with no master the frequency is 12-TET");
+        check (client.scaleName() != nullptr, "mts-esp: scale name is a valid string");
+    }
+}
 } // namespace TuningTests
 
 void runTuningTests()
 {
     TuningTests::runParserTests();
     TuningTests::runProcessorTests();
+    TuningTests::runSettingsAndMtsTests();
 }

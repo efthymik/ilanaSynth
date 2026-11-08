@@ -7643,6 +7643,39 @@ int runUiTests()
             expect (processor.getVectorShape() == VectorShape::triangle && processor.getVectorCorner (2) == 0,
                     "VECTOR off and on again keeps the shape and the corners");
         }
+        // The other counts: 2 gives the slider, 5 a pentagon, 6 a hexagon (corners in oscillator order); 4 keeps the square.
+        if (onSwitch != nullptr)
+        {
+            const auto setParamValue = [&processor] (const juce::String& id, float value)
+            {
+                if (auto* parameter = processor.apvts.getParameter (id))
+                    parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
+            };
+            const std::pair<int, int> cases[] { { 2, VectorShape::slider }, { 5, VectorShape::pentagon }, { 6, VectorShape::hexagon }, { 4, VectorShape::square } };
+            for (const auto& [count, shape] : cases)
+            {
+                for (int osc = 0; osc < OscillatorIds::count; ++osc)
+                {
+                    setParamValue (juce::String (OscillatorIds::prefixes[(size_t) osc]) + "_on", osc < count ? 1.0f : 0.0f);
+                    processor.setRevealed (IlanaSynthAudioProcessor::Module::Oscillator, osc, false);
+                }
+                setParamValue ("vec_on", 0.0f);
+                setParamValue ("vec_shape", (float) VectorShape::square);
+                for (int corner = 0; corner < 4; ++corner)
+                    setParamValue (juce::String ("vec_") + juce::String::charToString ((juce::juce_wchar) ('a' + corner)), (float) corner);
+                settle (100);
+                int shown = 0;
+                for (int osc = 0; osc < OscillatorIds::count; ++osc)
+                    shown += processor.isOscillatorShown (osc) ? 1 : 0;
+                onSwitch->getButton().triggerClick();
+                settle (150);
+                auto cornersInOrder = true;
+                for (int corner = 0; corner < juce::jmin (count, processor.getVectorCornerCount()); ++corner)
+                    cornersInOrder = cornersInOrder && processor.getVectorCorner (corner) == corner;
+                expect (shown == count && processor.getVectorShape() == shape && cornersInOrder,
+                        "VECTOR on with " + juce::String (count) + " oscillators fits shape " + juce::String (shape) + " (got " + juce::String (processor.getVectorShape()) + ", " + juce::String (shown) + " shown)");
+            }
+        }
         processor.loadFactoryPreset (0);
         settle (100);
     }
