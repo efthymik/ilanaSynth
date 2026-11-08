@@ -354,6 +354,8 @@ struct Recorder
     void beginDraw (bool replace, int view, PushConstants pc)
     {
         const auto* target = targets.back();
+        if (! replace)
+            pc.flags |= 4;
         pc.targetSize[0] = (float) target->width;
         pc.targetSize[1] = (float) target->height;
 
@@ -638,18 +640,18 @@ struct SavedState final : public juce::RenderingHelpers::SavedStateBase<SavedSta
     void fillWithGradient (IteratorType& iter, juce::ColourGradient& gradient, const juce::AffineTransform& trans, bool isIdentity) const
     {
         juce::HeapBlock<juce::PixelARGB> table;
-        const auto numEntries = gradient.createLookupTable (trans, table);
-        if (numEntries <= 0)
+        const auto tableSize = gradient.createLookupTable (trans, table);
+        if (tableSize <= 0)
             return;
 
-        // The software renderer can read one entry past the table (index
-        // numEntries); give that entry the last colour.
+        // EdgeTableFillers::Gradient hands its pixel iterator one entry
+        // fewer than the table holds; indexes run 0..numEntries.
+        const auto numEntries = tableSize - 1;
         PushConstants pc;
         pc.lutOffset = (int32_t) recorder->lut.size();
         pc.lutEntries = numEntries;
-        for (int i = 0; i < numEntries; ++i)
+        for (int i = 0; i < tableSize; ++i)
             recorder->lut.push_back (table[i].getNativeARGB());
-        recorder->lut.push_back (table[numEntries - 1].getNativeARGB());
 
         if (gradient.isRadial)
         {
