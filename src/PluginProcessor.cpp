@@ -644,7 +644,8 @@ void IlanaSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     restoreSustainPedal();
     // MULTI-CORE: up to three more threads (the host runs its own too), with
     // buffers for a chunk at the highest oversampling.
-    synth.prepareVoiceThreads (juce::jlimit (0, 3, juce::SystemStats::getNumCpus() - 1), expectedBlockSize * 4);
+    synth.prepareVoiceThreads (juce::jlimit (0, 3, juce::SystemStats::getNumCpus() - 1), expectedBlockSize * 4,
+                               expectedBlockSize, sampleRate);
 
     scaledMidiBuffer.ensureSize (4096); // (a dense MPE block; sized like chunkMidi)
 
@@ -981,6 +982,9 @@ void IlanaSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     // callback: hosts reset MXCSR between calls (see docs/ROUTING-CPU.md).
     juce::ScopedNoDenormals noDenormals;
 
+    if (hostWorkgroupPending)
+        hostWorkgroupPending = ! synth.setVoiceThreadsWorkgroup (hostWorkgroup);
+
     const auto total = buffer.getNumSamples();
 
     if (total <= expectedBlockSize)
@@ -1002,6 +1006,14 @@ void IlanaSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     }
 
     mixSamplePreview (buffer);
+}
+
+// Called by the host on its audio thread (an AU's render context). The
+// voice threads join it as they next wake (stability review 1).
+void IlanaSynthAudioProcessor::audioWorkgroupContextChanged (const juce::AudioWorkgroup& workgroup)
+{
+    hostWorkgroup = workgroup;
+    hostWorkgroupPending = ! synth.setVoiceThreadsWorkgroup (hostWorkgroup);
 }
 
 void IlanaSynthAudioProcessor::mixSamplePreview (juce::AudioBuffer<float>& buffer) noexcept

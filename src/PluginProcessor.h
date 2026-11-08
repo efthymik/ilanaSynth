@@ -130,6 +130,8 @@ public:
     void releaseResources() override;
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
+    // macOS (AU): the host's audio workgroup, for the MULTI-CORE threads.
+    void audioWorkgroupContextChanged (const juce::AudioWorkgroup& workgroup) override;
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
@@ -1215,6 +1217,10 @@ private:
     ParamRef masterRef { "master" }, outputTrimRef { "output_trim" };
     ParamRef fxRoutingRef { "fx_routing" };
     ParamRef multiCoreRef { "multi_core" };
+    // The host's workgroup (audio thread only), still to reach the voice
+    // threads when they were busy taking the last one.
+    juce::AudioWorkgroup hostWorkgroup;
+    bool hostWorkgroupPending = false;
     ParamRef sustainVoicesRef { "sustain_voices" };
     ParamRef midiProgramChangeRef { "midi_program_change" }, msegLoopRef { "mseg_loop" };
     // The Airwindows category modules (FX types 32-41), one engine each;

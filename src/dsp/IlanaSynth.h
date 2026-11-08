@@ -219,13 +219,18 @@ public:
     // MULTI-CORE: the sounding voices of a sub-block render on several
     // cores (VoiceThreads), the same sound as one after another. Off the
     // audio thread: numWorkers extra threads (0: one core), buffers for
-    // sub-blocks of up to maxSamples.
-    void prepareVoiceThreads (int numWorkers, int maxSamples)
+    // sub-blocks of up to maxSamples (the threads' real-time budget is a
+    // host block of blockSamples at hostRate).
+    void prepareVoiceThreads (int numWorkers, int maxSamples, int blockSamples, double hostRate)
     {
         voiceThreads.prepare (numWorkers, voices.size(), maxSamples,
                               [this] (int voice, juce::AudioBuffer<float>& buffer, int start, int length)
-                              { voices.getUnchecked (voice)->renderNextBlock (buffer, start, length); });
+                              { voices.getUnchecked (voice)->renderNextBlock (buffer, start, length); },
+                              blockSamples, hostRate);
     }
+
+    // The host's audio workgroup for the voice threads (VoiceThreads::setWorkgroup).
+    bool setVoiceThreadsWorkgroup (const juce::AudioWorkgroup& workgroup) noexcept { return voiceThreads.setWorkgroup (workgroup); }
 
     void setVoiceThreadsEnabled (bool shouldUse) noexcept { useVoiceThreads = shouldUse; }
 

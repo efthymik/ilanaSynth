@@ -6,7 +6,6 @@
 #include <atomic>
 #include <functional>
 #include <memory>
-#include <thread>
 #include <vector>
 
 // Renders the sounding voices of one sub-block on several cores. Each voice
@@ -22,6 +21,19 @@
 // (a futex / WaitOnAddress, no mutex), and the audio thread renders voices
 // too, then waits (a short spin, then the same atomic wait) until the last
 // voice a worker took is done.
+//
+// The audio thread waits for the workers, so they run at audio priority
+// (stability review 1): real-time threads on the Mac and Linux, MMCSS "Pro
+// Audio" on Windows (as the host's own audio threads; JUCE's real-time
+// option there would raise the whole host process to REALTIME_PRIORITY_CLASS).
+// On the Mac they also join the host's audio workgroup when the host names
+// one (an AU's render context; setWorkgroup), so they share its deadline and
+// stay off the efficiency cores.
+//
+// One pool per instance, not one shared by all: a host renders tracks on
+// several audio threads at once, and a shared pool would make one track's
+// audio thread wait on another track's voices (and need a many-producer
+// queue). Each instance has at most three workers, asleep between sub-blocks.
 class VoiceThreads
 {
 public:
@@ -30,7 +42,9 @@ public:
     ~VoiceThreads() { stop(); }
 
     // Off the audio thread. numWorkers 0 stops the threads (one core).
-    void prepare (int numWorkers, int maxVoices, int maxSamples, RenderFunction newRender)
+    // blockSamples and sampleRate set the real-time threads' time budget.
+    void prepare (int numWorkers, int maxVoices, int maxSamples, RenderFunction newRender,
+                  int blockSamples = 512, double sampleRate = 48000.0)
     {
         stop();
         render = std::move (newRender);
@@ -42,7 +56,11 @@ public:
         jobVoices.assign ((size_t) juce::jmax (1, maxVoices), 0);
         quit.store (false);
         for (int i = 0; i < numWorkers; ++i)
-            workers.emplace_back ([this] { workerLoop(); });
+        {
+            auto worker = std::make_unique<Worker> (*this);
+            if (startWorker (*worker, juce::jmax (1, blockSamples), sampleRate > 0.0 ? sampleRate : 48000.0))
+                workers.push_back (std::move (worker));
+        }
     }
 
     void stop()
@@ -51,9 +69,23 @@ public:
         generation.fetch_add (1);
         generation.notify_all();
         for (auto& worker : workers)
-            if (worker.joinable())
-                worker.join();
+            worker->waitForThreadToExit (-1);
         workers.clear();
+    }
+
+    // The host's audio workgroup (macOS; elsewhere it is empty and joining
+    // does nothing). Audio thread safe: no lock, no allocation (a copy
+    // retains the handle). Returns false when a worker was reading the last
+    // one just then: call again on a later block.
+    bool setWorkgroup (const juce::AudioWorkgroup& newWorkgroup) noexcept
+    {
+        auto expected = false;
+        if (! workgroupBusy.compare_exchange_strong (expected, true, std::memory_order_acquire))
+            return false;
+        workgroup = newWorkgroup;
+        workgroupBusy.store (false, std::memory_order_release);
+        workgroupVersion.fetch_add (1, std::memory_order_release);
+        return true;
     }
 
     int getNumWorkers() const noexcept { return (int) workers.size(); }
@@ -102,8 +134,77 @@ public:
     }
 
 private:
+   #if JUCE_WINDOWS
+    // The worker joins MMCSS's "Pro Audio" task at high priority while it
+    // runs, as the host's audio threads do (avrt.dll, loaded by name).
+    struct ProAudioTask
+    {
+        ProAudioTask()
+        {
+            if (! library.open ("avrt.dll"))
+                return;
+            using SetTask = void* (__stdcall*) (const wchar_t*, unsigned long*);
+            using SetPriority = int (__stdcall*) (void*, int);
+            revert = reinterpret_cast<Revert> (library.getFunction ("AvRevertMmThreadCharacteristics"));
+            if (auto* setTask = reinterpret_cast<SetTask> (library.getFunction ("AvSetMmThreadCharacteristicsW")))
+            {
+                unsigned long taskIndex = 0;
+                handle = setTask (L"Pro Audio", &taskIndex);
+            }
+            if (handle != nullptr)
+                if (auto* setPriority = reinterpret_cast<SetPriority> (library.getFunction ("AvSetMmThreadPriority")))
+                    setPriority (handle, 1); // AVRT_PRIORITY_HIGH
+        }
+
+        ~ProAudioTask()
+        {
+            if (handle != nullptr && revert != nullptr)
+                revert (handle);
+        }
+
+        using Revert = int (__stdcall*) (void*);
+        juce::DynamicLibrary library;
+        void* handle = nullptr;
+        Revert revert = nullptr;
+    };
+   #endif
+
+    struct Worker final : juce::Thread
+    {
+        explicit Worker (VoiceThreads& o) : juce::Thread ("ilanaSynth voices"), owner (o) {}
+        void run() override
+        {
+           #if JUCE_WINDOWS
+            const ProAudioTask task;
+           #endif
+            owner.workerLoop();
+        }
+        VoiceThreads& owner;
+    };
+
+    static bool startWorker (Worker& worker, int blockSamples, double sampleRate)
+    {
+       #if JUCE_WINDOWS
+        juce::ignoreUnused (blockSamples, sampleRate);
+        return worker.startThread (juce::Thread::Priority::highest);
+       #else
+        // Real time where the system allows it (Linux needs the rights for
+        // it), else the highest normal priority.
+        const auto options = juce::Thread::RealtimeOptions{}.withPriority (8)
+                                                            .withApproximateAudioProcessingTime (blockSamples, sampleRate);
+        return worker.startRealtimeThread (options) || worker.startThread (juce::Thread::Priority::highest);
+       #endif
+    }
+
+
     void workerLoop()
     {
+        // The workgroup this thread is in (kept alive while joined; the
+        // token is destroyed first, on this thread, leaving it).
+        juce::AudioWorkgroup joined;
+        juce::WorkgroupToken token;
+        unsigned joinedVersion = 0;
+
         // seen is read before quit: a stop() that lands before this thread
         // first runs (prepare then prepare again, quickly) is either seen
         // here or has moved generation past seen, so the wait returns;
@@ -115,8 +216,21 @@ private:
             seen = generation.load();
             if (quit.load())
                 return;
+            if (const auto version = workgroupVersion.load (std::memory_order_acquire); version != joinedVersion)
+                joinWorkgroup (joined, token, joinedVersion, version);
             runJobs();
         }
+    }
+
+    void joinWorkgroup (juce::AudioWorkgroup& joined, juce::WorkgroupToken& token, unsigned& joinedVersion, unsigned version)
+    {
+        for (auto expected = false; ! workgroupBusy.compare_exchange_weak (expected, true, std::memory_order_acquire); expected = false)
+            std::atomic_signal_fence (std::memory_order_seq_cst);
+        auto wanted = workgroup;
+        workgroupBusy.store (false, std::memory_order_release);
+        joinedVersion = version;
+        wanted.join (token); // leaves the old one first
+        joined = std::move (wanted);
     }
 
     void runJobs()
@@ -155,5 +269,8 @@ private:
     std::atomic<int> done { 0 };
     std::atomic<std::uint32_t> generation { 0 };
     std::atomic<bool> quit { false };
-    std::vector<std::thread> workers;
+    juce::AudioWorkgroup workgroup;
+    std::atomic<bool> workgroupBusy { false };
+    std::atomic<unsigned> workgroupVersion { 0 };
+    std::vector<std::unique_ptr<Worker>> workers;
 };
