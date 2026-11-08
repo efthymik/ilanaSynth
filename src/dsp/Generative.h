@@ -116,6 +116,9 @@ public:
             list.count = 0;
     }
 
+    // REPEATABLE RANDOM: the spray's sequence from a seed of its own.
+    void reseed (juce::int64 salt) { random.setSeed (0x5b7a1 + salt); }
+
     void process (const juce::MidiBuffer& input, juce::MidiBuffer& output, int numSamples, const Settings& settings)
     {
         output.clear();

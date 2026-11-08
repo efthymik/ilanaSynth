@@ -123,6 +123,19 @@ Voice::Voice()
     }
 }
 
+// REPEATABLE RANDOM: every generator of the voice from a given seed (the
+// processor's play start), so a render repeats.
+void Voice::reseedRandom (juce::int64 salt)
+{
+    random.setSeed (12345 + salt);
+    driftRandom.setSeed (54321 + salt);
+    fmNoiseRandom.setSeed (31337 + salt);
+    lfoPoolRandom.setSeed (27183 + salt);
+    liveGrainRandom.setSeed (0x1f3a + salt);
+    zoneRandom.setSeed (0x2b17 + salt);
+    sampleStartRandom.setSeed (0x5a17 + salt);
+}
+
 void Voice::setCurrentPlaybackSampleRate (double newRate)
 {
     juce::SynthesiserVoice::setCurrentPlaybackSampleRate (newRate);

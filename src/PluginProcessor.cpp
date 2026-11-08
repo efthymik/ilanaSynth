@@ -610,6 +610,7 @@ float IlanaSynthAudioProcessor::getParam (const ParamRef& ref) const
 
 void IlanaSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    repeatWasPlaying = false; // (an export that starts playing re-seeds)
     noteSpray.reset();
     arpHeldNotes.clearQuick();   // what's sounding is released by its gate
     generatedMidi.ensureSize (4096);
@@ -855,8 +856,15 @@ void IlanaSynthAudioProcessor::cutPatchTails()
     // The modulators start over too, as in a new instance, so a patch sounds
     // the same whatever played before it (a slow free-running LFO otherwise
     // starts wherever the last patch left it).
-    lfoRandom.setSeed (27182);
-    lfoPoolRandom.setSeed (31415);
+    restartModulators (0);
+}
+
+// The free LFOs, MSEG, clocked S&H, vector path and the Evolve drifts start
+// over, their generators seeded with salt added (0: as a new instance).
+void IlanaSynthAudioProcessor::restartModulators (juce::int64 salt)
+{
+    lfoRandom.setSeed (27182 + salt);
+    lfoPoolRandom.setSeed (31415 + salt);
     for (int lfo = 0; lfo < numLfos; ++lfo)
     {
         lfoPhases[(size_t) lfo] = 0.0;
@@ -874,10 +882,28 @@ void IlanaSynthAudioProcessor::cutPatchTails()
     clockShPhase = 0.0;
     clockShValue = 0.0f;
     vectorPathPhase = 0.0;
-    evolve.reset (4242u);
-    vectorDrift.reset (9191u);
+    evolve.reset (4242u + (std::uint32_t) salt);
+    vectorDrift.reset (9191u + (std::uint32_t) salt);
     for (auto& drift : macroDrift)
         drift.store (0.0f);
+}
+
+// REPEATABLE RANDOM (stability review 5): at play start every random
+// generator that runs free (the arp's, the probability sequencer's, the note
+// spray's, the voices' analog drift and random, the LFOs') is seeded from the
+// transport position and the free modulators start over, so a take, a Freeze
+// and an Export from the same bar play the same notes and movement.
+void IlanaSynthAudioProcessor::restartRandomAtPlayStart (double ppq)
+{
+    const auto tick = (juce::int64) std::llround (ppq * 960.0);
+    const auto salt = (juce::int64) (((juce::uint64) tick * 0x9e3779b97f4a7c15ull) >> 33);
+    arpRandom.setSeed (31415 + salt);
+    pseqRandom.setSeed (16180 + salt);
+    noteSpray.reseed (salt);
+    for (int i = 0; i < synth.getNumVoices(); ++i)
+        if (auto* voice = dynamic_cast<Voice*> (synth.getVoice (i)))
+            voice->reseedRandom (salt + 7919 * (juce::int64) i);
+    restartModulators (salt);
 }
 
 // The oversamplers' filters delay the output a little; the host compensates.
@@ -1284,6 +1310,22 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
 
     if (patchCut.exchange (false))
         cutPatchTails();
+
+    // REPEATABLE RANDOM: the transport starting re-seeds (off: nothing changes).
+    {
+        auto playing = false;
+        auto ppq = 0.0;
+        if (auto* head = getPlayHead())
+            if (const auto position = head->getPosition(); position.hasValue() && position->getIsPlaying())
+                if (const auto at = position->getPpqPosition(); at.hasValue() && std::isfinite (*at))
+                {
+                    playing = true;
+                    ppq = *at;
+                }
+        if (playing && ! repeatWasPlaying && getParam (repeatRandomRef) > 0.5f)
+            restartRandomAtPlayStart (ppq);
+        repeatWasPlaying = playing;
+    }
 
     {
         const juce::SpinLock::ScopedLockType lock (lfoShapeLock);

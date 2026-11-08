@@ -1218,6 +1218,10 @@ private:
     ParamRef masterRef { "master" }, outputTrimRef { "output_trim" };
     ParamRef fxRoutingRef { "fx_routing" };
     ParamRef multiCoreRef { "multi_core" };
+    ParamRef repeatRandomRef { "repeat_random" };
+    bool repeatWasPlaying = false;
+    void restartModulators (juce::int64 salt);
+    void restartRandomAtPlayStart (double ppq);
     // The host's workgroup (audio thread only), still to reach the voice
     // threads when they were busy taking the last one.
     juce::AudioWorkgroup hostWorkgroup;
