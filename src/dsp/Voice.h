@@ -652,6 +652,7 @@ public:
     // body memory, the vactrol, strings, glide origin, random sequences),
     // so its first notes don't carry the old patch's ringing.
     void resetForNewPatch();
+    void reseedRandom (juce::int64 salt);
     void pitchWheelMoved (int newValue) override;
     void controllerMoved (int controllerNumber, int newValue) override;
     void channelPressureChanged (int newValue) override;

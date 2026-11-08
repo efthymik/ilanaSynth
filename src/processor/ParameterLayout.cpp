@@ -1449,5 +1449,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout IlanaSynthAudioProcessor::cr
         addChoice ("vec_f", "Vector Corner F", oscillators, 5);
     }
 
+    // REPEATABLE RANDOM (stability review 5): the random generators re-seed
+    // from the transport position at play start, so playback, Freeze and
+    // Export match. Off, free as in every older patch.
+    addChoice ("repeat_random", "Repeatable Random", { "Off", "On" }, 0);
+
     return layout;
 }

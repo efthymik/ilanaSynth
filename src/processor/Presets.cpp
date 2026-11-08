@@ -391,19 +391,15 @@ void IlanaSynthAudioProcessor::handleAsyncUpdate()
                 continue;
 
             if (auto* parameter = apvts.getParameter ("macro" + juce::String (i + 1)))
-                parameter->setValueNotifyingHost (
-                    parameter->convertTo0to1 (pendingMacros[i].load()));
+                applyCcOverride (parameter->getParameterIndex(), parameter->convertTo0to1 (pendingMacros[i].load()));
         }
     }
 
     if (ccPending.exchange (false))
     {
-        const auto& parameters = getParameters();
-
         for (size_t cc = 0; cc < ccParameter.size(); ++cc)
             if (ccValuePending[cc].exchange (false))
-                if (const auto index = ccParameter[cc].load(); juce::isPositiveAndBelow (index, parameters.size()))
-                    parameters[index]->setValueNotifyingHost (pendingCcValues[cc].load());
+                applyCcOverride (pendingCcParameter[cc].load(), pendingCcValues[cc].load());
     }
 
     bool reloadSamples = false;

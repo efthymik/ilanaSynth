@@ -130,6 +130,8 @@ public:
     void releaseResources() override;
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
+    // macOS (AU): the host's audio workgroup, for the MULTI-CORE threads.
+    void audioWorkgroupContextChanged (const juce::AudioWorkgroup& workgroup) override;
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
@@ -1101,6 +1103,7 @@ private:
         const std::atomic<float>* value = nullptr;
         int index = -1;        // in paramCacheIds (an FX instance's own values are kept by it)
         int destination = -1;
+        int parameterIndex = -1; // in getParameters() (the learned CCs' values, ccOverrides)
         bool discrete = false; // a choice, int or bool: read back rounded
         float fallback = 0.0f; // the default, read in place of a non-finite value
     };
@@ -1244,6 +1247,14 @@ private:
     ParamRef masterRef { "master" }, outputTrimRef { "output_trim" };
     ParamRef fxRoutingRef { "fx_routing" };
     ParamRef multiCoreRef { "multi_core" };
+    ParamRef repeatRandomRef { "repeat_random" };
+    bool repeatWasPlaying = false;
+    void restartModulators (juce::int64 salt);
+    void restartRandomAtPlayStart (double ppq);
+    // The host's workgroup (audio thread only), still to reach the voice
+    // threads when they were busy taking the last one.
+    juce::AudioWorkgroup hostWorkgroup;
+    bool hostWorkgroupPending = false;
     ParamRef sustainVoicesRef { "sustain_voices" };
     ParamRef midiProgramChangeRef { "midi_program_change" }, msegLoopRef { "mseg_loop" };
     // The Airwindows category modules (FX types 32-41), one engine each;
@@ -1567,8 +1578,19 @@ private:
     std::array<std::atomic<int>, 128> ccParameter;
     std::atomic<int> paramLearn { -1 };
     std::array<std::atomic<float>, 128> pendingCcValues;
+    std::array<std::atomic<int>, 128> pendingCcParameter; // the parameter each queued value is for
     std::array<std::atomic<bool>, 128> ccValuePending;
     std::atomic<bool> ccPending { false };
+    // Sound review 7: a learned CC's (or a macro CC's) value as the audio
+    // thread heard it, read by getParam in place of the parameter's own until
+    // the message thread has set the parameter to it (then NaN again). So a
+    // CC moves the sound in the block it arrives in, live and in an offline
+    // export, however busy the message thread is. Indexed by getParameters().
+    std::unique_ptr<std::atomic<float>[]> ccOverrides;
+    std::vector<juce::RangedAudioParameter*> rangedParameters; // getParameters(), as ranged ones (or null)
+    void takeLearnedCcs (const juce::MidiBuffer& midiMessages);
+    void setCcOverride (int parameterIndex, float normalised) noexcept;
+    void applyCcOverride (int parameterIndex, float normalised);
     juce::String getParamCcMapText() const;
     void setParamCcMapText (const juce::String& text);
     std::atomic<float> envMonitorAmp { 0.0f };
@@ -1600,6 +1622,33 @@ private:
     };
     std::atomic<unsigned> paramEpoch { 0 }, liveEpoch { 0 }, dataEpoch { 0 }, sampleEpoch { 0 };
     ParamEpoch paramEpochListener { paramEpoch };
+
+    // Undo (stability review 4): the value tree has no undo manager, so a
+    // host's automation or a learned CC no longer lands in her history (and
+    // wipes Redo). This records the parameter changes made on the message
+    // thread instead, by the editor (not those of the audio thread, nor a CC
+    // the message thread applies, nor an undo or redo itself), each as a
+    // step that merges with the same parameter's last one, as the tree's
+    // did. A gesture starts a new step (as JUCE's attachments did) unless an
+    // edit (beginEdit) or a named step is waiting for it; the gestures of
+    // one message (a menu choice that sets several parameters) share it.
+    struct ParamUndoRecorder : juce::AudioProcessorParameter::Listener, juce::AsyncUpdater
+    {
+        explicit ParamUndoRecorder (IlanaSynthAudioProcessor& p) : processor (p) {}
+        void prepare (const juce::Array<juce::AudioProcessorParameter*>& parameters);
+        void parameterValueChanged (int index, float value) override;
+        void parameterGestureChanged (int index, bool starting) override;
+        void handleAsyncUpdate() override;
+
+        IlanaSynthAudioProcessor& processor;
+        std::unique_ptr<std::atomic<float>[]> lastValues; // every thread writes these (normalised)
+        int numValues = 0;
+        int openGestures = 0;
+        bool gestureStepOpen = false;
+        bool ignoring = false; // set around changes that are not her edits
+    };
+    struct ParamUndoStep;
+    ParamUndoRecorder undoRecorder { *this };
 
    #if JUCE_LINUX || JUCE_BSD
     struct HostRunLoopKeepAlive final : juce::VST3ClientExtensions
@@ -1681,6 +1730,8 @@ public:
 
     // Tests only: what the last block sent to the voices.
     const juce::MidiBuffer& getSynthMidiForTest() const { return midiForSynth; }
+    // Tests only: the message thread's pending work (the CCs it applies) now.
+    void runAsyncUpdateForTest() { handleUpdateNowIfNeeded(); }
 
     // Tests only: one arpeggiator note choice from the currently held notes.
     int pickArpNoteForTest (int mode, int octaves) { return selectArpNote (mode, octaves); }

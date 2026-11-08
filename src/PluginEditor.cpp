@@ -3525,6 +3525,7 @@ void IlanaSynthAudioProcessorEditor::showSettingsMenu (bool tuningOnly)
     menu.addItem (500, "MPE mode (per-note pitch, pressure and slide)", true,
                   processorRef.apvts.getRawParameterValue ("mpe_mode")->load() > 0.5f);
     menu.addItem (510, "Multi-core voices (several threads, same sound)", true, read ("multi_core") > 0.5f);
+    menu.addItem (511, "Repeatable random (Freeze and Export play what you heard)", true, read ("repeat_random") > 0.5f);
     menu.addItem (410, "Ask before replacing an edited patch", true, asksBeforeReplacingEdits());
     menu.addSeparator();
     menu.addItem (400, "Show welcome tour");
@@ -3585,6 +3586,15 @@ void IlanaSynthAudioProcessorEditor::showSettingsMenu (bool tuningOnly)
                                     multiCore->beginChangeGesture();
                                     multiCore->setValueNotifyingHost (multiCore->getValue() > 0.5f ? 0.0f : 1.0f);
                                     multiCore->endChangeGesture();
+                                }
+                            }
+                            else if (result == 511)
+                            {
+                                if (auto* repeatable = safeThis->processorRef.apvts.getParameter ("repeat_random"))
+                                {
+                                    repeatable->beginChangeGesture();
+                                    repeatable->setValueNotifyingHost (repeatable->getValue() > 0.5f ? 0.0f : 1.0f);
+                                    repeatable->endChangeGesture();
                                 }
                             }
                             else if (result == 500)
