@@ -8,6 +8,18 @@ namespace ilana::vulkan
 {
 struct FrameResources;
 
+// Hooks for presenting: the paint's submit waits on `wait` (at
+// waitStage), signals `signal`, and afterPaint records extra commands
+// after the picture is finished, when its image is in
+// VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL (copy it to a swapchain image).
+struct SubmitHooks
+{
+    VkSemaphore wait = VK_NULL_HANDLE;
+    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    VkSemaphore signal = VK_NULL_HANDLE;
+    std::function<void (VkCommandBuffer, VkImage canvasImage)> afterPaint;
+};
+
 // A persistent BGRA8 picture on the GPU that JUCE Graphics paints into. Each
 // paint() redraws only the dirty rectangles (cleared to transparent first)
 // with JUCE's own rasteriser semantics: clip regions, paths, strokes and
@@ -28,17 +40,7 @@ public:
     int getWidth() const  { return target.width; }
     int getHeight() const { return target.height; }
 
-    // Hooks for presenting: the paint's submit waits on `wait` (at
-    // waitStage), signals `signal`, and afterPaint records extra commands
-    // after the picture is finished, when its image is in
-    // VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL (copy it to a swapchain image).
-    struct SubmitHooks
-    {
-        VkSemaphore wait = VK_NULL_HANDLE;
-        VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-        VkSemaphore signal = VK_NULL_HANDLE;
-        std::function<void (VkCommandBuffer, VkImage canvasImage)> afterPaint;
-    };
+    using SubmitHooks = ilana::vulkan::SubmitHooks;
 
     // Paints `dirty` (physical pixels; clipped to the canvas): draw gets a
     // Graphics whose origin is the canvas's top-left, in physical pixels,
