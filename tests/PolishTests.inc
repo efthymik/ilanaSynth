@@ -1377,6 +1377,58 @@ void runGlideMigrationTest()
     std::cout << "  factory presets whose GLIDE stops at 2 s: " << (clamped.isEmpty() ? juce::String ("none") : clamped.joinIntoString (", ")) << std::endl;
 }
 
+// A big chord over full voices: the steals past the spares wait for their
+// voice's 8 ms fade instead of cutting it dead (a click), then all play.
+void runStealPastSparesTest()
+{
+    struct Sound : public juce::SynthesiserSound
+    {
+        bool appliesToNote (int) override { return true; }
+        bool appliesToChannel (int) override { return true; }
+    };
+    IlanaSynth synth;
+    synth.addSound (new Sound());
+    for (int i = 0; i < 40; ++i)
+        synth.addVoice (new Voice());
+    synth.setSpareVoices (8);
+    synth.setVoiceMode (IlanaSynth::Mode::Poly, 32, false);
+    synth.setCurrentPlaybackSampleRate (48000.0);
+    VoiceParams params;
+    for (int i = 0; i < synth.getNumVoices(); ++i)
+        static_cast<Voice*> (synth.getVoice (i))->setParams (params);
+
+    juce::AudioBuffer<float> buffer (2, 512);
+    juce::MidiBuffer none;
+    for (int note = 30; note < 62; ++note)
+        synth.noteOn (1, note, 0.8f);
+    synth.renderNextBlock (buffer, none, 0, 512);
+
+    const auto count = [&synth] (bool fading)
+    {
+        auto n = 0;
+        for (int i = 0; i < synth.getNumVoices(); ++i)
+            if (const auto* v = static_cast<Voice*> (synth.getVoice (i)); v->isVoiceActive() && v->isFadingOut() == fading)
+                ++n;
+        return n;
+    };
+    for (int note = 70; note < 82; ++note) // 12 steals, 8 spares
+        synth.noteOn (1, note, 0.8f);
+    check (count (true) == 12 && count (false) == 28,
+           "a 12-note chord over 32 voices: 12 fade, the 4 past the spares wait (" + juce::String (count (true)) + " fading, "
+               + juce::String (count (false)) + " playing)");
+    for (int block = 0; block < 4; ++block)
+    {
+        buffer.clear();
+        synth.renderNextBlock (buffer, none, 0, 128);
+    }
+    auto newNotes = 0;
+    for (int i = 0; i < synth.getNumVoices(); ++i)
+        if (const auto* v = synth.getVoice (i); v->isVoiceActive() && v->getCurrentlyPlayingNote() >= 70)
+            ++newNotes;
+    check (newNotes == 12 && count (false) == 32 && count (true) == 0,
+           "after the fades every note of the chord plays (" + juce::String (newNotes) + " of 12)");
+}
+
 void runTests()
 {
     timedRun ("Polish::runControllerSeedTest", [] { runControllerSeedTest(); });
@@ -1398,6 +1450,7 @@ void runTests()
     timedRun ("Polish::runModDepthRangeTest", [] { runModDepthRangeTest(); });
     timedRun ("Polish::runFilterEnvVelocityTest", [] { runFilterEnvVelocityTest(); });
     timedRun ("Polish::runGlideTimeTest", [] { runGlideTimeTest(); });
+    timedRun ("Polish::runStealPastSparesTest", [] { runStealPastSparesTest(); });
     timedRun ("Polish::runGlideMigrationTest", [] { runGlideMigrationTest(); });
 }
 } // namespace Polish

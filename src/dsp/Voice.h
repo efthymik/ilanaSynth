@@ -528,6 +528,7 @@ public:
             fadeTotal = fadeRemaining = juce::jmax (1, samples);
     }
     bool isFadingOut() const noexcept { return fadeTotal > 0; }
+    int getFadeRemaining() const noexcept { return fadeRemaining; }
     // False until the note has been rendered once (a note stolen in the sample it started has made no sound to cut).
     bool hasSounded() const noexcept { return sounded; }
 
