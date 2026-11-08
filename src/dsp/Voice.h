@@ -515,7 +515,11 @@ public:
     // Poly glide starts from the last note played, not the reused voice's own pitch. Off: it changes old presets.
     static inline bool polyGlideFromLastNote = false;
 
-    void setParams (const VoiceParams& newParams) { params = newParams; }
+    void setParams (const VoiceParams& newParams)
+    {
+        params = newParams;
+        paramsFresh = true; // the next render eases the glided knobs to these (BlockGlide)
+    }
 
     // Where an idle voice finds this block's parameters when a note starts on
     // it (the processor copies them into the voices that are sounding only).
@@ -976,6 +980,62 @@ private:
     {
         float l = 1.0f, r = 1.0f;
     };
+
+    // A value the processor or a block-rate route sets once a block (a knob
+    // turned by hand, an LFO on PAN), eased in over the next block instead
+    // of stepping: a straight ramp over the time since its last change (one
+    // block while it keeps moving), 0.5 to 25 ms, stepped each sub-block.
+    // Held still it is the value itself, bit for bit; a note starts on it.
+    struct BlockGlide
+    {
+        float value = 0.0f, target = 0.0f, step = 0.0f;
+        int left = 0;
+        juce::int64 changedAt = 0;
+
+        void snap (float v) noexcept
+        {
+            value = target = v;
+            left = 0;
+        }
+        bool moving() const noexcept { return left > 0; }
+        void retarget (float v, juce::int64 now, int minSamples, int maxSamples) noexcept
+        {
+            if (v != target)
+            {
+                left = (int) juce::jlimit ((juce::int64) minSamples, (juce::int64) maxSamples, now - changedAt);
+                target = v;
+                changedAt = now;
+                step = (target - value) / (float) left;
+            }
+        }
+        void advance (int samples) noexcept
+        {
+            if (left <= 0)
+                return;
+            left -= samples;
+            value = left > 0 ? value + step * (float) samples : target;
+        }
+    };
+    // The glided knobs, eased in params itself, so every reader hears them.
+    enum ParamGlide
+    {
+        glideFmAmount, glideFmFeedback, glideRingMod,
+        glideCutoff1, glideReso1, glideDrive1, glideCutoff2, glideReso2, glideDrive2,
+        glideVoiceSpread, glideOscPan, glideOscSpread = glideOscPan + VoiceParams::numOscillators,
+        numParamGlides = glideOscSpread + VoiceParams::numOscillators
+    };
+    float& glidedParam (int which) noexcept;
+    void retargetGlides (int numSamples);
+    void advanceGlides (int samples);
+    void updatePans();
+    void applyDrives();
+    std::array<BlockGlide, numParamGlides> paramGlides {};
+    // And the block-rate routes into them.
+    BlockGlide panModGlide, driveModGlide[2];
+    std::array<BlockGlide, VoiceParams::numOscillators> oscPanModGlide {}, spreadModGlide {};
+    bool paramsFresh = true, glidesSnap = true, glidesMoving = false, pansMoving = false, drivesMoving = false;
+    juce::int64 glideClock = 0;
+    DriveAmounts drive1Now, drive2Now; // the drives in front of the filters (applyDrives)
 
     // Per render (prepareModSlots): each slot's target (a mods index, or
     // -2 - cell for an OSC 4-6 FM cell, or -1 for none) and, for sources that

@@ -1429,6 +1429,82 @@ void runStealPastSparesTest()
            "after the fades every note of the chord plays (" + juce::String (newNotes) + " of 12)");
 }
 
+// Knobs the processor sends once a block (FM, ring, cutoff, reso, drive,
+// pan) ease across the next block instead of stepping; held still they
+// render exactly as before.
+void runBlockGlideTest()
+{
+    struct Sound : public juce::SynthesiserSound
+    {
+        bool appliesToNote (int) override { return true; }
+        bool appliesToChannel (int) override { return true; }
+    };
+    struct One
+    {
+        IlanaSynth synth;
+        One()
+        {
+            synth.addSound (new Sound());
+            synth.addVoice (new Voice());
+            synth.setCurrentPlaybackSampleRate (48000.0);
+        }
+        Voice& voice() { return *static_cast<Voice*> (synth.getVoice (0)); }
+        void render (juce::AudioBuffer<float>& buffer)
+        {
+            buffer.clear();
+            synth.renderNextBlock (buffer, juce::MidiBuffer(), 0, buffer.getNumSamples());
+        }
+    };
+
+    VoiceParams params;
+    params.oscillatorEnabled[2] = false;
+    params.oscillators[0].pan = -1.0f;
+    params.filter1.cutoffHz = 2000.0f;
+    params.fmAmount = 0.2f;
+
+    // Held still: the same samples whether the knobs arrive every block or once.
+    {
+        One once, every;
+        once.voice().setParams (params);
+        every.voice().setParams (params);
+        once.synth.noteOn (1, 60, 0.8f);
+        every.synth.noteOn (1, 60, 0.8f);
+        juce::AudioBuffer<float> a (2, 512), b (2, 512);
+        auto same = true;
+        for (int block = 0; block < 8; ++block)
+        {
+            every.voice().setParams (params);
+            once.render (a);
+            every.render (b);
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < 512; ++i)
+                    same = same && a.getSample (ch, i) == b.getSample (ch, i);
+        }
+        check (same, "knobs held still render bit for bit the same, sent every block or once");
+    }
+
+    // PAN from hard left to hard right between blocks: the left side fades
+    // across the block instead of dropping at its start.
+    One one;
+    one.voice().setParams (params);
+    one.synth.noteOn (1, 60, 0.8f);
+    juce::AudioBuffer<float> buffer (2, 512);
+    for (int block = 0; block < 4; ++block)
+        one.render (buffer);
+    params.oscillators[0].pan = 1.0f;
+    one.voice().setParams (params);
+    one.render (buffer);
+    auto between = 0;
+    for (int window = 0; window < 8; ++window)
+    {
+        const auto l = buffer.getRMSLevel (0, window * 64, 64), r = buffer.getRMSLevel (1, window * 64, 64);
+        const auto share = l / juce::jmax (1.0e-9f, l + r);
+        if (share > 0.1f && share < 0.9f)
+            ++between;
+    }
+    check (between >= 3, "a PAN change eases across the block (" + juce::String (between) + " of 8 windows between the sides)");
+}
+
 void runTests()
 {
     timedRun ("Polish::runControllerSeedTest", [] { runControllerSeedTest(); });
@@ -1451,6 +1527,7 @@ void runTests()
     timedRun ("Polish::runFilterEnvVelocityTest", [] { runFilterEnvVelocityTest(); });
     timedRun ("Polish::runGlideTimeTest", [] { runGlideTimeTest(); });
     timedRun ("Polish::runStealPastSparesTest", [] { runStealPastSparesTest(); });
+    timedRun ("Polish::runBlockGlideTest", [] { runBlockGlideTest(); });
     timedRun ("Polish::runGlideMigrationTest", [] { runGlideMigrationTest(); });
 }
 } // namespace Polish
