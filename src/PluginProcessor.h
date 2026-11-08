@@ -511,6 +511,11 @@ public:
     // Every parameter's value (0..1, by index) at that load or save, for the
     // tabs' edited-since-load dots. Message thread only.
     std::vector<float> loadedPresetValues;
+    // The page the editor was last on (a page id such as "MAIN"), so a reopened window lands there.
+    // Not a parameter and not sound: lives as long as the plugin instance. Message thread only.
+    juce::String lastViewPage;
+    // The last session-load notice the editor showed (so reopening the window does not show it again).
+    int shownStateLoadNoticeVersion = 0;
 
     unsigned getDataEpoch() const { return dataEpoch.load(); }
     // Counts sample loads (a new sample can reuse a freed one's address).
@@ -740,6 +745,9 @@ public:
     juce::String getTableNotice() const;
     int getTableNoticeVersion() const { return tableNoticeVersion.load(); }
     void clearTableNotice();
+    // Shown by the editor like the table notice (STUB: the state-load worker's real implementation replaces these two).
+    juce::String getStateLoadNotice() const { return {}; }
+    int getStateLoadNoticeVersion() const { return 0; }
     // fromUser: a file the player chose or dropped; it replaces a factory
     // sample source (the SOURCE menu goes back to the loaded sample).
     bool loadUserSample (int oscIndex, const juce::File& file, bool fromUser = false);

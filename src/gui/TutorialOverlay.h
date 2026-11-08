@@ -96,7 +96,8 @@ public:
         return { "PLAY has the essentials on one screen; the other tabs hold the detail. Click the preset name to browse "
                      + juce::String (presetCount) + " presets by sound, tag or bank.",
                  "Drag a source chip (the row above the macros) onto any knob to modulate it; the knob shows how far it moves.",
-                 "Every edit can be undone (" + commandKey() + "+Z), preset loads too, so try things: RANDOMISE (the dice) rolls a fresh patch." };
+                 "Every edit can be undone (" + commandKey() + "+Z), preset loads too, so try things: RANDOMISE (the dice) rolls a fresh patch.",
+                 "The computer keyboard plays too: A to K are the white keys, Z and X move the octave, and " + commandKey() + "+Left / Right steps through presets." };
     }
 
     // The hidden mouse moves, for MOUSE MOVES (Impeccable re-score, H7: the

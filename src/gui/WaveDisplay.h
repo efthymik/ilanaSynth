@@ -787,7 +787,7 @@ public:
                                     {
                                         if (! processor.selectSoundFontPreset (osc, preset.bank, preset.program))
                                             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "SoundFont Preset",
-                                                                                    processor.getLastSampleError());
+                                                                                    processor.getLastSampleError(), juce::String(), safeThis.getComponent());
                                     });
                                     safeThis->repaint();
                                     return;
@@ -797,7 +797,7 @@ public:
                                 {
                                     auto& processor = safeThis->processorRef;
                                     if (result == embedItem || result == embedAllItem)
-                                        SamplePortability::embed (processor, safeThis->oscIndex, result == embedAllItem);
+                                        SamplePortability::embed (processor, safeThis->oscIndex, result == embedAllItem, safeThis.getComponent());
                                     else if (result == collectItem)
                                         SamplePortability::collect (processor, safeThis.getComponent());
                                     else
@@ -1021,7 +1021,7 @@ public:
         }
         if (! processorRef.setSampleSlices (oscIndex, slicing, name))
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Slice",
-                                                    "Only a plain sample can be sliced (a multisample already has its zones).");
+                                                    "Only a plain sample can be sliced (a multisample already has its zones).", juce::String(), this);
         repaint();
     }
 
@@ -1174,7 +1174,7 @@ public:
             switchToSampleMode();
         else
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Load sample",
-                                                    processorRef.getLastSampleError());
+                                                    processorRef.getLastSampleError(), juce::String(), this);
         repaint();
     }
 

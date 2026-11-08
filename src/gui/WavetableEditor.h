@@ -856,7 +856,7 @@ public:
         if (! WavetableDoc::loadFromFile (file, loaded, loadMode))
         {
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Import",
-                                                    "Could not read " + file.getFileName() + ".");
+                                                    "Could not read " + file.getFileName() + ".", juce::String(), this);
             return false;
         }
         edit ([this, &loaded] { doc = std::move (loaded); selected = 0; });
@@ -883,7 +883,7 @@ private:
             file = file.withFileExtension ("wav");
             if (! safe->doc.exportWav (file))
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Export",
-                                                        "Could not write " + file.getFullPathName() + ".");
+                                                        "Could not write " + file.getFullPathName() + ".", juce::String(), safe.getComponent());
         });
     }
 
@@ -915,7 +915,7 @@ private:
                     safe->showMessage ("Saved " + written.getFileName());
                 else
                     juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Library",
-                                                            "Could not save to " + WavetableDoc::getLibraryFolder().getFullPathName() + ".");
+                                                            "Could not save to " + WavetableDoc::getLibraryFolder().getFullPathName() + ".", juce::String(), safe.getComponent());
             }
             else if (result == 2)
             {

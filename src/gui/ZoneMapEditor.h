@@ -745,7 +745,7 @@ private:
         }
 
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Add sample",
-                                                error.isNotEmpty() ? error : "Could not read " + file.getFileName() + ".");
+                                                error.isNotEmpty() ? error : "Could not read " + file.getFileName() + ".", juce::String(), this);
         return false;
     }
 
