@@ -625,7 +625,7 @@ public:
     {
         const auto r = juce::jlimit (0.0, 1.0, resonance);
         const auto lift = std::pow (lift0, 1.0 - std::pow (r, liftPower));
-        const auto g = FilterCore::prewarp (sampleRate, cutoff * lift);
+        const auto g = FilterCore::liftedPrewarp (sampleRate, cutoff, lift);
         const auto gHp = FilterCore::prewarp (sampleRate, feedbackHpHz);
         const auto tuning = tuningFor (gHp / g);
         const auto hpGain = g / std::sqrt (g * g + gHp * gHp);

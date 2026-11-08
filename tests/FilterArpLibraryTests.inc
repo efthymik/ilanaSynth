@@ -58,6 +58,19 @@ void runExtraFilterTests()
                                                    + ", 8 kHz " + juce::String (high, 4) + ")");
     }
 
+    // Diode LP and 303 Acid keep opening to the top of CUTOFF: their core
+    // runs up to 4x above the cutoff and used to stop at 0.45 sr, so past
+    // about 5.35 kHz (resonance 0, 48 kHz) the knob did nothing.
+    for (const auto type : { (int) FilterType::DiodeLow, (int) FilterType::Acid303 })
+    {
+        const auto at8k = filterToneGain (type, 12000.0, 8000.0, 0.0, 0.0f);
+        const auto at12k = filterToneGain (type, 12000.0, 12000.0, 0.0, 0.0f);
+        const auto at20k = filterToneGain (type, 12000.0, 20000.0, 0.0, 0.0f);
+        check (at12k > at8k * 1.1 && at20k > at12k * 1.1,
+               names[type] + " opens past 5 kHz (12 kHz tone at cutoff 8k / 12k / 20k: " + juce::String (at8k, 3) + " / "
+                   + juce::String (at12k, 3) + " / " + juce::String (at20k, 3) + ")");
+    }
+
     // Comb +: peaks at the cutoff's harmonics, dips between them.
     const auto onHarmonic = filterToneGain (FilterType::CombPlus, 1000.0, 500.0, 0.8, 0.0f);
     const auto between = filterToneGain (FilterType::CombPlus, 750.0, 500.0, 0.8, 0.0f);
