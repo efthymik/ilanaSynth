@@ -28,6 +28,10 @@
 #include "gui/VectorPad.h"
 #include "gui/PhysicalView.h"
 #include "gui/EnvThumbs.h"
+#if ILANA_VULKAN
+ #include "gpu/VulkanCanvas.h"
+ #include "gpu/VulkanDevice.h"
+#endif
 #include "gui/TableBrowser.h"
 #include "gui/WavetableEditor.h"
 #include "PluginEditor.h"
@@ -106,6 +110,44 @@ std::function<void()>& beforeSave()
     return callback;
 }
 
+// ILANA_SNAPSHOT_RENDERER: who draws the PNGs that save() writes.
+//   (unset) / software  createComponentSnapshot, JUCE's software renderer
+//   vulkan              ilana::vulkan::renderComponent (the Vulkan renderer,
+//                       offscreen); exits non-zero if Vulkan can't run
+//   both                <name>.png from software and <name>.vulkan.png from
+//                       Vulkan, of the same UI state (tools/vulkan_parity.py)
+enum class SnapshotRenderer { software, vulkan, both };
+
+SnapshotRenderer snapshotRenderer()
+{
+    static const auto renderer = []
+    {
+        const auto name = juce::SystemStats::getEnvironmentVariable ("ILANA_SNAPSHOT_RENDERER", "software").trim().toLowerCase();
+        if (name.isEmpty() || name == "software")
+            return SnapshotRenderer::software;
+        if (name == "vulkan" || name == "both")
+        {
+           #if ILANA_VULKAN
+            return name == "vulkan" ? SnapshotRenderer::vulkan : SnapshotRenderer::both;
+           #else
+            std::cerr << "ILANA_SNAPSHOT_RENDERER=" << name << ": this build has no Vulkan renderer (ILANA_VULKAN is off)" << std::endl;
+            std::exit (3);
+           #endif
+        }
+        std::cerr << "ILANA_SNAPSHOT_RENDERER=" << name << ": unknown (software, vulkan or both)" << std::endl;
+        std::exit (3);
+    }();
+    return renderer;
+}
+
+void writePng (const juce::Image& image, const juce::File& file)
+{
+    file.deleteFile();
+    juce::FileOutputStream stream (file);
+    juce::PNGImageFormat().writeImageToStream (image, stream);
+    std::cout << file.getFullPathName() << std::endl;
+}
+
 void save (juce::Component& editor, const juce::File& file)
 {
     if (beforeSave() != nullptr)
@@ -114,18 +156,32 @@ void save (juce::Component& editor, const juce::File& file)
     // ILANA_SNAPSHOT_SCALE: the pixel scale of the PNGs (1.5 by default; 3 for close-ups).
     static const auto scale = (float) juce::SystemStats::getEnvironmentVariable ("ILANA_SNAPSHOT_SCALE", "1.5").getDoubleValue();
     const auto pixels = scale > 0.1f ? scale : 1.5f;
+    const auto renderer = snapshotRenderer();
     // The text is sized for the zoom it draws at, as in the host (a 1.5x PNG of a 100 % editor showed the 100 %
     // floors and drew the small OSC card text bigger than ilana's 175 % window, 2026-10-23).
     const auto zoom = IlanaTheme::uiScaleRef();
     IlanaTheme::uiScaleRef() = zoom * pixels;
     IlanaTheme::notifyUiScaleListeners();
-    const auto image = editor.createComponentSnapshot (editor.getLocalBounds(), true, pixels);
+    juce::Image image, gpuImage;
+    if (renderer != SnapshotRenderer::vulkan)
+        image = editor.createComponentSnapshot (editor.getLocalBounds(), true, pixels);
+   #if ILANA_VULKAN
+    if (renderer != SnapshotRenderer::software)
+    {
+        gpuImage = ilana::vulkan::renderComponent (editor, editor.getLocalBounds(), pixels);
+        if (! gpuImage.isValid())
+        {
+            std::cerr << "ILANA_SNAPSHOT_RENDERER: the Vulkan renderer is unavailable (" << ilana::vulkan::lastError()
+                      << "); no picture written for " << file.getFullPathName() << std::endl;
+            std::exit (4);
+        }
+    }
+   #endif
     IlanaTheme::uiScaleRef() = zoom;
     IlanaTheme::notifyUiScaleListeners();
-    file.deleteFile();
-    juce::FileOutputStream stream (file);
-    juce::PNGImageFormat().writeImageToStream (image, stream);
-    std::cout << file.getFullPathName() << std::endl;
+    writePng (renderer == SnapshotRenderer::vulkan ? gpuImage : image, file);
+    if (renderer == SnapshotRenderer::both)
+        writePng (gpuImage, file.getSiblingFile (file.getFileNameWithoutExtension() + ".vulkan" + file.getFileExtension()));
 }
 int uiFailures = 0;
 
