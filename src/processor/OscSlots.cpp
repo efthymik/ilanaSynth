@@ -199,7 +199,7 @@ void IlanaSynthAudioProcessor::swapOscillators (int a, int b)
     trade ("fm_noise" + juce::String (a + 1), "fm_noise" + juce::String (b + 1));
     trade (VoiceRouting::cableParamId (a), VoiceRouting::cableParamId (b));
 
-    for (const auto* corner : { "vec_a", "vec_b", "vec_c", "vec_d" })
+    for (const auto* corner : { "vec_a", "vec_b", "vec_c", "vec_d", "vec_e", "vec_f" })
         if (auto* parameter = apvts.getParameter (corner))
         {
             const auto osc = juce::roundToInt (parameter->convertFrom0to1 (parameter->getValue()));
