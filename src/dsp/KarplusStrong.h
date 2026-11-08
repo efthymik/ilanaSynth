@@ -1641,7 +1641,7 @@ private:
             modal.setParams (decay, damping, stiffness, hammerHardness, damper, eco);
         }
         else if (isBowedModal())
-            bowedModal.setParams (decay, damping, stiffness, excitationPosition, bowPressure, bowSpeed, damper, slap, eco);
+            bowedModal.setParams (decay, damping, stiffness, excitationPosition, bowPressure, bowSpeed, damper, slap, eco, hammerHardness);
     }
 
 public:

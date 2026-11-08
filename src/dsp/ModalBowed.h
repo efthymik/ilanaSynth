@@ -26,9 +26,19 @@
 //   SPEED        bow speed: how loud and present the note is
 //   SIZE, SCALE  the body's size and the string's length (longer: lower
 //                losses, a softer stretch)
+//   VIBRATO      (the HAMMER knob) the player's vibrato: at its default the
+//                5.2 Hz, 9 cent vibrato fitted to Spitfire's long notes,
+//                starting a quarter second into the note
 //   PIZZ         (the SLAP switch) plucks the same modes instead of bowing
 //   DAMPER       how fast the string stops once the note is let go
 // Velocity is the bite: a harder start, a faster bow at the attack.
+//
+// Fitted over time to ilana's Spitfire String Quartet renders (2026-11-08):
+// the bow lands almost still and swells to full speed over about half a
+// second (the rise of a long note), the rosin makes the bow's speed
+// jitter (the noise between the partials, about 30 dB under them), a little
+// hiss off the hair reaches past the body's top, and the bow lifts at once
+// on release so the string and the body ring out.
 // Eco keeps half the modes and the body's lower half.
 
 #include <juce_core/juce_core.h>
@@ -77,7 +87,7 @@ public:
     }
 
     void setParams (float decay, float damping, float stiffness, float position, float pressure, float speed,
-                    float damper, bool pizz, bool eco)
+                    float damper, bool pizz, bool eco, float vibrato = 0.5f)
     {
         // At the Physical card's defaults (DECAY 0.75, DAMP 0.35, STIFF 0)
         // the losses and stretch of the sketch fitted to the Iowa violin.
@@ -98,6 +108,9 @@ public:
         bowSpeed = 0.05f + 0.3f * juce::jlimit (0.0f, 1.0f, speed);
         damperAmount = juce::jlimit (0.0f, 1.0f, damper);
         plucked = pizz;
+        // 0.5 plays the fitted 9 cents; the knob's top about 30.
+        const auto v = juce::jlimit (0.0f, 1.0f, vibrato);
+        vibratoCents = 30.0f * std::pow (v, 1.737f);
     }
 
     // SIZE and SCALE as factors (1: the violin as fitted).
@@ -121,6 +134,9 @@ public:
     {
         velocityLevel = juce::jlimit (0.0f, 1.0f, velocity);
         seed = (std::uint32_t) (randomUnit * 4294967040.0f) | 1u;
+        vibratoPhase = randomUnit * juce::MathConstants<float>::twoPi;
+        swell = 0.0f;
+        hissState = hissLast = 0.0f;
         // The mode count is set by the note's pitch at the start (a bend
         // keeps it, so no mode comes or goes mid-note).
         const auto top = juce::jmin (9000.0, sampleRate * 0.45);
@@ -179,12 +195,15 @@ public:
         {
             // The envelope: the bow sets on over attackSeconds, lifts on release.
             envelope += ((noteHeld ? 1.0f : 0.0f) - envelope) * (noteHeld ? attackCoefficient : releaseCoefficient);
+            swell += ((noteHeld ? 1.0f : 0.0f) - swell) * swellCoefficient;
             if (envelope > 1.0e-5f)
             {
                 seed = seed * 1664525u + 1013904223u;
-                const auto jitter = ((float) (seed >> 8) * (2.0f / 16777216.0f) - 1.0f) * 0.0035f;
+                const auto rosin = ((float) (seed >> 8) * (2.0f / 16777216.0f) - 1.0f);
+                seed = seed * 1664525u + 1013904223u;
+                hairNoise = ((float) (seed >> 8) * (2.0f / 16777216.0f) - 1.0f) * bowSpeed * envelope * (1.0f - swellDepth + swellDepth * swell);
                 const auto bite = 1.0f + 0.6f * velocityLevel * biteEnvelope;
-                const auto bow = bowSpeed * envelope * bite * (1.0f + jitter);
+                const auto bow = bowSpeed * envelope * (1.0f - swellDepth + swellDepth * swell) * bite * (1.0f + rosin * rosinJitter);
                 const auto pressure = juce::jlimit (0.0f, 1.0f, grip + expression * 0.75f);
                 const auto difference = bow - bowVelocity;
                 const auto slope = 5.0f - 4.0f * pressure;
@@ -192,6 +211,10 @@ public:
                 force = difference * table * forceScale * envelope;
             }
         }
+        else
+            hairNoise = 0.0f;
+        if (envelope <= 1.0e-5f)
+            hairNoise = 0.0f;
         biteEnvelope *= biteFall;
 
         auto bridge = 0.0f;
@@ -218,6 +241,11 @@ public:
         }
         peakBody = juce::jmax (peakBody, std::abs (sound));
         sound *= outputGain;
+        // The hair's hiss, high-passed, straight out (past the body's top).
+        const auto hiss = hissPole * (hissState + hairNoise - hissLast);
+        hissLast = hairNoise;
+        hissState = hiss;
+        sound += hissLevel * hiss;
         return std::isfinite (sound) ? juce::jlimit (-8.0f, 8.0f, sound) : 0.0f;
     }
 
@@ -229,6 +257,7 @@ private:
             updateModes();
         if (bodyDirty)
             updateBody();
+        updateVibrato();
         // Released: DAMPER takes the string's level down (0 lets it ring).
         if (releasedAt >= 0 && damperAmount > 0.0f)
         {
@@ -250,6 +279,25 @@ private:
         }
     }
 
+    // The vibrato bends every mode by the same ratio once a block (the
+    // losses stay at the note's own pitch).
+    void updateVibrato()
+    {
+        const auto seconds = (double) elapsed / sampleRate;
+        vibratoPhase += (float) (juce::MathConstants<double>::twoPi * vibratoRate * blockSize / sampleRate);
+        if (vibratoPhase > juce::MathConstants<float>::twoPi)
+            vibratoPhase -= juce::MathConstants<float>::twoPi;
+        const auto onset = juce::jlimit (0.0, 1.0, (seconds - vibratoDelay) / vibratoRise);
+        const auto cents = plucked ? 0.0 : (double) vibratoCents * onset * std::sin ((double) vibratoPhase);
+        if (cents == bentCents)
+            return;
+        bentCents = cents;
+        const auto ratio = std::exp2 (cents / 1200.0);
+        const auto k = juce::MathConstants<double>::twoPi / sampleRate;
+        for (int n = 0; n < modes; ++n)
+            turn[n] = (float) (2.0 * (double) decayOf[n] * std::cos (juce::jmin ((double) modeHz[n] * ratio, sampleRate * 0.49) * k));
+    }
+
     void updateModes()
     {
         modesDirty = false;
@@ -266,6 +314,8 @@ private:
             const auto sigma = ((double) loss0 + (double) loss1 * hz * hz) * lossScale;
             const auto decay = std::exp (-sigma * k);
             turn[n] = (float) (2.0 * decay * std::cos (juce::MathConstants<double>::twoPi * hz * k));
+            decayOf[n] = (float) decay;
+            modeHz[n] = (float) hz;
             fall[n] = (float) (decay * decay);
             shape[n] = (float) std::sin (index * juce::MathConstants<double>::pi * (double) bowAt);
             shapeSum += (double) shape[n] * shape[n];
@@ -279,8 +329,11 @@ private:
         for (int n = 0; n < modes; ++n)
             push[n] = (float) (2.0 * k * (double) shape[n] / admittance);
         forceScale = 1.0f;
+        bentCents = 0.0;
         attackCoefficient = (float) (1.0 - std::exp (-1.0 / (attackSeconds () * sampleRate)));
-        releaseCoefficient = (float) (1.0 - std::exp (-1.0 / (0.08 * sampleRate)));
+        releaseCoefficient = (float) (1.0 - std::exp (-1.0 / (0.002 * sampleRate)));
+        swellCoefficient = (float) (1.0 - std::exp (-1.0 / (0.34 * sampleRate)));
+        hissPole = (float) std::exp (-juce::MathConstants<double>::twoPi * 8000.0 / sampleRate);
         biteFall = (float) std::exp (-1.0 / (0.08 * sampleRate));
         if (elapsed == 0)
             biteEnvelope = 1.0f;
@@ -290,8 +343,9 @@ private:
         pluckScale = (float) (5.0 * (double) bowSpeed / (juce::MathConstants<double>::twoPi * juce::jmax (20.0, frequency)));
     }
 
-    // A low string takes longer to speak (as on the Bow exciter).
-    double attackSeconds() const { return 0.05 * juce::jlimit (1.0, 2.5, 220.0 / frequency); }
+    // The bow's contact: a low string takes longer to speak (as on the Bow
+    // exciter); the swell after it shapes the note's rise.
+    double attackSeconds() const { return 0.0025 * juce::jlimit (1.0, 2.5, 220.0 / frequency); }
 
     void updateBody()
     {
@@ -343,13 +397,19 @@ private:
     float envelope = 0.0f, attackCoefficient = 0.001f, releaseCoefficient = 0.001f;
     float biteEnvelope = 1.0f, biteFall = 0.999f, level = 1.0f;
     float halfRate = 22050.0f, forceScale = 1.0f, pluckScale = 1.0f, peakBridge = 0.0f, peakBody = 0.0f;
+    float swell = 0.0f, swellCoefficient = 0.0001f, hairNoise = 0.0f, hissState = 0.0f, hissLast = 0.0f, hissPole = 0.35f;
+    float vibratoCents = 9.0f, vibratoPhase = 0.0f;
+    double bentCents = 0.0;
     std::uint32_t seed = 1;
+    // Fitted to the Spitfire long notes (2026-11-08, see the top).
+    static constexpr float swellDepth = 0.97f, rosinJitter = 0.0905f, hissLevel = 0.0052f;
+    static constexpr double vibratoRate = 5.2, vibratoDelay = 0.25, vibratoRise = 0.4;
     // The output's level: the string's units are tiny (metres of string,
     // narrow resonators); this brings a violin D4 near a plucked string's.
     static constexpr float outputGain = 30000.0f;
 
     alignas (32) float q[maxModes] {}, qp[maxModes] {}, turn[maxModes] {}, fall[maxModes] {};
-    alignas (32) float shape[maxModes] {}, push[maxModes] {}, out[maxModes] {};
+    alignas (32) float shape[maxModes] {}, push[maxModes] {}, out[maxModes] {}, decayOf[maxModes] {}, modeHz[maxModes] {};
     alignas (32) float bodyB0[maxBody] {}, bodyA1[maxBody] {}, bodyA2[maxBody] {}, bodyGain[maxBody] {};
     alignas (32) float bx1[maxBody] {}, bx2[maxBody] {}, by1[maxBody] {}, by2[maxBody] {};
 };

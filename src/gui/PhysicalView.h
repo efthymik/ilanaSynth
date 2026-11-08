@@ -445,7 +445,7 @@ inline std::vector<std::pair<juce::String, std::vector<PhysicalSpec>>> physicalC
         return { { "STRING", { { "_string_decay", "DECAY" }, { "_string_damp", "DAMP" }, { "_string_stiffness", "STIFF" },
                                { "_damper", "DAMPER" } } },
                  { "EXCITER", { { "_excite", "EXCITE" }, { "_string_slap", "PIZZ" }, { "_string_excite_pos", "POSITION" },
-                                { "_bow_pressure", "GRIP" }, { "_bow_speed", "SPEED" }, { "_modal_size", "SIZE" },
+                                { "_bow_pressure", "GRIP" }, { "_bow_speed", "SPEED" }, { "_hammer_hard", "VIBRATO" }, { "_modal_size", "SIZE" },
                                 { "_modal_scale", "SCALE" } } } };
 
     const auto piano = excite == 9;
