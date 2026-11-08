@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../PluginProcessor.h"
+#include "../SamplePaths.h"
 
 // The dialogs of portable sample presets (roadmap step 31): the missing-file
 // prompt (locate one file, or search a folder for all of them), embedding a
@@ -53,8 +54,7 @@ inline juce::String missingText (const std::vector<IlanaSynthAudioProcessor::Mis
             text << "\n...and " << juce::String ((int) missing.size() - 6) << " more";
             break;
         }
-        const juce::File file (entry.path);
-        text << "\nOSC " << juce::String (entry.osc + 1) << ":  " << file.getFileName();
+        text << "\nOSC " << juce::String (entry.osc + 1) << ":  " << SamplePaths::fileNameOf (entry.path);
         if (! entry.partial.isEmpty())
             text << "  (missing " << entry.partial.joinIntoString (", ", 0, 3) << (entry.partial.size() > 3 ? ", ..." : "") << ")";
     }
@@ -107,11 +107,11 @@ inline void promptMissing (IlanaSynthAudioProcessor& processor, Owner owner)
         if (owner == nullptr || choice == 0)
             return;
 
-        const auto start = juce::File (first.path).getParentDirectory().isDirectory() ? juce::File (first.path).getParentDirectory()
-                                                                                       : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+        const auto saved = SamplePaths::folderOf (first.path); // a Windows path on the Mac too
+        const auto start = saved.isDirectory() ? saved : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
         if (choice == 1)
         {
-            chooser() = std::make_unique<juce::FileChooser> ("Locate " + juce::File (first.path).getFileName(), start,
+            chooser() = std::make_unique<juce::FileChooser> ("Locate " + SamplePaths::fileNameOf (first.path), start,
                                                              "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3;*.m4a;*.sf2;*.sfz");
             chooser()->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                                     [&processor, owner, first] (const juce::FileChooser& picked)

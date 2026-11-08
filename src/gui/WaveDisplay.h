@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "../PluginProcessor.h"
+#include "../SamplePaths.h"
 #include "../dsp/SampleFactory.h"
 #include "../dsp/SampleRange.h"
 #include "../dsp/Voice.h"
@@ -1953,7 +1954,7 @@ private:
             // A patch whose file moved says so, instead of looking like an empty slot.
             const auto lost = processorRef.getMissingSamples();
             const auto lostHere = std::find_if (lost.begin(), lost.end(), [this] (const auto& entry) { return entry.osc == oscIndex; });
-            IlanaTheme::drawFitted (g, lostHere != lost.end() ? "Missing file: " + juce::File (lostHere->path).getFileName()
+            IlanaTheme::drawFitted (g, lostHere != lost.end() ? "Missing file: " + SamplePaths::fileNameOf (lostHere->path)
                                                               : juce::String ("Drop a .wav or .sfz here"),
                                     hint.toNearestInt(), juce::Justification::centred, 2);
             const auto pill = juce::Rectangle<float> (110.0f, 28.0f).withCentre (well.getCentre().translated (0.0f, 20.0f));
