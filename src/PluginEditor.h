@@ -17,6 +17,12 @@
 #include <memory>
 #include <vector>
 
+// Windows and Linux draw the UI through Vulkan first (CMake sets
+// ILANA_VULKAN there; macOS never builds it).
+#if ILANA_VULKAN
+ #include "gpu/VulkanAttachment.h"
+#endif
+
 #include "PluginProcessor.h"
 #include "gui/HeaderWidgets.h"
 #include "gui/ConfirmOverlay.h"
@@ -142,6 +148,17 @@ public:
     // Windows always draws with Direct2D, so these do nothing there.
     void setGpuRendering (bool shouldUseGpu);
     bool isGpuRendering() const;
+
+    // Vulkan drawing on Windows and Linux (settings menu > Vulkan rendering,
+    // saved as "vulkanRendering", on by default; ILANA_NO_VULKAN=1 turns it
+    // off for a run). While it draws, OpenGL stays detached; if Vulkan can't
+    // run here or fails later, the editor goes back to Direct2D (Windows) or
+    // to OpenGL when "gpuRendering" is on (Linux). Elsewhere these do nothing.
+    void setVulkanRendering (bool shouldUseVulkan);
+    bool isVulkanRendering() const;
+   #if ILANA_VULKAN
+    ilana::vulkan::Attachment* getVulkanAttachment() const { return vulkan.get(); }
+   #endif
 
 private:
     struct Content : public juce::Component
@@ -464,6 +481,11 @@ private:
 
    #if ILANA_GPU_UI
     std::unique_ptr<juce::OpenGLContext> openGL;
+   #endif
+   #if ILANA_VULKAN
+    std::unique_ptr<ilana::vulkan::Attachment> vulkan;
+    bool openGLWanted = false; // the "gpuRendering" choice, kept while Vulkan draws instead
+    void vulkanFailed();
    #endif
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (IlanaSynthAudioProcessorEditor)
