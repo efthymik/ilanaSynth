@@ -1300,6 +1300,16 @@ void runGlideTimeTest()
         check (std::abs (measured - glide) < 0.05 * glide + 16.0 / 48000.0,
                "GLIDE " + juce::String (glide * 1000.0f) + " ms takes its time (" + juce::String (measured * 1000.0, 1) + " ms)");
     }
+    // The same whatever the host's blocks (a MIDI event splits one): each
+    // sub-block steps by the samples it runs, not a whole 16.
+    const auto reference = measureGlideTime (0.05f, 48000.0, 16);
+    for (const auto blockSize : { 1, 7, 24, 512 })
+    {
+        const auto measured = measureGlideTime (0.05f, 48000.0, blockSize);
+        check (std::abs (measured - reference) < 0.02 * reference + (double) blockSize / 48000.0,
+               "GLIDE's time does not depend on the block size (" + juce::String (blockSize) + ": " + juce::String (measured * 1000.0, 1)
+                   + " ms against " + juce::String (reference * 1000.0, 1) + ")");
+    }
 }
 
 void runGlideMigrationTest()

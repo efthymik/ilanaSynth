@@ -2448,7 +2448,7 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
             evaluateModsRated (mods, i, ampValue, filterValue, filter2Value, modValue, env4Value);
 
             if ((i & 15) == 0)
-                updateSubBlock (mods, filterValue, filter2Value, envelopeValues);
+                updateSubBlock (mods, filterValue, filter2Value, envelopeValues, juce::jmin (16, numSamples - i));
             else if (params.filter1Fm != 0.0f || params.filter2Fm != 0.0f
                      || mods[(int) D::Filter1Fm] != 0.0f || mods[(int) D::Filter2Fm] != 0.0f)
                 updateFilterCoefficients (mods, filterValue, filter2Value);
@@ -3105,7 +3105,7 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
         evaluateModsRated (mods, i, ampValue, filterValue, filter2Value, modValue, env4Value);
 
         if ((i & 15) == 0)
-            updateSubBlock (mods, filterValue, filter2Value, envelopeValues);
+            updateSubBlock (mods, filterValue, filter2Value, envelopeValues, juce::jmin (16, numSamples - i));
         else if (params.filter1Fm != 0.0f || params.filter2Fm != 0.0f
                  || mods[(int) D::Filter1Fm] != 0.0f || mods[(int) D::Filter2Fm] != 0.0f)
             updateFilterCoefficients (mods, filterValue, filter2Value);
@@ -3795,11 +3795,12 @@ double Voice::oscFrequencyFactor (const VoiceParams::OscParams& settings) const
     return currentFrequency * settings.ratio * offset;
 }
 
-void Voice::updateSubBlock (const float* mods, float filterEnvValue, float filter2EnvValue, const float* envelopeValues)
+// (samples: how many the sub-block runs, 16 but at a block's end.)
+void Voice::updateSubBlock (const float* mods, float filterEnvValue, float filter2EnvValue, const float* envelopeValues, int samples)
 {
     using D = Mod::Destination;
 
-    const auto driftedFrequency = advanceGlideAndDrift (mods[(int) D::Drift], 16);
+    const auto driftedFrequency = advanceGlideAndDrift (mods[(int) D::Drift], samples);
 
     // Warp amounts move at sub-block rate: the table-level choice behind them
     // is too costly to redo every sample.
@@ -4125,7 +4126,7 @@ void Voice::renderBodyTail (float* left, float* right, int startSample, int numS
     for (int i = 0; i < numSamples; ++i)
     {
         if ((i & 15) == 0)
-            tuneBody (advanceGlideAndDrift (blockMod (D::Drift), 16));
+            tuneBody (advanceGlideAndDrift (blockMod (D::Drift), juce::jmin (16, numSamples - i)));
         if (fadeTotal > 0)
             ampGainFade = fadeRemaining > 0 ? (float) --fadeRemaining / (float) fadeTotal : 0.0f;
         const auto wetL = materialBodyL.process (0.0f) * wetGain * ampGainFade;
