@@ -96,31 +96,40 @@ set "VST3_DST=%COMMON%\VST3\ilanaSynth.vst3"
 set "FX_DST=%COMMON%\VST3\ilanaSynth FX.vst3"
 set "APP_DST=%PROGRAMS%\ilanaSynth"
 
+rem --- Back up what is installed now (so a bad build can be rolled back) ---
+for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmm"`) do set "STAMP=%%T"
+if not defined STAMP set "STAMP=unknown-time"
+set "BACKUP=%USERPROFILE%\ilanaSynth-backups\%STAMP%-before-install"
+if exist "%VST3_DST%" call :backupdir "%VST3_DST%" "%BACKUP%\ilanaSynth.vst3"
+if errorlevel 1 goto :fail
+if exist "%FX_DST%" call :backupdir "%FX_DST%" "%BACKUP%\ilanaSynth FX.vst3"
+if errorlevel 1 goto :fail
+set "CLAP_DST=%COMMON%\CLAP"
+for %%N in ("ilanaSynth.clap" "ilanaSynth FX.clap") do (
+    if exist "%CLAP_DST%\%%~N" (
+        if not exist "%BACKUP%\CLAP" mkdir "%BACKUP%\CLAP"
+        copy /y "%CLAP_DST%\%%~N" "%BACKUP%\CLAP\" >nul
+    )
+)
+if exist "%BACKUP%" echo Previous install saved to "%BACKUP%"
+
 echo.
 echo === Installing the VST3 to "%VST3_DST%" ===
-robocopy "%VST3_SRC%" "%VST3_DST%" /MIR /NFL /NDL /NJH /NJS /NP >nul
-if errorlevel 8 (
-    echo ERROR: could not copy the VST3. Close your DAW (it may be holding the
-    echo plugin open^) and run this script again.
-    goto :fail
-)
+robocopy "%VST3_SRC%" "%VST3_DST%" /MIR /R:2 /W:2 /NFL /NDL /NJH /NJS /NP
+if errorlevel 8 goto :copyfail
 
 if exist "%FX_SRC%" (
     echo === Installing ilanaSynth FX to "%FX_DST%" ===
-    robocopy "%FX_SRC%" "%FX_DST%" /MIR /NFL /NDL /NJH /NJS /NP >nul
-    if errorlevel 8 (
-        echo ERROR: could not copy ilanaSynth FX. Close your DAW and run this again.
-        goto :fail
-    )
+    robocopy "%FX_SRC%" "%FX_DST%" /MIR /R:2 /W:2 /NFL /NDL /NJH /NJS /NP
+    if errorlevel 8 goto :copyfail
 )
 
-set "CLAP_DST=%COMMON%\CLAP"
 for %%P in ("%~dp0build\ilanaSynth_artefacts\Release\CLAP\ilanaSynth.clap" "%~dp0build\ilanaSynthFX_artefacts\Release\CLAP\ilanaSynth FX.clap") do (
     if exist %%P (
         if not exist "%CLAP_DST%" mkdir "%CLAP_DST%"
         echo === Installing %%~nxP to "%CLAP_DST%" ===
         copy /y %%P "%CLAP_DST%\" >nul
-        if errorlevel 1 echo WARNING: could not copy %%~nxP ^(close your DAW and run this again^).
+        if errorlevel 1 goto :copyfail
     )
 )
 
@@ -144,9 +153,31 @@ echo    CLAP:       %CLAP_DST%
 echo    Standalone: %APP_DST%\ilanaSynth.exe  (shortcut on the desktop)
 echo  Rescan plugins in your DAW to pick it up.
 echo ==========================================================================
+if exist "%BACKUP%" echo  Previous install: %BACKUP%
+if exist "%~dp0build\build-label.txt" (
+    for /f "usebackq delims=" %%L in ("%~dp0build\build-label.txt") do echo Build: %%L
+)
 echo.
 pause
 exit /b 0
+
+:backupdir
+rem  %1 = installed folder, %2 = backup folder. Fails (errorlevel 1) if the copy fails.
+robocopy %1 %2 /E /R:2 /W:2 /NFL /NDL /NJH /NJS /NP
+if errorlevel 8 (
+    echo.
+    echo ERROR: could not back up %1 to %2.
+    exit /b 1
+)
+exit /b 0
+
+:copyfail
+echo.
+echo ERROR: could not copy the plugin files. Close Ableton Live ^(and any other
+echo DAW or the standalone app^) and run this script again. The previous install
+echo if any, was saved to "%BACKUP%".
+pause
+exit /b 1
 
 :fail
 echo.
