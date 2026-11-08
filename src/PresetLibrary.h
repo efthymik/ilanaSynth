@@ -660,8 +660,8 @@ inline void rebuildLegacy (std::vector<FactoryPreset>& list)
               .gateSteps (D1_16, "9909900990990909", 0.25f, 0.0f, 0.45f)
               .delay (D1_8D, 0.35f, 0.2f, true).reverb (Plate, 0.35f, 0.12f));
 
-    // Rig Lead: a guitar-rig solo voice: tube amp, late vibrato, spring and echo.
-    swap (B ("Rig Lead", "Lead")
+    // Amp Solo Lead (was Rig Lead): a guitar-rig solo voice: tube amp, late vibrato, spring and echo.
+    swap (B ("Amp Solo Lead", "Lead")
               .osc1 (SoftSaw, 0.8f, 0.75f).unison (1, 2, 7.0f, 0.5f)
               .osc2 (SoftSquareT, 0.0f, 0.3f, -12)
               .filter1 (AwHolt, 1800.0f, 0.3f, 1.5f, 1.5f, 0.5f).morph (1, 0.4f)

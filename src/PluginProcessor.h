@@ -293,7 +293,7 @@ public:
     // from user preset files for the browser. Message thread only.
     static juce::StringArray getPresetCategoryChoices()
     {
-        return { "Bass", "Lead", "Brass", "Wind", "Pluck", "Pad", "Keys", "Chords", "Arp", "Drone", "FX", "Other" };
+        return { "Bass", "Lead", "Brass", "Wind", "Pluck", "Pad", "Keys", "Chords", "Arp", "Drone", "FX", "Generative", "Drums", "FX Input", "Other" };
     }
 
     void setPresetMeta (const juce::String& category, const juce::String& tags)
