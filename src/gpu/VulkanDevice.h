@@ -18,7 +18,7 @@
 
 namespace ilana::vulkan
 {
-struct Pipelines;
+struct ImageCache;
 
 // One per process, created on first use on the message thread and shared by
 // every editor. All recording and submitting happens on the message thread.
@@ -37,10 +37,15 @@ struct Device
     VkCommandPool commandPool = VK_NULL_HANDLE;
     VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkRenderPass renderPass = VK_NULL_HANDLE; // one BGRA8 colour attachment, LOAD/STORE, stays COLOR_ATTACHMENT_OPTIMAL
+    VkRenderPass renderPass = VK_NULL_HANDLE;      // one BGRA8 colour attachment, LOAD/STORE, stays COLOR_ATTACHMENT_OPTIMAL
+    VkRenderPass clearRenderPass = VK_NULL_HANDLE; // the same, cleared to transparent first (a new transparency layer)
     VkPipeline blendPipeline = VK_NULL_HANDLE;   // premultiplied source-over
     VkPipeline replacePipeline = VK_NULL_HANDLE; // writes the source as it is
     VkSampler nearestSampler = VK_NULL_HANDLE;
+
+    // Textures made from juce::Images, shared by every canvas (VulkanGraphics.cpp).
+    ImageCache* imageCache = nullptr;
+    void destroyCachedTextures();
 
     ~Device();
 
