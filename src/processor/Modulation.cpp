@@ -654,6 +654,7 @@ void IlanaSynthAudioProcessor::applyCcOverride (int parameterIndex, float normal
         return;
 
     normalised = juce::jlimit (0.0f, 1.0f, normalised);
+    const juce::ScopedValueSetter<bool> notAnEdit (undoRecorder.ignoring, true);
     parameter->setValueNotifyingHost (normalised);
     auto heard = parameter->convertFrom0to1 (normalised);
     ccOverrides[(size_t) parameterIndex].compare_exchange_strong (heard, std::numeric_limits<float>::quiet_NaN());

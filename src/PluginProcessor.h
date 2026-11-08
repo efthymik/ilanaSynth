@@ -1594,6 +1594,33 @@ private:
     std::atomic<unsigned> paramEpoch { 0 }, liveEpoch { 0 }, dataEpoch { 0 }, sampleEpoch { 0 };
     ParamEpoch paramEpochListener { paramEpoch };
 
+    // Undo (stability review 4): the value tree has no undo manager, so a
+    // host's automation or a learned CC no longer lands in her history (and
+    // wipes Redo). This records the parameter changes made on the message
+    // thread instead, by the editor (not those of the audio thread, nor a CC
+    // the message thread applies, nor an undo or redo itself), each as a
+    // step that merges with the same parameter's last one, as the tree's
+    // did. A gesture starts a new step (as JUCE's attachments did) unless an
+    // edit (beginEdit) or a named step is waiting for it; the gestures of
+    // one message (a menu choice that sets several parameters) share it.
+    struct ParamUndoRecorder : juce::AudioProcessorParameter::Listener, juce::AsyncUpdater
+    {
+        explicit ParamUndoRecorder (IlanaSynthAudioProcessor& p) : processor (p) {}
+        void prepare (const juce::Array<juce::AudioProcessorParameter*>& parameters);
+        void parameterValueChanged (int index, float value) override;
+        void parameterGestureChanged (int index, bool starting) override;
+        void handleAsyncUpdate() override;
+
+        IlanaSynthAudioProcessor& processor;
+        std::unique_ptr<std::atomic<float>[]> lastValues; // every thread writes these (normalised)
+        int numValues = 0;
+        int openGestures = 0;
+        bool gestureStepOpen = false;
+        bool ignoring = false; // set around changes that are not her edits
+    };
+    struct ParamUndoStep;
+    ParamUndoRecorder undoRecorder { *this };
+
    #if JUCE_LINUX || JUCE_BSD
     struct HostRunLoopKeepAlive final : juce::VST3ClientExtensions
     {

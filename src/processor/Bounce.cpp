@@ -9,7 +9,10 @@
 IlanaSynthAudioProcessor::~IlanaSynthAudioProcessor()
 {
     for (auto* parameter : getParameters())
+    {
         parameter->removeListener (&paramEpochListener);
+        parameter->removeListener (&undoRecorder);
+    }
     for (int slot = 1; slot <= numFxSlots; ++slot)
         if (auto* parameter = apvts.getParameter ("fx_slot" + juce::String (slot)))
             parameter->removeListener (&fxSlotTypeListener);

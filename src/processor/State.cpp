@@ -1574,6 +1574,7 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
     }
 
     apvts.replaceState (state);
+    undoManager.clearUndoHistory(); // (the tree's own undo manager did this; it has none now)
     ensureBuiltInTables();
     // replaceState emptied the undo history: a gesture still open around this
     // load would add a step that restores only the data (a hybrid patch).

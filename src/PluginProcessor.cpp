@@ -105,7 +105,8 @@ IlanaSynthAudioProcessor::IlanaSynthAudioProcessor()
 #else
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
 #endif
-      apvts (*this, &undoManager, "PARAMS", createParameterLayout())
+      // No undo manager: undoRecorder records her parameter edits instead.
+      apvts (*this, nullptr, "PARAMS", createParameterLayout())
 {
     fxMain = std::make_unique<FxEngine> (*this);
     fxRackRunner = std::make_unique<PatchGraph::Runner>();
@@ -131,8 +132,12 @@ IlanaSynthAudioProcessor::IlanaSynthAudioProcessor()
         arpPitchIds[(size_t) step] = "arp_pitch" + n;
     }
 
+    undoRecorder.prepare (getParameters());
     for (auto* parameter : getParameters())
+    {
         parameter->addListener (&paramEpochListener);
+        parameter->addListener (&undoRecorder);
+    }
     for (int slot = 1; slot <= numFxSlots; ++slot)
         if (auto* parameter = apvts.getParameter ("fx_slot" + juce::String (slot)))
             parameter->addListener (&fxSlotTypeListener);
@@ -405,6 +410,93 @@ std::uint32_t hashParamId (const char* id) noexcept
     return hash;
 }
 } // namespace
+
+// One parameter's move, as an undo step (see ParamUndoRecorder).
+struct IlanaSynthAudioProcessor::ParamUndoStep : public juce::UndoableAction
+{
+    ParamUndoStep (juce::AudioProcessorParameter& p, float b, float a) : parameter (p), before (b), after (a) {}
+
+    bool perform() override
+    {
+        // The first perform is the edit itself, already done.
+        if (std::exchange (done, true))
+            parameter.setValueNotifyingHost (after);
+        return true;
+    }
+
+    bool undo() override
+    {
+        parameter.setValueNotifyingHost (before);
+        return true;
+    }
+
+    juce::UndoableAction* createCoalescedAction (juce::UndoableAction* next) override
+    {
+        if (auto* later = dynamic_cast<ParamUndoStep*> (next); later != nullptr && &later->parameter == &parameter)
+        {
+            auto* merged = new ParamUndoStep (parameter, before, later->after);
+            merged->done = true;
+            return merged;
+        }
+        return nullptr;
+    }
+
+    int getSizeInUnits() override { return 10; }
+
+    juce::AudioProcessorParameter& parameter;
+    float before, after;
+    bool done = false;
+};
+
+void IlanaSynthAudioProcessor::ParamUndoRecorder::prepare (const juce::Array<juce::AudioProcessorParameter*>& parameters)
+{
+    numValues = parameters.size();
+    lastValues.reset (new std::atomic<float>[(size_t) juce::jmax (1, numValues)]);
+    for (int i = 0; i < numValues; ++i)
+        lastValues[(size_t) i].store (parameters[i]->getValue());
+}
+
+void IlanaSynthAudioProcessor::ParamUndoRecorder::parameterValueChanged (int index, float value)
+{
+    if (! juce::isPositiveAndBelow (index, numValues))
+        return;
+
+    // Any thread (the host's automation comes on the audio thread): only the
+    // value is kept, so the next edit knows where it started.
+    const auto previous = lastValues[(size_t) index].exchange (value);
+
+    if (ignoring || std::abs (previous - value) < 1.0e-7f || ! juce::MessageManager::existsAndIsCurrentThread()
+        || processor.undoManager.isPerformingUndoRedo())
+        return;
+
+    if (auto* parameter = processor.getParameters()[index])
+        processor.undoManager.perform (new ParamUndoStep (*parameter, previous, value));
+}
+
+void IlanaSynthAudioProcessor::ParamUndoRecorder::parameterGestureChanged (int, bool starting)
+{
+    if (! juce::MessageManager::existsAndIsCurrentThread() || processor.undoManager.isPerformingUndoRedo())
+        return;
+
+    if (starting)
+    {
+        // A step that already has its name (or is new) and an open edit keep it.
+        if (! std::exchange (gestureStepOpen, true) && ! processor.pendingEditData.has_value()
+            && processor.undoManager.getNumActionsInCurrentTransaction() > 0)
+            processor.undoManager.beginNewTransaction();
+        ++openGestures;
+    }
+    else if (openGestures > 0 && --openGestures == 0)
+    {
+        triggerAsyncUpdate(); // the step closes after this message
+    }
+}
+
+void IlanaSynthAudioProcessor::ParamUndoRecorder::handleAsyncUpdate()
+{
+    if (openGestures == 0)
+        gestureStepOpen = false;
+}
 
 void IlanaSynthAudioProcessor::buildParamCache()
 {
