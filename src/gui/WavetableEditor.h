@@ -931,7 +931,7 @@ private:
                 showMessage ("Saved " + written.getFileName());
             else
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Library",
-                                                        "Could not save to " + WavetableDoc::getLibraryFolder().getFullPathName() + ".");
+                                                        "Could not save to " + WavetableDoc::getLibraryFolder().getFullPathName() + ".", juce::String(), this);
         };
 
         const auto existing = WavetableDoc::getLibraryFile (doc.name);
