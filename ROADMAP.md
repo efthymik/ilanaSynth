@@ -1,6 +1,6 @@
 # ilanaSynth roadmap
 
-This is the plan for what comes after v1.1. **v1.2 (M1–M6b) is done, and so is M7 (M7.0–M7.5: follow-ups, the Generative card, the BODY section, electric pianos, the wavetable editor and ilanaSynth FX) M8.1 (chaos and physics modulators) M8.2 (piano rework) M8.3 (west-coast voice) M8.4 (filter models) M8.5 (feedback guitar, Evolve, vector pad) M8.6 (resample to oscillator), M8.7 (polish), M10 (preset pack) and M9 (portability and release quality): v1.3 is feature-complete.**
+This file is the milestone record (M1 to M10). The product is now beta 1.4, heading for RC 1.0 (exit criteria: `docs/RC-1.0-CHECKLIST.md`). **v1.2 (M1–M6b) is done, and so is M7 (M7.0–M7.5: follow-ups, the Generative card, the BODY section, electric pianos, the wavetable editor and ilanaSynth FX) M8.1 (chaos and physics modulators) M8.2 (piano rework) M8.3 (west-coast voice) M8.4 (filter models) M8.5 (feedback guitar, Evolve, vector pad) M8.6 (resample to oscillator), M8.7 (polish), M10 (preset pack) and M9 (portability and release quality): v1.3 was feature-complete; features are frozen until RC 1.0.**
 
 The core of the plan is **one physical modelling engine used in two places**:
 - **PHYSICAL oscillator mode**: any oscillator can be a string or other modelled instrument. It replaces String mode, and old String patches migrate to it.
