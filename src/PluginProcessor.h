@@ -407,6 +407,12 @@ public:
     // Returns 1 if it changed the value.
     static int migrateDenseBoardMix (const std::function<float (const juce::String&, float)>& get,
                                      const std::function<void (const juce::String&, float)>& set);
+    // GLIDE took 16 times its knob's time until 2026-11 (Voice::glideCoeff):
+    // a patch or factory recipe from before gets GLIDE x16 (at most the knob's
+    // 2 s), and its routes and macros into GLIDE reach as far in seconds, so
+    // it glides as it did. Returns how many values it changed.
+    static int migrateGlideTime (const std::function<float (const juce::String&, float)>& get,
+                                 const std::function<void (const juce::String&, float)>& set);
     // The same on the live parameters (after a bounce or a factory preset).
     void migrateOperatorModes();
     bool clearModSlotsForTarget (int destination);

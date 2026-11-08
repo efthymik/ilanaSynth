@@ -1124,7 +1124,8 @@ private:
     // exp2 (offset / 12), worked out per block rather than every sub-block.
     double unisonRatio[VoiceParams::numOscillators][VoiceParams::maxUnison] {};
     float unisonGains[VoiceParams::numOscillators][VoiceParams::maxUnison] {};
-    float glideCoeff = 1.0f;
+    float glideCoeff = 1.0f;   // one glide step's coefficient (16 samples)
+    float glideSamples = 0.0f; // GLIDE's time constant in samples (0: off)
     bool hasPlayedNote = false;
 
     float driftValue = 0.0f;

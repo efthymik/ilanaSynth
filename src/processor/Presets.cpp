@@ -926,6 +926,39 @@ void IlanaSynthAudioProcessor::moveLevelToTrim (std::vector<std::pair<juce::Stri
     values.push_back ({ "output_trim", level });
 }
 
+int IlanaSynthAudioProcessor::migrateGlideTime (const std::function<float (const juce::String&, float)>& get,
+                                               const std::function<void (const juce::String&, float)>& set)
+{
+    constexpr auto factor = 16.0f;  // the old glide's slowness: one coefficient step per 16 samples
+    constexpr auto maxGlide = 2.0f; // the knob's range (ParameterLayout)
+    constexpr auto skew = 0.13f;    // and its skew
+    auto changed = 0;
+
+    // At or under 1 ms GLIDE is off (Voice::startNote); those stay off.
+    if (const auto glide = get ("glide", 0.0f); glide > 0.001f)
+    {
+        set ("glide", juce::jmin (glide * factor, maxGlide));
+        ++changed;
+    }
+
+    // A route adds to the knob's skewed position, (seconds / 2) ^ skew; there
+    // x16 in seconds is x16 ^ skew, so the routes and macros reach as far.
+    const auto depthFactor = std::pow (factor, skew);
+    const auto glideDestination = Mod::destinationForParamId ("glide");
+    for (int slot = 1; slot <= Mod::maxSlots && glideDestination > 0; ++slot)
+    {
+        const auto prefix = "mod" + juce::String (slot);
+        if (juce::roundToInt (get (prefix + "_dst", 0.0f)) != glideDestination)
+            continue;
+        if (const auto depth = get (prefix + "_amt", 0.0f); depth != 0.0f)
+        {
+            set (prefix + "_amt", juce::jlimit (-1.0f, 1.0f, depth * depthFactor));
+            ++changed;
+        }
+    }
+    return changed;
+}
+
 void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
 {
     ++dataEpoch; // what the editor draws changes
@@ -1169,6 +1202,22 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
                                       values.push_back ({ id, value });
                               });
     }
+
+    // The recipes' (and every baked pack's) GLIDE times are in the old,
+    // 16x slow units: they load x16 and glide as they were heard.
+    migrateGlideTime ([&values] (const juce::String& id, float fallback)
+                      {
+                          for (const auto& entry : values)
+                              if (entry.first == id)
+                                  return entry.second;
+                          return fallback;
+                      },
+                      [&values] (const juce::String& id, float value)
+                      {
+                          for (auto& entry : values)
+                              if (entry.first == id)
+                                  entry.second = value;
+                      });
 
     // Step 45: a preset written before Grain Position existed plays its
     // cloud at Sample Start; give it that value.

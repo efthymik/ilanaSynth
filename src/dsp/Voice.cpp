@@ -1461,9 +1461,13 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
         westFolder.setParams (params.west.fold, params.west.symmetry, params.west.stages);
     }
 
-    glideCoeff = params.glideTime > 0.001f
-                     ? 1.0f - std::exp (-1.0f / (float) (params.glideTime * sampleRate))
-                     : 1.0f;
+    // GLIDE is the one-pole's time constant in seconds. It steps once a
+    // sub-block (16 samples), so each step takes the 16-sample coefficient.
+    // (Until 2026-11 it took the one-sample coefficient, which made every
+    // glide 16 times slower than the knob said; old patches and the factory
+    // recipes load with GLIDE x16, migrateGlideTime, and glide as they did.)
+    glideSamples = params.glideTime > 0.001f ? (float) (params.glideTime * sampleRate) : 0.0f;
+    glideCoeff = glideSamples > 0.0f ? 1.0f - std::exp (-16.0f / glideSamples) : 1.0f;
 
     const auto unisonLimit = [this] (const VoiceParams::OscParams& osc)
     {
