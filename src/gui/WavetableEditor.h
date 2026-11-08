@@ -909,14 +909,7 @@ private:
             if (safe == nullptr || result <= 0)
                 return;
             if (result == 1)
-            {
-                juce::File written;
-                if (safe->doc.saveToLibrary (safe->doc.name, &written))
-                    safe->showMessage ("Saved " + written.getFileName());
-                else
-                    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Library",
-                                                            "Could not save to " + WavetableDoc::getLibraryFolder().getFullPathName() + ".");
-            }
+                safe->saveToLibrary();
             else if (result == 2)
             {
                 WavetableDoc::getLibraryFolder().createDirectory();
@@ -925,6 +918,39 @@ private:
             else if (result - 100 < sorted.size())
                 safe->importFile (sorted[result - 100], Wavetable::LoadMode::Frames);
         });
+    }
+
+    // A table of the same name in the library is replaced only when asked;
+    // "Keep both" saves this one as "<name> 2".
+    void saveToLibrary()
+    {
+        const auto save = [this] (const juce::String& fileName)
+        {
+            juce::File written;
+            if (doc.saveToLibrary (fileName, &written))
+                showMessage ("Saved " + written.getFileName());
+            else
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Library",
+                                                        "Could not save to " + WavetableDoc::getLibraryFolder().getFullPathName() + ".");
+        };
+
+        const auto existing = WavetableDoc::getLibraryFile (doc.name);
+        if (! existing.existsAsFile())
+        {
+            save (doc.name);
+            return;
+        }
+
+        juce::Component::SafePointer<WavetableEditor> safe (this);
+        juce::AlertWindow::showYesNoCancelBox (juce::MessageBoxIconType::QuestionIcon, "Library",
+                                               "Replace " + existing.getFileNameWithoutExtension() + "?",
+                                               "REPLACE", "KEEP BOTH", "CANCEL", this,
+                                               juce::ModalCallbackFunction::create ([safe, save] (int choice)
+                                               {
+                                                   if (safe == nullptr || choice == 0)
+                                                       return;
+                                                   save (choice == 1 ? safe->doc.name : WavetableDoc::getUnusedLibraryName (safe->doc.name));
+                                               }));
     }
 
     void showMessage (const juce::String& text)

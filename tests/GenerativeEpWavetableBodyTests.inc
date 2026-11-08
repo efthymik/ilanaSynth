@@ -417,6 +417,12 @@ void runM74WavetableEditorTests()
         check (loaded && imported.getNumFrames() == recipeDoc.getNumFrames() && worst < 1.0e-5f,
                "the exported .wav loads back frame for frame");
 
+        // Exporting over a file swaps it in whole and leaves no temporary file.
+        const auto before = file.getParentDirectory().getNumberOfChildFiles (juce::File::findFiles);
+        check (recipeDoc.exportWav (file) && Wavetable::readWavFrameSize (file) == 2048
+                   && file.getParentDirectory().getNumberOfChildFiles (juce::File::findFiles) == before,
+               "an export over an existing .wav replaces it through a temporary file");
+
         // A sidecar makes a library table editable again.
         auto recipe = recipeDoc.recipeTree();
         if (auto xml = recipe.createXml())

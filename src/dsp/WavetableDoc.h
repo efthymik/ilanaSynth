@@ -104,6 +104,10 @@ public:
     // The user library: Documents/ilanaSynth Wavetables, a .wav plus an
     // .ilwt sidecar holding the recipe.
     static juce::File getLibraryFolder();
+    // The .wav a name saves to (saveToLibrary replaces it), and the name with
+    // " 2", " 3"... added until neither its .wav nor its .ilwt exists.
+    static juce::File getLibraryFile (const juce::String& fileName);
+    static juce::String getUnusedLibraryName (const juce::String& fileName);
     bool saveToLibrary (const juce::String& fileName, juce::File* written = nullptr) const;
     static bool loadFromFile (const juce::File& file, WavetableDoc& doc, Wavetable::LoadMode mode = Wavetable::LoadMode::Automatic);
 
