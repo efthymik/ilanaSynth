@@ -24,5 +24,22 @@ public:
 
     virtual bool isActive() const = 0;
     virtual juce::String describe() const = 0; // device name, swapchain size and present mode
+
+    // For tests (ilanaSnapshot --vulkanlive): what the canvas holds now (the
+    // picture last presented), how many frames were presented and what they
+    // cost on the message thread, and the input events the child window asks
+    // for (X11: every client's event mask on it; -1 elsewhere), which must
+    // be none so the mouse and keyboard reach the editor's own window.
+    struct Stats
+    {
+        int framesPresented = 0;
+        int acquireTimeouts = 0;
+        double lastFrameMs = 0.0;   // acquire, paint, submit and present
+        double totalFrameMs = 0.0;
+    };
+
+    virtual juce::Image readback() = 0;
+    virtual Stats getStats() const = 0;
+    virtual long getNativeInputEventMask() const = 0;
 };
 } // namespace ilana::vulkan
