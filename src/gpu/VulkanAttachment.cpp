@@ -918,6 +918,8 @@ private:
             swapchainStale = true;
 
         const auto region = std::exchange (dirty, {});
+        stats.lastDirty = region.getBounds();
+        stats.repaintFrames += region.isEmpty() ? 0 : 1;
         presentWanted = false;
 
         Canvas::SubmitHooks hooks;

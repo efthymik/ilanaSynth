@@ -33,9 +33,11 @@ public:
     struct Stats
     {
         int framesPresented = 0;
+        int repaintFrames = 0;      // of those, frames that redrew something (the rest only presented again)
         int acquireTimeouts = 0;
         double lastFrameMs = 0.0;   // acquire, paint, submit and present
         double totalFrameMs = 0.0;
+        juce::Rectangle<int> lastDirty; // physical pixels on the canvas, empty for a present-only frame
     };
 
     virtual juce::Image readback() = 0;
