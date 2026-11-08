@@ -1701,6 +1701,8 @@ public:
 
     // Tests only: what the last block sent to the voices.
     const juce::MidiBuffer& getSynthMidiForTest() const { return midiForSynth; }
+    // Tests only: the message thread's pending work (the CCs it applies) now.
+    void runAsyncUpdateForTest() { handleUpdateNowIfNeeded(); }
 
     // Tests only: one arpeggiator note choice from the currently held notes.
     int pickArpNoteForTest (int mode, int octaves) { return selectArpNote (mode, octaves); }

@@ -98,6 +98,7 @@ void timedRun (const char* name, Suite&& suite)
 #include "GranularTests.inc"
 #include "BuiltInTableTests.inc"
 #include "ParamInfoTests.inc"
+#include "HostIntegrationTests.inc"
 #include "DemoRender.inc"
 
 #include "BenchTools.inc"
@@ -333,6 +334,13 @@ int main()
     {
         runClipTests();
         std::cout << (failures == 0 ? "CLIP TESTS PASSED" : "CLIP TESTS FAILED") << " (" << failures << " failures)" << std::endl;
+        return failures == 0 ? 0 : 1;
+    }
+
+    if (juce::SystemStats::getEnvironmentVariable ("ILANA_HOST_TEST", "").isNotEmpty())
+    {
+        runHostIntegrationTests();
+        std::cout << (failures == 0 ? "HOST TESTS PASSED" : "HOST TESTS FAILED") << " (" << failures << " failures)" << std::endl;
         return failures == 0 ? 0 : 1;
     }
 
@@ -851,6 +859,7 @@ int main()
     timedRun ("runBuiltInTableTests", [] { runBuiltInTableTests(); });
     timedRun ("runGranularControlTests", [] { runGranularControlTests(); });
     timedRun ("runParamInfoTests", [] { runParamInfoTests(); });
+    timedRun ("runHostIntegrationTests", [] { runHostIntegrationTests(); });
     timedRun ("runAirwindowsFilterTests", [] { runAirwindowsFilterTests(); });
 
     std::cout << (failures == 0 ? "ALL TESTS PASSED" : "TESTS FAILED")
