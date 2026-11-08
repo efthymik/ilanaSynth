@@ -1030,6 +1030,18 @@ void IlanaSynthAudioProcessor::applyPresetTrims (const char* presetName, const j
             master->second = level;
         else
             values.push_back ({ "master", level });
+
+        // MASTER stops at +12 dB; what is left goes to the soft clip's gain,
+        // which comes straight after it (a trim used to vanish there).
+        const auto* clip = find ("master_clip");
+        if (base + trim->levelDb > 12.0f && (clip == nullptr || clip->second > 0.5f))
+        {
+            const auto rest = base + trim->levelDb - 12.0f;
+            if (auto* gain = find ("master_clip_gain"))
+                gain->second = juce::jlimit (0.0f, 24.0f, gain->second + rest);
+            else
+                values.push_back ({ "master_clip_gain", juce::jlimit (0.0f, 24.0f, rest) });
+        }
     }
 
     for (int slot = 1; slot <= Mod::maxSlots; ++slot)
