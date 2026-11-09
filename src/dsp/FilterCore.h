@@ -51,6 +51,20 @@ inline double prewarp (double sampleRate, double cutoff)
     return std::tan (juce::MathConstants<double>::pi * juce::jlimit (10.0, sampleRate * 0.45, cutoff) / sampleRate);
 }
 
+// Diode LP and 303 Acid run their core above the cutoff (cutoff * lift, up
+// to 4x at low resonance), and prewarp stops at 0.45 sr: the top of CUTOFF
+// did nothing (above about 5.35 kHz at resonance 0, 48 kHz). Past that
+// point the core's g keeps growing as the warped cutoff does, so the
+// passband opens on to the top of the knob. Below it, prewarp as before.
+inline double liftedPrewarp (double sampleRate, double cutoff, double lift)
+{
+    const auto top = sampleRate * 0.45;
+    if (cutoff * lift <= top)
+        return prewarp (sampleRate, cutoff * lift);
+    const auto knee = top / lift; // the cutoff where the core reaches the top
+    return prewarp (sampleRate, top) * prewarp (sampleRate, juce::jmin (cutoff, top)) / prewarp (sampleRate, knee);
+}
+
 // 2x oversampling: a polyphase IIR half-band (two allpass paths, four
 // coefficients; de Soras' design with transition 0.08: flat to 16 kHz at
 // 48 kHz, more than 63 dB down on anything that would fold below 18 kHz).

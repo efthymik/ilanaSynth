@@ -123,6 +123,19 @@ Voice::Voice()
     }
 }
 
+// REPEATABLE RANDOM: every generator of the voice from a given seed (the
+// processor's play start), so a render repeats.
+void Voice::reseedRandom (juce::int64 salt)
+{
+    random.setSeed (12345 + salt);
+    driftRandom.setSeed (54321 + salt);
+    fmNoiseRandom.setSeed (31337 + salt);
+    lfoPoolRandom.setSeed (27183 + salt);
+    liveGrainRandom.setSeed (0x1f3a + salt);
+    zoneRandom.setSeed (0x2b17 + salt);
+    sampleStartRandom.setSeed (0x5a17 + salt);
+}
+
 void Voice::setCurrentPlaybackSampleRate (double newRate)
 {
     juce::SynthesiserVoice::setCurrentPlaybackSampleRate (newRate);
@@ -347,6 +360,7 @@ void Voice::startNote (int midiNoteNumber, float velocity, juce::SynthesiserSoun
 {
     if (paramsSource != nullptr)
         params = *paramsSource;
+    paramsFresh = glidesSnap = true; // a note starts on the knobs' values, not eased in
 
     const auto mono = monoPending;
     const auto legato = mono && monoLegato;
@@ -1334,6 +1348,7 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
     }
 
     sounded = true;
+    retargetGlides (numSamples);
 
     // Step 33: the One Shot that held the release has played out.
     if (oneShotHold && ! oneShotPlaying())
@@ -1461,9 +1476,13 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
         westFolder.setParams (params.west.fold, params.west.symmetry, params.west.stages);
     }
 
-    glideCoeff = params.glideTime > 0.001f
-                     ? 1.0f - std::exp (-1.0f / (float) (params.glideTime * sampleRate))
-                     : 1.0f;
+    // GLIDE is the one-pole's time constant in seconds. It steps once a
+    // sub-block (16 samples), so each step takes the 16-sample coefficient.
+    // (Until 2026-11 it took the one-sample coefficient, which made every
+    // glide 16 times slower than the knob said; old patches and the factory
+    // recipes load with GLIDE x16, migrateGlideTime, and glide as they did.)
+    glideSamples = params.glideTime > 0.001f ? (float) (params.glideTime * sampleRate) : 0.0f;
+    glideCoeff = glideSamples > 0.0f ? 1.0f - std::exp (-16.0f / glideSamples) : 1.0f;
 
     const auto unisonLimit = [this] (const VoiceParams::OscParams& osc)
     {
@@ -1559,42 +1578,30 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
 
     lastStringMode[2] = params.oscillators[2].stringMode;
 
-    const auto panMod = juce::jlimit (-1.0f, 1.0f, blockMod (D::Pan));
-
-    const auto computePans = [this, panMod] (const VoiceParams::OscParams& osc, int numUnison, float oscPanMod,
-                                             float spreadMod, float* gainsL, float* gainsR)
+    // The pans, from the block-rate routes into them eased in (BlockGlide).
     {
-        const auto spread = juce::jlimit (0.0f, 1.0f, osc.spread + spreadMod);
-
-        for (int u = 0; u < numUnison; ++u)
+        constexpr D panDestinations[] { D::Osc1Pan, D::Osc2Pan, D::SubPan,
+                                        D::Osc4Pan, D::Osc5Pan, D::Osc6Pan };
+        constexpr D spreadDestinations[] { D::Osc1Spread, D::Osc2Spread, D::SubSpread,
+                                           D::Osc4Spread, D::Osc5Spread, D::Osc6Spread };
+        const auto minGlide = (int) (0.0005 * sampleRate), maxGlide = (int) (0.025 * sampleRate);
+        const auto target = [&] (BlockGlide& glide, float value)
         {
-            const auto spreadOffset = numUnison > 1
-                                          ? spread * ((float) u / (float) (numUnison - 1) * 2.0f - 1.0f)
-                                          : 0.0f;
-            const auto pan = juce::jlimit (-1.0f, 1.0f, osc.pan + oscPanMod + spreadOffset + panMod
-                                                            + params.voiceSpread * voicePan);
-            const auto angle = (pan * 0.5f + 0.5f) * juce::MathConstants<float>::halfPi;
-            gainsL[u] = std::cos (angle);
-            gainsR[u] = std::sin (angle);
+            if (glidesSnap)
+                glide.snap (value);
+            else
+                glide.retarget (value, glideClock, minGlide, maxGlide);
+        };
+        target (panModGlide, juce::jlimit (-1.0f, 1.0f, blockMod (D::Pan)));
+        for (int osc = 0; osc < VoiceParams::numOscillators; ++osc)
+        {
+            target (oscPanModGlide[(size_t) osc], blockMod (panDestinations[osc]) * Mod::Range::oscPan);
+            target (spreadModGlide[(size_t) osc], blockMod (spreadDestinations[osc]));
         }
-    };
-
-    constexpr D panDestinations[] { D::Osc1Pan, D::Osc2Pan, D::SubPan,
-                                    D::Osc4Pan, D::Osc5Pan, D::Osc6Pan };
-    constexpr D spreadDestinations[] { D::Osc1Spread, D::Osc2Spread, D::SubSpread,
-                                       D::Osc4Spread, D::Osc5Spread, D::Osc6Spread };
-
-    for (int osc = 0; osc < VoiceParams::numOscillators; ++osc)
-        if (osc < 3 || numOscUnison[osc] > 0)
-            computePans (params.oscillators[osc], numOscUnison[osc],
-                         blockMod (panDestinations[osc]) * Mod::Range::oscPan, blockMod (spreadDestinations[osc]),
-                         panGainL[osc], panGainR[osc]);
-
-    computePans (VoiceParams::OscParams {}, 1, 0.0f, 0.0f, &panGainSubOscL, &panGainSubOscR);
-
-    // Each wavetable unison voice's blend gain and pan, folded per block.
-    for (int osc = 0; osc < VoiceParams::numOscillators; ++osc)
-        oscBank[osc].setWeights (unisonGains[osc], panGainL[osc], panGainR[osc], numOscUnison[osc]);
+        target (driveModGlide[0], blockMod (D::Filter1Drive));
+        target (driveModGlide[1], blockMod (D::Filter2Drive));
+    }
+    updatePans();
 
     for (int osc = 0; osc < VoiceParams::numOscillators; ++osc)
     {
@@ -1683,30 +1690,20 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
     resonatorL.setParams (params.resonatorOn ? resonatorAmount : 0.0f, resonatorDecay, 0.35f);
     resonatorR.setParams (params.resonatorOn ? resonatorAmount : 0.0f, resonatorDecay, 0.35f);
 
-    const auto driveAmount1 = juce::jlimit (1.0f, 10.0f, params.filter1.drive + blockMod (D::Filter1Drive) * driveRange);
-    const auto driveAmount2 = juce::jlimit (1.0f, 10.0f, params.filter2.drive + blockMod (D::Filter2Drive) * driveRange);
-    // 303 Acid and Moog Drive take the drive inside (into their feedback
-    // loop's input); every other model is driven by a tanh in front.
-    const auto inside1 = FilterType::drivesInside (params.filter1.type);
-    const auto inside2 = FilterType::drivesInside (params.filter2.type);
-    // A stereo route into a drive: the left side gets more, the right less (2026-10-30).
-    const auto stereoDrive = [this] (float amount, int index)
-    {
-        const auto shift = stereoRouted[(size_t) index] ? blockMod ((Mod::Destination) ((int) Mod::Destination::Count + index)) * driveRange : 0.0f;
-        return DriveAmounts { juce::jlimit (1.0f, 10.0f, amount + shift), juce::jlimit (1.0f, 10.0f, amount - shift) };
-    };
-    const auto drives1 = stereoDrive (driveAmount1, Mod::StereoIndex::drive1);
-    const auto drives2 = stereoDrive (driveAmount2, Mod::StereoIndex::drive2);
-    for (auto* filter : { &filter1L, &bothFilter1L })
-        filter->setDrive (inside1 ? drives1.l : 1.0f);
-    for (auto* filter : { &filter1R, &bothFilter1R })
-        filter->setDrive (inside1 ? drives1.r : 1.0f);
-    for (auto* filter : { &filter2L, &bothFilter2L })
-        filter->setDrive (inside2 ? drives2.l : 1.0f);
-    for (auto* filter : { &filter2R, &bothFilter2R })
-        filter->setDrive (inside2 ? drives2.r : 1.0f);
-    const auto drive1 = inside1 ? DriveAmounts {} : drives1;
-    const auto drive2 = inside2 ? DriveAmounts {} : drives2;
+    applyDrives();
+    const auto& drive1 = drive1Now; // (eased each sub-block while they move: advanceGlides)
+    const auto& drive2 = drive2Now;
+
+    glidesSnap = false;
+    pansMoving = panModGlide.moving() || paramGlides[glideVoiceSpread].moving();
+    for (int osc = 0; osc < VoiceParams::numOscillators; ++osc)
+        pansMoving = pansMoving || oscPanModGlide[(size_t) osc].moving() || spreadModGlide[(size_t) osc].moving()
+                     || paramGlides[(size_t) (glideOscPan + osc)].moving() || paramGlides[(size_t) (glideOscSpread + osc)].moving();
+    drivesMoving = driveModGlide[0].moving() || driveModGlide[1].moving()
+                   || paramGlides[glideDrive1].moving() || paramGlides[glideDrive2].moving();
+    glidesMoving = pansMoving || drivesMoving;
+    for (int k = 0; k < numParamGlides && ! glidesMoving; ++k)
+        glidesMoving = paramGlides[(size_t) k].moving();
 
     auto* left = outputBuffer.getWritePointer (0);
     auto* right = outputBuffer.getNumChannels() > 1 ? outputBuffer.getWritePointer (1) : nullptr;
@@ -1863,6 +1860,9 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
                           : target == 0 && source == 1 ? params.fmAmount
                                                        : params.fmMatrix[source][target];
         if (amount != 0.0f || params.fmMatrix[source][target] != 0.0f)
+            return false;
+        // (FM AMOUNT or FEEDBACK easing in from zero: BlockGlide.)
+        if (target == 0 && source <= 1 && paramGlides[(size_t) (source == 0 ? glideFmFeedback : glideFmAmount)].moving())
             return false;
 
         if (source >= 3 || target >= 3)
@@ -2447,7 +2447,7 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
             evaluateModsRated (mods, i, ampValue, filterValue, filter2Value, modValue, env4Value);
 
             if ((i & 15) == 0)
-                updateSubBlock (mods, filterValue, filter2Value, envelopeValues);
+                updateSubBlock (mods, filterValue, filter2Value, envelopeValues, juce::jmin (16, numSamples - i));
             else if (params.filter1Fm != 0.0f || params.filter2Fm != 0.0f
                      || mods[(int) D::Filter1Fm] != 0.0f || mods[(int) D::Filter2Fm] != 0.0f)
                 updateFilterCoefficients (mods, filterValue, filter2Value);
@@ -3104,7 +3104,7 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
         evaluateModsRated (mods, i, ampValue, filterValue, filter2Value, modValue, env4Value);
 
         if ((i & 15) == 0)
-            updateSubBlock (mods, filterValue, filter2Value, envelopeValues);
+            updateSubBlock (mods, filterValue, filter2Value, envelopeValues, juce::jmin (16, numSamples - i));
         else if (params.filter1Fm != 0.0f || params.filter2Fm != 0.0f
                  || mods[(int) D::Filter1Fm] != 0.0f || mods[(int) D::Filter2Fm] != 0.0f)
             updateFilterCoefficients (mods, filterValue, filter2Value);
@@ -3805,11 +3805,15 @@ double Voice::oscFrequencyFactor (const VoiceParams::OscParams& settings) const
     return currentFrequency * settings.ratio * offset;
 }
 
-void Voice::updateSubBlock (const float* mods, float filterEnvValue, float filter2EnvValue, const float* envelopeValues)
+// (samples: how many the sub-block runs, 16 but at a block's end.)
+void Voice::updateSubBlock (const float* mods, float filterEnvValue, float filter2EnvValue, const float* envelopeValues, int samples)
 {
     using D = Mod::Destination;
 
-    const auto driftedFrequency = advanceGlideAndDrift (mods[(int) D::Drift]);
+    if (glidesMoving)
+        advanceGlides (samples);
+
+    const auto driftedFrequency = advanceGlideAndDrift (mods[(int) D::Drift], samples);
 
     // Warp amounts move at sub-block rate: the table-level choice behind them
     // is too costly to redo every sample.
@@ -3952,21 +3956,181 @@ void Voice::updateSubBlock (const float* mods, float filterEnvValue, float filte
     updateFilterCoefficients (mods, filterEnvValue, filter2EnvValue);
 }
 
-// One sub-block's glide and drift (the drift's random walk steps here, so it
-// stays in step whether the voice renders in full or only its body's tail).
-double Voice::advanceGlideAndDrift (float driftMod)
+float& Voice::glidedParam (int which) noexcept
 {
-    currentFrequency += (baseFrequency - currentFrequency) * (double) glideCoeff;
+    switch (which)
+    {
+        case glideFmAmount:    return params.fmAmount;
+        case glideFmFeedback:  return params.fmFeedback;
+        case glideRingMod:     return params.ringMod;
+        case glideCutoff1:     return params.filter1.cutoffHz;
+        case glideReso1:       return params.filter1.resonance;
+        case glideDrive1:      return params.filter1.drive;
+        case glideCutoff2:     return params.filter2.cutoffHz;
+        case glideReso2:       return params.filter2.resonance;
+        case glideDrive2:      return params.filter2.drive;
+        case glideVoiceSpread: return params.voiceSpread;
+        default: break;
+    }
+    return which < glideOscSpread ? params.oscillators[which - glideOscPan].pan
+                                  : params.oscillators[which - glideOscSpread].spread;
+}
+
+// A render's start: the knobs the processor just sent become the glides'
+// targets, and params holds where each glide is (BlockGlide).
+void Voice::retargetGlides (int numSamples)
+{
+    glideClock += numSamples;
+    if (paramsFresh)
+    {
+        paramsFresh = false;
+        const auto minGlide = (int) (0.0005 * sampleRate), maxGlide = (int) (0.025 * sampleRate);
+        for (int k = 0; k < numParamGlides; ++k)
+        {
+            auto& glide = paramGlides[(size_t) k];
+            if (glidesSnap)
+                glide.snap (glidedParam (k));
+            else
+                glide.retarget (glidedParam (k), glideClock, minGlide, maxGlide);
+        }
+    }
+    for (int k = 0; k < numParamGlides; ++k)
+        if (paramGlides[(size_t) k].moving())
+            glidedParam (k) = paramGlides[(size_t) k].value;
+    // (The processor mirrors FM AMOUNT and FEEDBACK into the matrix.)
+    if (paramGlides[glideFmAmount].moving())
+        params.fmMatrix[1][0] = params.fmAmount;
+    if (paramGlides[glideFmFeedback].moving())
+        params.fmMatrix[0][0] = params.fmFeedback;
+}
+
+// One sub-block of the glides; the pans and drives follow theirs.
+void Voice::advanceGlides (int samples)
+{
+    auto still = true;
+    for (int k = 0; k < numParamGlides; ++k)
+    {
+        auto& glide = paramGlides[(size_t) k];
+        if (! glide.moving())
+            continue;
+        glide.advance (samples);
+        glidedParam (k) = glide.value;
+        still = still && ! glide.moving();
+    }
+    params.fmMatrix[1][0] = params.fmAmount;
+    params.fmMatrix[0][0] = params.fmFeedback;
+    for (auto* glide : { &panModGlide, &driveModGlide[0], &driveModGlide[1] })
+    {
+        glide->advance (samples);
+        still = still && ! glide->moving();
+    }
+    for (int osc = 0; osc < VoiceParams::numOscillators; ++osc)
+    {
+        oscPanModGlide[(size_t) osc].advance (samples);
+        spreadModGlide[(size_t) osc].advance (samples);
+        still = still && ! oscPanModGlide[(size_t) osc].moving() && ! spreadModGlide[(size_t) osc].moving();
+    }
+    if (pansMoving)
+        updatePans();
+    if (drivesMoving)
+        applyDrives();
+    if (still)
+        glidesMoving = pansMoving = drivesMoving = false;
+}
+
+// Each oscillator's unison pans (and the sub's), from the glided knobs and routes.
+void Voice::updatePans()
+{
+    const auto panMod = panModGlide.value;
+
+    const auto computePans = [this, panMod] (const VoiceParams::OscParams& osc, int numUnison, float oscPanMod,
+                                             float spreadMod, float* gainsL, float* gainsR)
+    {
+        const auto spread = juce::jlimit (0.0f, 1.0f, osc.spread + spreadMod);
+
+        for (int u = 0; u < numUnison; ++u)
+        {
+            const auto spreadOffset = numUnison > 1
+                                          ? spread * ((float) u / (float) (numUnison - 1) * 2.0f - 1.0f)
+                                          : 0.0f;
+            const auto pan = juce::jlimit (-1.0f, 1.0f, osc.pan + oscPanMod + spreadOffset + panMod
+                                                            + params.voiceSpread * voicePan);
+            const auto angle = (pan * 0.5f + 0.5f) * juce::MathConstants<float>::halfPi;
+            gainsL[u] = std::cos (angle);
+            gainsR[u] = std::sin (angle);
+        }
+    };
+
+    for (int osc = 0; osc < VoiceParams::numOscillators; ++osc)
+        if (osc < 3 || numOscUnison[osc] > 0)
+            computePans (params.oscillators[osc], numOscUnison[osc], oscPanModGlide[(size_t) osc].value,
+                         spreadModGlide[(size_t) osc].value, panGainL[osc], panGainR[osc]);
+
+    computePans (VoiceParams::OscParams {}, 1, 0.0f, 0.0f, &panGainSubOscL, &panGainSubOscR);
+
+    // Each wavetable unison voice's blend gain and pan.
+    for (int osc = 0; osc < VoiceParams::numOscillators; ++osc)
+        oscBank[osc].setWeights (unisonGains[osc], panGainL[osc], panGainR[osc], numOscUnison[osc]);
+}
+
+// The filters' drives, from the glided DRIVE knobs and routes.
+void Voice::applyDrives()
+{
+    const auto driveAmount1 = juce::jlimit (1.0f, 10.0f, params.filter1.drive + driveModGlide[0].value * driveRange);
+    const auto driveAmount2 = juce::jlimit (1.0f, 10.0f, params.filter2.drive + driveModGlide[1].value * driveRange);
+    // 303 Acid and Moog Drive take the drive inside (into their feedback
+    // loop's input); every other model is driven by a tanh in front.
+    const auto inside1 = FilterType::drivesInside (params.filter1.type);
+    const auto inside2 = FilterType::drivesInside (params.filter2.type);
+    // A stereo route into a drive: the left side gets more, the right less (2026-10-30).
+    const auto stereoDrive = [this] (float amount, int index)
+    {
+        const auto shift = stereoRouted[(size_t) index] ? blockMod ((Mod::Destination) ((int) Mod::Destination::Count + index)) * driveRange : 0.0f;
+        return DriveAmounts { juce::jlimit (1.0f, 10.0f, amount + shift), juce::jlimit (1.0f, 10.0f, amount - shift) };
+    };
+    const auto drives1 = stereoDrive (driveAmount1, Mod::StereoIndex::drive1);
+    const auto drives2 = stereoDrive (driveAmount2, Mod::StereoIndex::drive2);
+    for (auto* filter : { &filter1L, &bothFilter1L })
+        filter->setDrive (inside1 ? drives1.l : 1.0f);
+    for (auto* filter : { &filter1R, &bothFilter1R })
+        filter->setDrive (inside1 ? drives1.r : 1.0f);
+    for (auto* filter : { &filter2L, &bothFilter2L })
+        filter->setDrive (inside2 ? drives2.l : 1.0f);
+    for (auto* filter : { &filter2R, &bothFilter2R })
+        filter->setDrive (inside2 ? drives2.r : 1.0f);
+    drive1Now = inside1 ? DriveAmounts {} : drives1;
+    drive2Now = inside2 ? DriveAmounts {} : drives2;
+}
+
+// One sub-block's glide and drift over its samples (the drift's random walk
+// steps here, so it stays in step whether the voice renders in full or only
+// its body's tail).
+double Voice::advanceGlideAndDrift (float driftMod, int samples)
+{
+    const auto glideStep = samples == 16 || glideSamples <= 0.0f ? glideCoeff
+                                                                 : 1.0f - std::exp (-(float) samples / glideSamples);
+    currentFrequency += (baseFrequency - currentFrequency) * (double) glideStep;
 
     auto driftFactor = 1.0;
     const auto drift = juce::jlimit (0.0f, 1.0f, params.drift + driftMod);
 
     if (drift > 0.0f)
     {
-        if (driftRandom.nextFloat() > 0.995f)
+        // The walk was tuned as 16 samples at 48 kHz a step: a new target
+        // about 15 times a second, a slew of about 0.17 s. Other rates, the
+        // oversampled voices and shorter steps scale the chance and the slew
+        // by the time the step covers (exactly the old numbers at 48 kHz).
+        const auto steps = (double) samples * 3000.0 / sampleRate;
+        auto threshold = 0.995f, slew = 0.002f;
+        if (steps != 1.0)
+        {
+            threshold = (float) (1.0 - 0.005 * steps);
+            slew = (float) (1.0 - std::pow (0.998, steps));
+        }
+        if (driftRandom.nextFloat() > threshold)
             driftTarget = driftRandom.nextFloat() * 2.0f - 1.0f;
 
-        driftValue += (driftTarget - driftValue) * 0.002f;
+        driftValue += (driftTarget - driftValue) * slew;
         driftFactor = std::exp2 ((double) driftValue * (double) drift * 0.25 / 12.0);
     }
 
@@ -4121,7 +4285,7 @@ void Voice::renderBodyTail (float* left, float* right, int startSample, int numS
     for (int i = 0; i < numSamples; ++i)
     {
         if ((i & 15) == 0)
-            tuneBody (advanceGlideAndDrift (blockMod (D::Drift)));
+            tuneBody (advanceGlideAndDrift (blockMod (D::Drift), juce::jmin (16, numSamples - i)));
         if (fadeTotal > 0)
             ampGainFade = fadeRemaining > 0 ? (float) --fadeRemaining / (float) fadeTotal : 0.0f;
         const auto wetL = materialBodyL.process (0.0f) * wetGain * ampGainFade;

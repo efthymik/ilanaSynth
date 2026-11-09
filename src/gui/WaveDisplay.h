@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "../PluginProcessor.h"
+#include "../SamplePaths.h"
 #include "../dsp/SampleFactory.h"
 #include "../dsp/SampleRange.h"
 #include "../dsp/Voice.h"
@@ -787,7 +788,7 @@ public:
                                     {
                                         if (! processor.selectSoundFontPreset (osc, preset.bank, preset.program))
                                             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "SoundFont Preset",
-                                                                                    processor.getLastSampleError());
+                                                                                    processor.getLastSampleError(), juce::String(), safeThis.getComponent());
                                     });
                                     safeThis->repaint();
                                     return;
@@ -797,7 +798,7 @@ public:
                                 {
                                     auto& processor = safeThis->processorRef;
                                     if (result == embedItem || result == embedAllItem)
-                                        SamplePortability::embed (processor, safeThis->oscIndex, result == embedAllItem);
+                                        SamplePortability::embed (processor, safeThis->oscIndex, result == embedAllItem, safeThis.getComponent());
                                     else if (result == collectItem)
                                         SamplePortability::collect (processor, safeThis.getComponent());
                                     else
@@ -1021,7 +1022,7 @@ public:
         }
         if (! processorRef.setSampleSlices (oscIndex, slicing, name))
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Slice",
-                                                    "Only a plain sample can be sliced (a multisample already has its zones).");
+                                                    "Only a plain sample can be sliced (a multisample already has its zones).", juce::String(), this);
         repaint();
     }
 
@@ -1174,7 +1175,7 @@ public:
             switchToSampleMode();
         else
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Load sample",
-                                                    processorRef.getLastSampleError());
+                                                    processorRef.getLastSampleError(), juce::String(), this);
         repaint();
     }
 
@@ -1953,7 +1954,7 @@ private:
             // A patch whose file moved says so, instead of looking like an empty slot.
             const auto lost = processorRef.getMissingSamples();
             const auto lostHere = std::find_if (lost.begin(), lost.end(), [this] (const auto& entry) { return entry.osc == oscIndex; });
-            IlanaTheme::drawFitted (g, lostHere != lost.end() ? "Missing file: " + juce::File (lostHere->path).getFileName()
+            IlanaTheme::drawFitted (g, lostHere != lost.end() ? "Missing file: " + SamplePaths::fileNameOf (lostHere->path)
                                                               : juce::String ("Drop a .wav or .sfz here"),
                                     hint.toNearestInt(), juce::Justification::centred, 2);
             const auto pill = juce::Rectangle<float> (110.0f, 28.0f).withCentre (well.getCentre().translated (0.0f, 20.0f));

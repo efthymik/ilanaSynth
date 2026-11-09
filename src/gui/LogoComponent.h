@@ -6,6 +6,7 @@
 #include "AnimationUtils.h"
 
 class LogoComponent : public juce::Component,
+                      public juce::SettableTooltipClient,
                       private IlanaAnim::FrameTimer
 {
 public:
@@ -25,7 +26,8 @@ public:
 
     LogoComponent()
     {
-        setInterceptsMouseClicks (false, false);
+        // Takes the hover (for the build tooltip) but does nothing on a click.
+        setInterceptsMouseClicks (true, false);
         startTimerHz (30);
     }
 

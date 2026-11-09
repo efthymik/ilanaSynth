@@ -446,7 +446,7 @@ inline juce::String lfoDelay (const juce::String&, float value)
     const auto first = (16 + (a & 15)) << (1 + (a >> 4));
     const auto second = juce::jmax (0x80, first & 0xff80);
     const auto seconds = 2147483648.0 / 25190424.0 * (1.0 / first + 1.0 / second);
-    return seconds < 1.0 ? juce::String (juce::roundToInt (seconds * 1000.0)) + " ms" : describeNumber ((float) seconds, 1) + " s";
+    return secondsText ((float) seconds); // (the same "1.20 s" as every other time)
 }
 
 inline juce::String ofNinetyNine (const juce::String&, float value) { return juce::String (juce::roundToInt (juce::roundToInt (value) * 100.0 / 99.0)) + "%"; }
@@ -913,6 +913,7 @@ inline const HelpRow helpRows[] {
     { is ("voice_spread"), "Random stereo position per voice: instant width for pads." },
     { is ("unison_random"), "Randomises unison start phases for a softer, phasey attack." },
     { is ("mpe_mode"), "Per-note bend and pressure via MIDI channels, \xc2\xb1" "48 st bend range." },
+    { is ("repeat_random"), "On, the random arp, drift and free LFOs start over from the bar at play start, so Freeze and Export play what you heard." },
     { is ("drift"), "Analog-style per-voice pitch instability." },
     { is ("tune_loose"), "Every note lands a little off pitch, up to 40 cents. Zero is in tune." },
     { is ("tune_loose_both"), "On, notes land sharp or flat. Off, only flat, as a loosely tuned string does." },

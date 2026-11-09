@@ -302,6 +302,7 @@ def style_rules(params, category, rng=None):
     if not mono:
         params["glide"] = 0.0
     else:
+        # (Factory glide is in the old 16x-slow units: the plugin loads it x16, migrateGlideTime.)
         params["glide"] = min(params.get("glide", 0.0), 0.012)
         params["glide_legato"] = 1.0
     if category == "Lead" and rng is not None:

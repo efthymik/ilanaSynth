@@ -243,7 +243,7 @@ public:
                 + (bipolar ? "bipolar (-1 to 1 across)" : "unipolar (0 to 1 across)"),
             "Left to right: the source's range.  Bottom to top: what it sends.",
             "Click to add a point, drag the middle dots to bend, double-click to remove.",
-            "Click another row's CURVE to edit that one. To add a route, drag a source onto any knob, then drag its ring on the knob to set the depth.",
+            "Click another row's CURVE to edit it. To add a route, drag a source onto a knob, then drag its ring for the depth.",
         };
         // Two lines to a sentence where the dock is tall enough for three,
         // else one line each, so none runs into QUICK SHAPES.

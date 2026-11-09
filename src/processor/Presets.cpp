@@ -1,7 +1,9 @@
 #include "ProcessorInternal.h"
+#include "../SamplePaths.h"
 
 #include <cstring>
 #include <map>
+#include <set>
 
 namespace
 {
@@ -390,19 +392,15 @@ void IlanaSynthAudioProcessor::handleAsyncUpdate()
                 continue;
 
             if (auto* parameter = apvts.getParameter ("macro" + juce::String (i + 1)))
-                parameter->setValueNotifyingHost (
-                    parameter->convertTo0to1 (pendingMacros[i].load()));
+                applyCcOverride (parameter->getParameterIndex(), parameter->convertTo0to1 (pendingMacros[i].load()));
         }
     }
 
     if (ccPending.exchange (false))
     {
-        const auto& parameters = getParameters();
-
         for (size_t cc = 0; cc < ccParameter.size(); ++cc)
             if (ccValuePending[cc].exchange (false))
-                if (const auto index = ccParameter[cc].load(); juce::isPositiveAndBelow (index, parameters.size()))
-                    parameters[index]->setValueNotifyingHost (pendingCcValues[cc].load());
+                applyCcOverride (pendingCcParameter[cc].load(), pendingCcValues[cc].load());
     }
 
     bool reloadSamples = false;
@@ -445,7 +443,10 @@ void IlanaSynthAudioProcessor::handleAsyncUpdate()
             if (path.isEmpty())
                 continue;
 
-            const juce::File file (path);
+            // The path, or the same place under this home folder (a set saved on the other OS).
+            const auto file = SamplePaths::findFile (path);
+            if (file.existsAsFile() && file.getFullPathName() != path)
+                retargetSampleOptions (i, file.getFullPathName()); // an edited zone map follows its file
 
             if (! file.existsAsFile() || ! loadUserSample (i, file))
             {
@@ -457,7 +458,7 @@ void IlanaSynthAudioProcessor::handleAsyncUpdate()
                     missingSamplePaths[(size_t) i] = path; // a save keeps the path
                     ++missingSamplesVersion;
                     tableNotice = (tableNotice.isEmpty() ? juce::String() : tableNotice + "\n")
-                                  + "Sample not loaded (missing or unreadable): " + file.getFullPathName();
+                                  + "Sample not loaded (missing or unreadable): " + path;
                 }
                 ++tableNoticeVersion;
             }
@@ -487,7 +488,7 @@ void IlanaSynthAudioProcessor::handleAsyncUpdate()
             if (path.isEmpty())
                 continue;
 
-            const juce::File file (path);
+            const auto file = SamplePaths::findFile (path);
 
             if (! file.existsAsFile() || ! loadUserWavetable (i, file, (Wavetable::LoadMode) juce::jlimit (0, 4, mode)))
             {
@@ -499,7 +500,7 @@ void IlanaSynthAudioProcessor::handleAsyncUpdate()
                     missingTablePaths[(size_t) i] = path;
                     missingTableModes[i] = mode;
                     tableNotice = (tableNotice.isEmpty() ? juce::String() : tableNotice + "\n")
-                                  + "Wavetable not loaded (missing or unreadable): " + file.getFullPathName();
+                                  + "Wavetable not loaded (missing or unreadable): " + path;
                 }
                 ++tableNoticeVersion;
             }
@@ -617,6 +618,181 @@ void IlanaSynthAudioProcessor::applyDefaultMacros (const std::array<bool, 4>& ke
     {
         map (3, "SWELL", { { (int) D::AmpAttack, 0.3f } });
     }
+}
+
+namespace
+{
+// ilana's own pack (PresetPackIlana.h): the defaults below leave it as she made it.
+bool isIlanaPackPreset (const char* name)
+{
+    static const auto names = []
+    {
+        std::set<std::string> set;
+        Presets::Library::addIlanaPresets ([&set] (const Presets::FactoryPreset& preset) { set.insert (preset.name); });
+        return set;
+    }();
+    return name != nullptr && names.count (name) > 0;
+}
+} // namespace
+
+// The mod wheel and aftertouch, on a factory preset that routes neither: one
+// route each, picked by category, the way a player expects them to act
+// there (most of the library ignored the wheel). Silent at wheel and
+// pressure 0, so the preset sounds as written until they are touched. Init
+// (an empty matrix by design), the DX7 voices (they already add vibrato)
+// and ilana's own presets are left alone.
+void IlanaSynthAudioProcessor::applyDefaultExpression (const char* presetName, const juce::String& category)
+{
+    using D = Mod::Destination;
+    using S = Mod::Source;
+
+    if (category == "DX7" || isIlanaPackPreset (presetName))
+        return;
+
+    auto wheel = false, pressure = false;
+    std::array<bool, (size_t) numLfos> lfoUsed {};
+    auto anyLfo = -1;
+
+    for (int i = 0; i < Mod::maxSlots; ++i)
+    {
+        const auto slot = readModSlot (i);
+        if (slot.source == S::None)
+            continue;
+        for (const auto source : { slot.source, slot.aux })
+        {
+            wheel = wheel || source == S::ModWheel;
+            pressure = pressure || source == S::Aftertouch || source == S::Expression;
+            auto lfo = Mod::lfoIndexFor (source);
+            if (lfo < 0)
+                lfo = Mod::lfoBIndexFor (source);
+            if (juce::isPositiveAndBelow (lfo, numLfos))
+            {
+                lfoUsed[(size_t) lfo] = true;
+                if (anyLfo < 0 && source == slot.source && slot.destination != 0)
+                    anyLfo = lfo;
+            }
+        }
+    }
+
+    pressure = pressure || getParam ("mpe_mode") > 0.5f;
+    if (wheel && pressure)
+        return;
+
+    const auto route = [this] (S source, int destination, float depth, S via = S::None)
+    {
+        const auto slot = assignModSlot ((int) source, destination, depth);
+        if (slot >= 0 && via != S::None)
+            setModSlotValue (slot, "aux", (float) (int) via);
+    };
+
+    // Brightness: open a closed filter, close an open one.
+    const auto cutoff = (int) D::Filter1Cutoff;
+    const auto closed = getParam ("f1_cutoff") < 8000.0f;
+    const auto bright = [&] (S source, float open, float close) { route (source, cutoff, closed ? open : close); };
+
+    if (category == "Lead")
+    {
+        // Vibrato, on an LFO of its own (one the preset leaves unused and at
+        // its default shape), on every playing oscillator.
+        auto lfo = -1;
+        for (int k = numLfos; k-- > 0;)
+            if (! lfoUsed[(size_t) k] && (int) getParam (lfoIds[(size_t) k].shape) == 0)
+            {
+                lfo = k;
+                break;
+            }
+
+        if (! wheel && lfo >= 0)
+        {
+            const auto prefix = "lfo" + juce::String (lfo + 1);
+            const std::pair<const char*, float> settings[] { { "_rate", 5.2f }, { "_sync", 0.0f }, { "_retrig", 0.0f } };
+            for (const auto& [field, value] : settings)
+                if (auto* parameter = apvts.getParameter (prefix + field))
+                    parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
+
+            const std::pair<const char*, D> pitches[] { { "osc1_on", D::Osc1Pitch }, { "osc2_on", D::Osc2Pitch },
+                                                        { "sub_on", D::SubPitch },   { "osc4_on", D::Osc4Pitch },
+                                                        { "osc5_on", D::Osc5Pitch }, { "osc6_on", D::Osc6Pitch } };
+            for (const auto& [on, destination] : pitches)
+                if (getParam (on) > 0.5f)
+                    route (Mod::lfoSourceFor (lfo), (int) destination, 0.012f, S::ModWheel);
+        }
+
+        if (! pressure && closed)
+            route (S::Aftertouch, cutoff, 0.25f);
+        return;
+    }
+
+    if (category == "Pad" || category == "Chords")
+    {
+        if (! wheel)
+            bright (S::ModWheel, 0.3f, -0.35f);
+        if (! pressure && closed)
+            route (S::Aftertouch, cutoff, 0.2f);
+        return;
+    }
+
+    if (wheel)
+        return;
+
+    if (category == "Pluck" || category == "Keys" || category == "Arp")
+    {
+        const auto fm = getParam ("fm_amount");
+        if (fm > 0.01f && fm < 0.8f)
+            route (S::ModWheel, (int) D::FmAmount, 0.3f);
+        else
+            bright (S::ModWheel, 0.3f, -0.35f);
+    }
+    else if (category == "Bass")
+    {
+        route (S::ModWheel, (int) D::Filter1Drive, 0.5f);
+        if (closed)
+            route (S::ModWheel, cutoff, 0.2f);
+    }
+    else if (category == "Drone")
+    {
+        // Motion: the wheel speeds up an LFO the drone already moves with.
+        if (anyLfo >= 0)
+            route (S::ModWheel, (int) Mod::lfoRateDestinationFor (anyLfo), 0.3f);
+        else
+            bright (S::ModWheel, 0.3f, -0.35f);
+    }
+}
+
+// Velocity brightens a hard hit on plucks, keys, basses and leads that had
+// no velocity on their timbre (more than half the library only got louder).
+// A steep curve keeps it out of the way at ordinary velocities: up to 1.5
+// octaves of cutoff at 127, about 0.2 at 100, next to nothing below 90.
+// Only where FILTER 1 is closed enough for that to be heard; the same
+// presets as applyDefaultExpression are left alone.
+void IlanaSynthAudioProcessor::applyDefaultVelocity (const char* presetName, const juce::String& category)
+{
+    using S = Mod::Source;
+
+    if (! (category == "Pluck" || category == "Keys" || category == "Bass" || category == "Lead") || isIlanaPackPreset (presetName))
+        return;
+    if (getParam ("filter_velocity") > 0.0f)
+        return;
+    for (int i = 0; i < Mod::maxSlots; ++i)
+    {
+        const auto slot = readModSlot (i);
+        if (slot.source == S::Velocity || slot.aux == S::Velocity)
+            return;
+    }
+
+    // Low passes only: a comb, formant or band pass would move in pitch or
+    // vowel, not brightness. An open filter: the FM depth instead, if any.
+    static const std::set<int> lowPasses { 0, 4, 6, 7, 13, 14, 15, 18, 25, 26, 29, 32, 33, 34, 35, 37 };
+    const auto filter = getParam ("f1_cutoff") < 8000.0f && getParam ("f1_reso") <= 0.8f
+                        && lowPasses.count ((int) getParam ("f1_type")) > 0;
+    const auto fm = getParam ("fm_amount");
+    auto slot = -1;
+    if (filter)
+        slot = assignModSlot ((int) S::Velocity, (int) Mod::Destination::Filter1Cutoff, 0.25f);
+    else if (getParam ("osc2_on") > 0.5f && fm > 0.01f && fm < 0.8f)
+        slot = assignModSlot ((int) S::Velocity, (int) Mod::Destination::FmAmount, 0.25f);
+    if (slot >= 0)
+        setModSlotValue (slot, "curve", 1.0f);
 }
 
 namespace
@@ -890,6 +1066,18 @@ void IlanaSynthAudioProcessor::applyPresetTrims (const char* presetName, const j
             master->second = level;
         else
             values.push_back ({ "master", level });
+
+        // MASTER stops at +12 dB; what is left goes to the soft clip's gain,
+        // which comes straight after it (a trim used to vanish there).
+        const auto* clip = find ("master_clip");
+        if (base + trim->levelDb > 12.0f && (clip == nullptr || clip->second > 0.5f))
+        {
+            const auto rest = base + trim->levelDb - 12.0f;
+            if (auto* gain = find ("master_clip_gain"))
+                gain->second = juce::jlimit (0.0f, 24.0f, gain->second + rest);
+            else
+                values.push_back ({ "master_clip_gain", juce::jlimit (0.0f, 24.0f, rest) });
+        }
     }
 
     for (int slot = 1; slot <= Mod::maxSlots; ++slot)
@@ -924,6 +1112,39 @@ void IlanaSynthAudioProcessor::moveLevelToTrim (std::vector<std::pair<juce::Stri
     }
     values.push_back ({ "master", 0.0f });
     values.push_back ({ "output_trim", level });
+}
+
+int IlanaSynthAudioProcessor::migrateGlideTime (const std::function<float (const juce::String&, float)>& get,
+                                               const std::function<void (const juce::String&, float)>& set)
+{
+    constexpr auto factor = 16.0f;  // the old glide's slowness: one coefficient step per 16 samples
+    constexpr auto maxGlide = 2.0f; // the knob's range (ParameterLayout)
+    constexpr auto skew = 0.13f;    // and its skew
+    auto changed = 0;
+
+    // At or under 1 ms GLIDE is off (Voice::startNote); those stay off.
+    if (const auto glide = get ("glide", 0.0f); glide > 0.001f)
+    {
+        set ("glide", juce::jmin (glide * factor, maxGlide));
+        ++changed;
+    }
+
+    // A route adds to the knob's skewed position, (seconds / 2) ^ skew; there
+    // x16 in seconds is x16 ^ skew, so the routes and macros reach as far.
+    const auto depthFactor = std::pow (factor, skew);
+    const auto glideDestination = Mod::destinationForParamId ("glide");
+    for (int slot = 1; slot <= Mod::maxSlots && glideDestination > 0; ++slot)
+    {
+        const auto prefix = "mod" + juce::String (slot);
+        if (juce::roundToInt (get (prefix + "_dst", 0.0f)) != glideDestination)
+            continue;
+        if (const auto depth = get (prefix + "_amt", 0.0f); depth != 0.0f)
+        {
+            set (prefix + "_amt", juce::jlimit (-1.0f, 1.0f, depth * depthFactor));
+            ++changed;
+        }
+    }
+    return changed;
 }
 
 void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
@@ -1170,6 +1391,22 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
                               });
     }
 
+    // The recipes' (and every baked pack's) GLIDE times are in the old,
+    // 16x slow units: they load x16 and glide as they were heard.
+    migrateGlideTime ([&values] (const juce::String& id, float fallback)
+                      {
+                          for (const auto& entry : values)
+                              if (entry.first == id)
+                                  return entry.second;
+                          return fallback;
+                      },
+                      [&values] (const juce::String& id, float value)
+                      {
+                          for (auto& entry : values)
+                              if (entry.first == id)
+                                  entry.second = value;
+                      });
+
     // Step 45: a preset written before Grain Position existed plays its
     // cloud at Sample Start; give it that value.
     for (int osc = 0; osc < OscillatorIds::count; ++osc)
@@ -1316,6 +1553,13 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
         for (size_t macro = 0; macro < 4; ++macro)
             keep[macro] = voicedMacroNames[macro].isNotEmpty();
         applyDefaultMacros (keep);
+    }
+
+    if (index > 0)
+    {
+        const auto category = getFactoryPresetCategories()[index];
+        applyDefaultExpression (presets[(size_t) index].name, category);
+        applyDefaultVelocity (presets[(size_t) index].name, category);
     }
 
     // A recipe, its voicing and the default macros can each route the same

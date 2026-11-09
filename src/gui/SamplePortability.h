@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../PluginProcessor.h"
+#include "../SamplePaths.h"
 
 // The dialogs of portable sample presets (roadmap step 31): the missing-file
 // prompt (locate one file, or search a folder for all of them), embedding a
@@ -37,9 +38,11 @@ private:
     std::function<void (bool)> done;
 };
 
-inline void tell (const juce::String& title, const juce::String& text, juce::MessageBoxIconType icon = juce::MessageBoxIconType::InfoIcon)
+// `owner`: the editor (or a page in it), so the box follows the editor's Interface size.
+inline void tell (const juce::String& title, const juce::String& text, juce::MessageBoxIconType icon = juce::MessageBoxIconType::InfoIcon,
+                  juce::Component* owner = nullptr)
 {
-    juce::AlertWindow::showMessageBoxAsync (icon, title, text);
+    juce::AlertWindow::showMessageBoxAsync (icon, title, text, juce::String(), owner);
 }
 
 inline juce::String missingText (const std::vector<IlanaSynthAudioProcessor::MissingSample>& missing)
@@ -53,8 +56,7 @@ inline juce::String missingText (const std::vector<IlanaSynthAudioProcessor::Mis
             text << "\n...and " << juce::String ((int) missing.size() - 6) << " more";
             break;
         }
-        const juce::File file (entry.path);
-        text << "\nOSC " << juce::String (entry.osc + 1) << ":  " << file.getFileName();
+        text << "\nOSC " << juce::String (entry.osc + 1) << ":  " << SamplePaths::fileNameOf (entry.path);
         if (! entry.partial.isEmpty())
             text << "  (missing " << entry.partial.joinIntoString (", ", 0, 3) << (entry.partial.size() > 3 ? ", ..." : "") << ")";
     }
@@ -83,7 +85,8 @@ inline void searchAndRelink (IlanaSynthAudioProcessor& processor, Owner owner, c
                                  if (processor.relinkSample (osc, file))
                                      ++relinked;
                              if (relinked == 0)
-                                 tell ("Search", "No file with a missing sample's name was found in " + folder.getFullPathName() + ".");
+                                 tell ("Search", "No file with a missing sample's name was found in " + folder.getFullPathName() + ".",
+                                       juce::MessageBoxIconType::InfoIcon, owner.getComponent());
                              if (owner != nullptr)
                                  promptMissing (processor, owner);
                          });
@@ -107,11 +110,11 @@ inline void promptMissing (IlanaSynthAudioProcessor& processor, Owner owner)
         if (owner == nullptr || choice == 0)
             return;
 
-        const auto start = juce::File (first.path).getParentDirectory().isDirectory() ? juce::File (first.path).getParentDirectory()
-                                                                                       : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+        const auto saved = SamplePaths::folderOf (first.path); // a Windows path on the Mac too
+        const auto start = saved.isDirectory() ? saved : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
         if (choice == 1)
         {
-            chooser() = std::make_unique<juce::FileChooser> ("Locate " + juce::File (first.path).getFileName(), start,
+            chooser() = std::make_unique<juce::FileChooser> ("Locate " + SamplePaths::fileNameOf (first.path), start,
                                                              "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3;*.m4a;*.sf2;*.sfz");
             chooser()->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                                     [&processor, owner, first] (const juce::FileChooser& picked)
@@ -120,7 +123,7 @@ inline void promptMissing (IlanaSynthAudioProcessor& processor, Owner owner)
                                         if (owner == nullptr || ! file.existsAsFile())
                                             return;
                                         if (! processor.relinkSample (first.osc, file))
-                                            tell ("Locate", "That file could not be read as a sample.", juce::MessageBoxIconType::WarningIcon);
+                                            tell ("Locate", "That file could not be read as a sample.", juce::MessageBoxIconType::WarningIcon, owner.getComponent());
                                         // Its neighbours often moved with it.
                                         for (const auto& [osc, sibling] : processor.findMissingSampleFiles (file.getParentDirectory(), false))
                                             processor.relinkSample (osc, sibling);
@@ -141,14 +144,14 @@ inline void promptMissing (IlanaSynthAudioProcessor& processor, Owner owner)
     }), true);
 }
 
-inline void embed (IlanaSynthAudioProcessor& processor, int oscIndex, bool all)
+inline void embed (IlanaSynthAudioProcessor& processor, int oscIndex, bool all, juce::Component* owner = nullptr)
 {
     juce::String error;
     const auto count = all ? processor.embedAllSamples (error) : (processor.embedSample (oscIndex, error) ? 1 : 0);
     if (error.isNotEmpty())
-        tell ("Embed samples", error, juce::MessageBoxIconType::WarningIcon);
+        tell ("Embed samples", error, juce::MessageBoxIconType::WarningIcon, owner);
     else if (count == 0)
-        tell ("Embed samples", "There is no sample file to store in the patch.");
+        tell ("Embed samples", "There is no sample file to store in the patch.", juce::MessageBoxIconType::InfoIcon, owner);
 }
 
 inline void collect (IlanaSynthAudioProcessor& processor, Owner owner)
@@ -172,11 +175,11 @@ inline void collect (IlanaSynthAudioProcessor& processor, Owner owner)
                                                                                                  return ! self.threadShouldExit();
                                                                                              });
                                                      },
-                                                     [result, folder] (bool)
+                                                     [result, folder, owner] (bool)
                                                      {
                                                          if (result->error.isNotEmpty())
                                                          {
-                                                             tell ("Collect samples", result->error, juce::MessageBoxIconType::WarningIcon);
+                                                             tell ("Collect samples", result->error, juce::MessageBoxIconType::WarningIcon, owner.getComponent());
                                                              return;
                                                          }
                                                          auto text = result->cancelled ? juce::String ("Stopped. ") : juce::String();
@@ -184,7 +187,7 @@ inline void collect (IlanaSynthAudioProcessor& processor, Owner owner)
                                                               << ", and the patch now plays them from there. Save the preset to keep that.";
                                                          if (! result->missing.isEmpty())
                                                              text << "\n\nNot found, so not copied:\n" << result->missing.joinIntoString ("\n", 0, 5);
-                                                         tell ("Collect samples", text);
+                                                         tell ("Collect samples", text, juce::MessageBoxIconType::InfoIcon, owner.getComponent());
                                                      });
                                 job->launchThread();
                             });

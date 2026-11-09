@@ -193,7 +193,7 @@ inline std::complex<double> response (int type, bool slope24, double resonance, 
                 // model tunes it (at 48 kHz).
                 const auto r = resonance;
                 const auto lift = std::pow (Filters2::Acid303::lift0, 1.0 - std::pow (r, Filters2::Acid303::liftPower));
-                const auto g = std::tan (juce::MathConstants<double>::pi * juce::jmin (cutoff * lift, 21000.0) / 48000.0);
+                const auto g = FilterCore::liftedPrewarp (48000.0, cutoff, lift);
                 const auto gHp = std::tan (juce::MathConstants<double>::pi * Filters2::Acid303::feedbackHpHz / 48000.0);
                 const auto tuning = Filters2::Acid303::tuningFor (gHp / g);
                 const auto hpGain = g / std::sqrt (g * g + gHp * gHp);
@@ -282,7 +282,7 @@ inline std::complex<double> response (int type, bool slope24, double resonance, 
         // The diode-ladder core as DiodeFilter tunes it (at 48 kHz).
         const auto lift = std::pow (DiodeTuning::lift0, 1.0 - std::pow (resonance, DiodeTuning::liftPower));
         const auto k = juce::jmin (0.97, resonance) * DiodeTuning::threshold * 1.02;
-        const auto g = std::tan (juce::MathConstants<double>::pi * juce::jmin (cutoff * lift, 21000.0) / 48000.0);
+        const auto g = FilterCore::liftedPrewarp (48000.0, cutoff, lift);
         const auto warped = std::tan (juce::MathConstants<double>::pi * juce::jmin (cutoff, 21000.0) / 48000.0);
         const auto sc = s * (warped / g) * DiodeTuning::oscillationRatio;
         const auto out = FilterCore::DiodeLadderCore::coreResponse (sc, false);
@@ -634,7 +634,7 @@ public:
         Coefficients c;
         const auto r = juce::jlimit (0.0, 1.0, resonance);
         const auto lift = std::pow (lift0, 1.0 - std::pow (r, liftPower));
-        c.h = FilterCore::prewarp (sampleRate, cutoff * lift) / oscillationRatio;
+        c.h = FilterCore::liftedPrewarp (sampleRate, cutoff, lift) / oscillationRatio;
         c.k = r * threshold * 1.02;
         const auto makeUp = compensationBase * (1.0 + compensationPerK * c.k);
         c.post = std::pow (makeUp, outputShare);

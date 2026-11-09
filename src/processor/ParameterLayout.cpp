@@ -394,7 +394,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout IlanaSynthAudioProcessor::cr
     // Global
     addFloat ("amp_velocity", "Amp Velocity", 0.0f, 1.0f, 0.3f);
     addFloat ("filter_velocity", "Filter Velocity", 0.0f, 1.0f, 0.0f); // (scales the FILTER ENV source by velocity; the old default 0.5 belonged to the removed ENV AMOUNT)
-    addFloat ("glide", "Glide", 0.0f, 2.0f, 0.0f, 0.13f); // (skew 0.13: 10 ms sits at half the travel; most glides are 0-10 ms, the longer ones effects)
+    addFloat ("glide", "Glide", 0.0f, 2.0f, 0.0f, 0.13f); // (skew 0.13: 10 ms sits at half the travel. The factory glides were 0-10 ms when GLIDE ran 16x slow; they load x16, migrateGlideTime)
     addFloat ("bend_range", "Bend Range", 0.0f, 24.0f, 2.0f, 1.0f, 1.0f);
     addFloat ("drift", "Drift", 0.0f, 1.0f, 0.0f);
     addFloat ("tune_loose", "Loose Tuning", 0.0f, 40.0f, 0.0f); // cents
@@ -1448,6 +1448,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout IlanaSynthAudioProcessor::cr
         addChoice ("vec_e", "Vector Corner E", oscillators, 4);
         addChoice ("vec_f", "Vector Corner F", oscillators, 5);
     }
+
+    // REPEATABLE RANDOM (stability review 5): the random generators re-seed
+    // from the transport position at play start, so playback, Freeze and
+    // Export match. Off, free as in every older patch.
+    addChoice ("repeat_random", "Repeatable Random", { "Off", "On" }, 0);
 
     // The modal exciters' SIZE (the body: x0.25..x4) and SCALE (the
     // string's length: x0.5..x2), both as recorded at the middle (2026-11-06).

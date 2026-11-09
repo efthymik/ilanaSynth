@@ -26,6 +26,7 @@ public:
         if (newMode != mode)
         {
             heldNotes.clearQuick();
+            pendingCount = 0;
 
             // Leaving poly: let the extra voices ring out rather than cut.
             if (newMode != Mode::Poly)
@@ -154,6 +155,9 @@ public:
 
         if (mode == Mode::Poly)
         {
+            const juce::ScopedLock sl (lock);
+            dropPending (midiChannel, midiNoteNumber); // the key again: this note replaces it
+            noteOnVelocity = velocity;
             Synthesiser::noteOn (midiChannel, midiNoteNumber, velocity);
             return;
         }
@@ -172,6 +176,14 @@ public:
     {
         if (mode == Mode::Poly)
         {
+            {
+                // A note still waiting for its voice (below) plays its
+                // release once it starts, as a note this short would.
+                const juce::ScopedLock sl (lock);
+                for (int i = 0; i < pendingCount; ++i)
+                    if (pending[(size_t) i].channel == midiChannel && pending[(size_t) i].note == midiNoteNumber)
+                        pending[(size_t) i].released = true;
+            }
             Synthesiser::noteOff (midiChannel, midiNoteNumber, velocity, allowTailOff);
 
             // MPE: a member channel with no key down has no pressure left, so
@@ -211,6 +223,7 @@ public:
         {
             const juce::ScopedLock sl (lock);
             heldNotes.clearQuick();
+            pendingCount = 0;
         }
 
         Synthesiser::allNotesOff (midiChannel, allowTailOff);
@@ -219,13 +232,18 @@ public:
     // MULTI-CORE: the sounding voices of a sub-block render on several
     // cores (VoiceThreads), the same sound as one after another. Off the
     // audio thread: numWorkers extra threads (0: one core), buffers for
-    // sub-blocks of up to maxSamples.
-    void prepareVoiceThreads (int numWorkers, int maxSamples)
+    // sub-blocks of up to maxSamples (the threads' real-time budget is a
+    // host block of blockSamples at hostRate).
+    void prepareVoiceThreads (int numWorkers, int maxSamples, int blockSamples, double hostRate)
     {
         voiceThreads.prepare (numWorkers, voices.size(), maxSamples,
                               [this] (int voice, juce::AudioBuffer<float>& buffer, int start, int length)
-                              { voices.getUnchecked (voice)->renderNextBlock (buffer, start, length); });
+                              { voices.getUnchecked (voice)->renderNextBlock (buffer, start, length); },
+                              blockSamples, hostRate);
     }
+
+    // The host's audio workgroup for the voice threads (VoiceThreads::setWorkgroup).
+    bool setVoiceThreadsWorkgroup (const juce::AudioWorkgroup& workgroup) noexcept { return voiceThreads.setWorkgroup (workgroup); }
 
     void setVoiceThreadsEnabled (bool shouldUse) noexcept { useVoiceThreads = shouldUse; }
 
@@ -236,6 +254,26 @@ public:
 
 protected:
     void renderVoices (juce::AudioBuffer<float>& buffer, int startSample, int numSamples) override
+    {
+        // Notes waiting for a stolen voice's fade (findFreeVoice): render up
+        // to the first fade's end, start what is free, go on.
+        while (pendingCount > 0 && numSamples > 0)
+        {
+            startPendingNotes();
+            if (pendingCount == 0)
+                break;
+            auto until = numSamples;
+            for (int i = 0; i < pendingCount; ++i)
+                until = juce::jmin (until, juce::jmax (1, pending[(size_t) i].voice->getFadeRemaining()));
+            renderVoicesNow (buffer, startSample, until);
+            startSample += until;
+            numSamples -= until;
+        }
+        if (numSamples > 0)
+            renderVoicesNow (buffer, startSample, numSamples);
+    }
+
+    void renderVoicesNow (juce::AudioBuffer<float>& buffer, int startSample, int numSamples)
     {
         if (sustainVoiceCap > 0)
             capSustainedVoices();
@@ -270,18 +308,33 @@ protected:
             if (voice->isVoiceActive() && ! isFading (voice))
                 ++active;
 
-        if (active >= polyLimit)
+        // (Notes waiting for a voice count as playing.)
+        if (active + pendingCount >= polyLimit)
         {
             auto* victim = stealActiveVoice();
+            auto* stolen = dynamic_cast<Voice*> (victim);
 
             // A free voice plays the new note while the stolen one fades out.
-            if (spareVoices > 0 && victim != nullptr)
+            if (spareVoices > 0 && stolen != nullptr && stolen->hasSounded())
+            {
+                const auto fade = (int) (0.008 * getSampleRate());
                 if (auto* spare = Synthesiser::findFreeVoice (sound, midiChannel, midiNoteNumber, false))
-                    if (auto* stolen = dynamic_cast<Voice*> (victim); stolen != nullptr && stolen->hasSounded())
-                    {
-                        stolen->startFadeOut ((int) (0.008 * getSampleRate()));
-                        return spare;
-                    }
+                {
+                    stolen->startFadeOut (fade);
+                    return spare;
+                }
+
+                // No spare left (a big chord over full voices): the note
+                // waits the 8 ms for the stolen voice to fade, rather than
+                // cutting it dead (a click). A voice already waited for is
+                // only taken when every voice is fading.
+                if (! dropPending (stolen) && pendingCount < (int) pending.size())
+                {
+                    stolen->startFadeOut (fade);
+                    pending[(size_t) pendingCount++] = { stolen, sound, midiChannel, midiNoteNumber, noteOnVelocity, false };
+                    return nullptr;
+                }
+            }
 
             return victim;
         }
@@ -344,6 +397,64 @@ private:
                 return;
             oldest->startFadeOut ((int) (0.04 * getSampleRate()));
         }
+    }
+
+    // A note waiting for the voice it stole to fade out (findFreeVoice).
+    struct PendingNote
+    {
+        Voice* voice = nullptr;
+        juce::SynthesiserSound* sound = nullptr;
+        int channel = 0, note = 0;
+        float velocity = 0.0f;
+        bool released = false;
+    };
+    mutable std::array<PendingNote, 64> pending {};
+    mutable int pendingCount = 0;
+    float noteOnVelocity = 0.8f;
+
+    // Forgets the waiting notes on that voice, or on that key; whether any were.
+    bool dropPending (const Voice* voice) const noexcept
+    {
+        return dropPendingIf ([voice] (const PendingNote& p) { return p.voice == voice; });
+    }
+    bool dropPending (int channel, int note) const noexcept
+    {
+        return dropPendingIf ([channel, note] (const PendingNote& p) { return p.channel == channel && p.note == note; });
+    }
+    template <typename Match>
+    bool dropPendingIf (Match match) const noexcept
+    {
+        auto kept = 0;
+        for (int i = 0; i < pendingCount; ++i)
+            if (! match (pending[(size_t) i]))
+                pending[(size_t) kept++] = pending[(size_t) i];
+        const auto dropped = kept != pendingCount;
+        pendingCount = kept;
+        return dropped;
+    }
+
+    // Starts the waiting notes whose voice has finished its fade.
+    void startPendingNotes()
+    {
+        auto kept = 0;
+        for (int i = 0; i < pendingCount; ++i)
+        {
+            const auto p = pending[(size_t) i];
+            if (p.voice->isVoiceActive())
+            {
+                if (p.voice->isFadingOut()) // (else another note took the voice: this one is dropped)
+                    pending[(size_t) kept++] = p;
+                continue;
+            }
+            startVoice (p.voice, p.sound, p.channel, p.note, p.velocity);
+            if (p.released)
+            {
+                p.voice->setKeyDown (false);
+                if (! p.voice->isSustainPedalDown())
+                    stopVoice (p.voice, 0.0f, true);
+            }
+        }
+        pendingCount = kept;
     }
 
     VoiceSharedState shared;

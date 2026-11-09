@@ -9,6 +9,7 @@
 #endif
 
 #include "PluginEditor.h"
+#include "BuildInfo.h"
 
 #include <set>
 
@@ -326,7 +327,7 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
     // KEYS and ? sit at the right of the tab row, beside SCOPE (the status
     // line they shared is now only a hover line over the chips).
     keysButton.setClickingTogglesState (true);
-    keysButton.setTooltip ("Keyboard\nShow or hide the on-screen keyboard.  It sits below the synth and makes the window taller.");
+    updateKeysTooltip();
     keysButton.onClick = [this] { setKeyboardVisible (keysButton.getToggleState()); };
     helpButton.setTooltip ("Welcome tour\nThe one-minute tour: the essentials, the shortcuts and what's new.");
     helpButton.onClick = [this]
@@ -896,6 +897,15 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
         setPresetDockShown (true);
     displayScaleApplied = settings->containsKey ("uiZoom") && ! juce::approximatelyEqual (uiZoom, 1.0f);
 
+    // Back on the page the window was left on (only the tabs in the row; the pages behind it are for tests).
+    if (processorRef.lastViewPage.isNotEmpty())
+        for (int index = 0; index < visibleTabCount && index < (int) sections.size(); ++index)
+            if (sections[(size_t) index]->indexOf (processorRef.lastViewPage) >= 0)
+            {
+                showPage (processorRef.lastViewPage);
+                break;
+            }
+
     headerScope.setVisible (settings->getBoolValue ("headerWaveform", true));
     // Off by default on macOS: JUCE's OpenGL renderer rasterises paths on the
     // CPU and uploads them through Apple's OpenGL-on-Metal layer, and measured
@@ -1125,6 +1135,8 @@ IlanaSynthAudioProcessorEditor::~IlanaSynthAudioProcessorEditor()
     ModNames::openMatrixRow() = nullptr;
     ModNames::fxSlotEffectName() = nullptr;
     tableBrowserSettings() = nullptr;
+    if (const auto page = getCurrentPageId(); page.isNotEmpty())
+        processorRef.lastViewPage = page;
     closeWavetableEditor();
     tabs.getTabbedButtonBar().removeChangeListener (this);
     processorRef.getUndoManager().removeChangeListener (this);
@@ -1210,8 +1222,29 @@ void IlanaSynthAudioProcessorEditor::applyUiZoom (float newZoom)
     }
 
     applyAspectAndLimits();
-    setSize (juce::roundToInt ((float) currentDesignWidth() * uiZoom),
-             juce::roundToInt ((float) totalDesignHeight() * uiZoom));
+    // The saved zoom stays as picked; the window is capped to the screen it opens on.
+    const auto shown = juce::jmin (uiZoom, fitZoom());
+    setSize (juce::roundToInt ((float) currentDesignWidth() * shown),
+             juce::roundToInt ((float) totalDesignHeight() * shown));
+}
+
+// The biggest zoom at which the window fits the display's usable area (the editor's units are the
+// display's logical pixels: a host scale and the display's scale cancel). 2.0 when there is no display.
+float IlanaSynthAudioProcessorEditor::fitZoom() const
+{
+    auto& displays = juce::Desktop::getInstance().getDisplays();
+    const auto* display = getPeer() != nullptr ? displays.getDisplayForRect (getScreenBounds()) : displays.getPrimaryDisplay();
+
+    if (display == nullptr)
+        display = displays.getPrimaryDisplay();
+
+    if (display == nullptr || display->userArea.isEmpty())
+        return 2.0f;
+
+    const auto room = 0.97f; // (a little for the title bar and the edge)
+    const auto fit = juce::jmin ((float) display->userArea.getWidth() * room / (float) currentDesignWidth(),
+                                 (float) display->userArea.getHeight() * room / (float) totalDesignHeight());
+    return juce::jlimit (0.75f, 2.0f, fit);
 }
 
 void IlanaSynthAudioProcessorEditor::applyAspectAndLimits()
@@ -1729,6 +1762,32 @@ void IlanaSynthAudioProcessorEditor::timerCallback()
     if (processorRef.takeMissingSamplesPrompt())
         SamplePortability::promptMissing (processorRef, this);
 
+    // A wavetable file that was not there, and anything a session load had to change or drop: told once.
+    if (const auto version = processorRef.getTableNoticeVersion(); version != shownTableNoticeVersion)
+    {
+        shownTableNoticeVersion = version;
+
+        if (const auto notice = processorRef.getTableNotice(); notice.isNotEmpty())
+        {
+            SamplePortability::tell ("Wavetable not loaded", notice + "\n\nThe oscillator plays the default table until you load the file again from its wavetable menu.",
+                                     juce::MessageBoxIconType::WarningIcon, this);
+            processorRef.clearTableNotice(); // (the editor's own bump of the version is not another notice)
+            shownTableNoticeVersion = processorRef.getTableNoticeVersion();
+        }
+    }
+
+    if (const auto version = processorRef.getStateLoadNoticeVersion(); version != processorRef.shownStateLoadNoticeVersion)
+    {
+        processorRef.shownStateLoadNoticeVersion = version;
+
+        if (const auto notice = processorRef.getStateLoadNotice(); notice.isNotEmpty())
+            SamplePortability::tell ("Session loaded with changes", notice, juce::MessageBoxIconType::WarningIcon, this);
+    }
+
+    // Where the window was left, for the next time it opens.
+    if (const auto page = getCurrentPageId(); page.isNotEmpty())
+        processorRef.lastViewPage = page;
+
     // "Edited" marker: cheap checksum of every parameter against the one
     // taken when the preset was loaded.
     if (presetLoadFlash <= 0.01f)
@@ -1906,10 +1965,11 @@ void IlanaSynthAudioProcessorEditor::resized()
 {
     const auto scale = (float) getHeight() / (float) totalDesignHeight();
     IlanaTheme::uiScaleRef() = scale * hostScaleFactor();
+    IlanaTheme::tooltipZoomRef() = scale; // (the tooltip window sits outside the scaled content)
 
     // A corner drag changes the zoom; remember it (saved on the timer so a
     // drag doesn't hit the disk on every step).
-    if (displayScaleApplied && std::abs (scale - uiZoom) > 0.005f)
+    if (displayScaleApplied && std::abs (scale - juce::jmin (uiZoom, fitZoom())) > 0.005f)
     {
         uiZoom = scale;
         zoomNeedsSaving = true;
@@ -1930,6 +1990,7 @@ void IlanaSynthAudioProcessorEditor::resized()
         logo.setBounds (14 - margin, 9 - margin, 160 + margin, 34 + 2 * margin);
     }
     logo.version = juce::String ("v") + appVersion;
+    logo.setTooltip ("ilanaSynth " + juce::String (appVersion) + "\n" + juce::String (ilana::buildLabel()));
 
     constexpr int key = 30, step = 10, rowY = 11;
     int x = designWidth - 14;
@@ -2084,6 +2145,15 @@ juce::Rectangle<int> IlanaSynthAudioProcessorEditor::stereoPopoverBounds() const
     return juce::Rectangle<int> (StereoPopover::width, StereoPopover::height)
         .withPosition (button.getCentreX() - StereoPopover::width / 2, dockBounds.getY() - StereoPopover::height - 2)
         .constrainedWithin (area.reduced (4, 0).withTrimmedBottom (-2));
+}
+
+// The KEYBOARD button's tooltip: the strip, and the computer keys with the octave they play now.
+void IlanaSynthAudioProcessorEditor::updateKeysTooltip()
+{
+    keysButton.setTooltip ("Keyboard\nShow or hide the on-screen keyboard.  It sits below the synth and makes the window taller.\n"
+                           "The computer keys play too: A to K are the white keys (W E T Y U O P the black ones), Z and X move the octave (now from "
+                           + juce::MidiMessage::getMidiNoteName (60 + 12 * noteKeyOctave, true, true, 3)
+                           + "), Ctrl or Cmd with Left and Right step through presets.");
 }
 
 void IlanaSynthAudioProcessorEditor::setStereoOpen (bool open)
@@ -3468,7 +3538,8 @@ void IlanaSynthAudioProcessorEditor::showSettingsMenu (bool tuningOnly)
 
     for (int i = 0; i < 6; ++i)
         sizes.addItem (200 + i, juce::String (juce::roundToInt (zoomChoices[i] * 100.0f)) + "%",
-                       true, juce::approximatelyEqual (uiZoom, zoomChoices[i]));
+                       zoomChoices[i] <= fitZoom() + 0.001f || juce::approximatelyEqual (uiZoom, zoomChoices[i]),
+                       juce::approximatelyEqual (uiZoom, zoomChoices[i]));
 
     // Engine quality and oversampling, also on the scope panel (where they were
     // hard to find).
@@ -3502,9 +3573,8 @@ void IlanaSynthAudioProcessorEditor::showSettingsMenu (bool tuningOnly)
                     false, processorRef.isMtsEspConnected());
 
     juce::PopupMenu menu;
-    // One voice panel: OSC > VOICE (review 10, S10-1); the header's VOICES
-    // opens it too.
-    menu.addItem (960, "Voice settings (OSC > VOICE)...");
+    // The voice settings are in the bottom bar (VOICE MODE and the rest); the header's VOICES opens the same menu.
+    menu.addItem (960, "Voice mode (bottom bar)...");
     menu.addSeparator();
     menu.addSubMenu ("Skin", skins);
     menu.addSubMenu ("Interface size", sizes);
@@ -3527,9 +3597,12 @@ void IlanaSynthAudioProcessorEditor::showSettingsMenu (bool tuningOnly)
     menu.addItem (500, "MPE mode (per-note pitch, pressure and slide)", true,
                   processorRef.apvts.getRawParameterValue ("mpe_mode")->load() > 0.5f);
     menu.addItem (510, "Multi-core voices (several threads, same sound)", true, read ("multi_core") > 0.5f);
+    menu.addItem (511, "Repeatable random (Freeze and Export play what you heard)", true, read ("repeat_random") > 0.5f);
     menu.addItem (410, "Ask before replacing an edited patch", true, asksBeforeReplacingEdits());
     menu.addSeparator();
     menu.addItem (400, "Show welcome tour");
+    menu.addSeparator();
+    menu.addItem (990, "Build " + juce::String (ilana::buildLabel()), false); // (information only)
 
     // The header's tuning indicator opens just the tuning items.
     if (tuningOnly)
@@ -3604,6 +3677,15 @@ void IlanaSynthAudioProcessorEditor::showSettingsMenu (bool tuningOnly)
                                     multiCore->endChangeGesture();
                                 }
                             }
+                            else if (result == 511)
+                            {
+                                if (auto* repeatable = safeThis->processorRef.apvts.getParameter ("repeat_random"))
+                                {
+                                    repeatable->beginChangeGesture();
+                                    repeatable->setValueNotifyingHost (repeatable->getValue() > 0.5f ? 0.0f : 1.0f);
+                                    repeatable->endChangeGesture();
+                                }
+                            }
                             else if (result == 500)
                             {
                                 if (auto* mpe = safeThis->processorRef.apvts.getParameter ("mpe_mode"))
@@ -3673,7 +3755,7 @@ void IlanaSynthAudioProcessorEditor::showSettingsMenu (bool tuningOnly)
                                                                                                     : safeThis->processorRef.loadTuningScale (text, error);
                                                                         if (! loaded)
                                                                             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
-                                                                                                                    "Could not load " + file.getFileName(), error);
+                                                                                                                    "Could not load " + file.getFileName(), error, juce::String(), safeThis.getComponent());
                                                                     });
                             }
                             else if (result == 803)
@@ -4131,6 +4213,35 @@ bool IlanaSynthAudioProcessorEditor::closeTopPopup()
             return true;
     }
 
+    if (stereoPopover != nullptr && stereoPopover->isVisible() && ! stereoGrow->isClosing())
+    {
+        setStereoOpen (false);
+        return true;
+    }
+
+    // The tuning pop-over of PLAY (or of the OSC page behind it).
+    {
+        std::function<bool (juce::Component&)> closeTuning = [&] (juce::Component& parent)
+        {
+            for (auto* child : parent.getChildren())
+            {
+                if (auto* play = dynamic_cast<PlayPage*> (child); play != nullptr && play->closeTuning())
+                    return true;
+
+                if (auto* osc = dynamic_cast<OscPage*> (child); osc != nullptr && osc->closeTuning())
+                    return true;
+
+                if (closeTuning (*child))
+                    return true;
+            }
+
+            return false;
+        };
+
+        if (closeTuning (content))
+            return true;
+    }
+
     if (isScopeOpen())
     {
         setScopeOpen (false);
@@ -4166,6 +4277,7 @@ bool IlanaSynthAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
         if (character == 'z' || character == 'x')
         {
             noteKeyOctave = juce::jlimit (-3, 3, noteKeyOctave + (character == 'x' ? 1 : -1));
+            updateKeysTooltip();
             return true;
         }
 

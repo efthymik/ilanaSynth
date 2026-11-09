@@ -4016,6 +4016,14 @@ private:
 
 public:
     bool isTuningShown() const { return tuningPopover.isVisible(); }
+    // Esc, from the editor: closes the tuning pop-over if it is open.
+    bool closeTuning()
+    {
+        if (! tuningPopover.isVisible() || tuningGrow.isClosing())
+            return false;
+        showTuning (false);
+        return true;
+    }
 
 private:
     void paintStrip (juce::Graphics& g) const

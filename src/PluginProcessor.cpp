@@ -105,7 +105,8 @@ IlanaSynthAudioProcessor::IlanaSynthAudioProcessor()
 #else
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
 #endif
-      apvts (*this, &undoManager, "PARAMS", createParameterLayout())
+      // No undo manager: undoRecorder records her parameter edits instead.
+      apvts (*this, nullptr, "PARAMS", createParameterLayout())
 {
     fxMain = std::make_unique<FxEngine> (*this);
     fxRackRunner = std::make_unique<PatchGraph::Runner>();
@@ -131,8 +132,12 @@ IlanaSynthAudioProcessor::IlanaSynthAudioProcessor()
         arpPitchIds[(size_t) step] = "arp_pitch" + n;
     }
 
+    undoRecorder.prepare (getParameters());
     for (auto* parameter : getParameters())
+    {
         parameter->addListener (&paramEpochListener);
+        parameter->addListener (&undoRecorder);
+    }
     for (int slot = 1; slot <= numFxSlots; ++slot)
         if (auto* parameter = apvts.getParameter ("fx_slot" + juce::String (slot)))
             parameter->addListener (&fxSlotTypeListener);
@@ -177,6 +182,7 @@ IlanaSynthAudioProcessor::IlanaSynthAudioProcessor()
     {
         ccParameter[cc].store (-1);
         pendingCcValues[cc].store (0.0f);
+        pendingCcParameter[cc].store (-1);
         ccValuePending[cc].store (false);
     }
 
@@ -406,10 +412,104 @@ std::uint32_t hashParamId (const char* id) noexcept
 }
 } // namespace
 
+// One parameter's move, as an undo step (see ParamUndoRecorder).
+struct IlanaSynthAudioProcessor::ParamUndoStep : public juce::UndoableAction
+{
+    ParamUndoStep (juce::AudioProcessorParameter& p, float b, float a) : parameter (p), before (b), after (a) {}
+
+    bool perform() override
+    {
+        // The first perform is the edit itself, already done.
+        if (std::exchange (done, true))
+            parameter.setValueNotifyingHost (after);
+        return true;
+    }
+
+    bool undo() override
+    {
+        parameter.setValueNotifyingHost (before);
+        return true;
+    }
+
+    juce::UndoableAction* createCoalescedAction (juce::UndoableAction* next) override
+    {
+        if (auto* later = dynamic_cast<ParamUndoStep*> (next); later != nullptr && &later->parameter == &parameter)
+        {
+            auto* merged = new ParamUndoStep (parameter, before, later->after);
+            merged->done = true;
+            return merged;
+        }
+        return nullptr;
+    }
+
+    int getSizeInUnits() override { return 10; }
+
+    juce::AudioProcessorParameter& parameter;
+    float before, after;
+    bool done = false;
+};
+
+void IlanaSynthAudioProcessor::ParamUndoRecorder::prepare (const juce::Array<juce::AudioProcessorParameter*>& parameters)
+{
+    numValues = parameters.size();
+    lastValues.reset (new std::atomic<float>[(size_t) juce::jmax (1, numValues)]);
+    for (int i = 0; i < numValues; ++i)
+        lastValues[(size_t) i].store (parameters[i]->getValue());
+}
+
+void IlanaSynthAudioProcessor::ParamUndoRecorder::parameterValueChanged (int index, float value)
+{
+    if (! juce::isPositiveAndBelow (index, numValues))
+        return;
+
+    // Any thread (the host's automation comes on the audio thread): only the
+    // value is kept, so the next edit knows where it started.
+    const auto previous = lastValues[(size_t) index].exchange (value);
+
+    if (ignoring || std::abs (previous - value) < 1.0e-7f || ! juce::MessageManager::existsAndIsCurrentThread()
+        || processor.undoManager.isPerformingUndoRedo())
+        return;
+
+    if (auto* parameter = processor.getParameters()[index])
+        processor.undoManager.perform (new ParamUndoStep (*parameter, previous, value));
+}
+
+void IlanaSynthAudioProcessor::ParamUndoRecorder::parameterGestureChanged (int, bool starting)
+{
+    if (! juce::MessageManager::existsAndIsCurrentThread() || processor.undoManager.isPerformingUndoRedo())
+        return;
+
+    if (starting)
+    {
+        // A step that already has its name (or is new) and an open edit keep it.
+        if (! std::exchange (gestureStepOpen, true) && ! processor.pendingEditData.has_value()
+            && processor.undoManager.getNumActionsInCurrentTransaction() > 0)
+            processor.undoManager.beginNewTransaction();
+        ++openGestures;
+    }
+    else if (openGestures > 0 && --openGestures == 0)
+    {
+        triggerAsyncUpdate(); // the step closes after this message
+    }
+}
+
+void IlanaSynthAudioProcessor::ParamUndoRecorder::handleAsyncUpdate()
+{
+    if (openGestures == 0)
+        gestureStepOpen = false;
+}
+
 void IlanaSynthAudioProcessor::buildParamCache()
 {
     const auto& parameters = getParameters();
     std::uint32_t size = 1;
+
+    rangedParameters.clear();
+    for (auto* parameter : parameters)
+        rangedParameters.push_back (dynamic_cast<juce::RangedAudioParameter*> (parameter));
+    ccOverrides.reset (new std::atomic<float>[(size_t) juce::jmax (1, parameters.size())]);
+    for (int i = 0; i < juce::jmax (1, parameters.size()); ++i)
+        ccOverrides[(size_t) i].store (std::numeric_limits<float>::quiet_NaN());
 
     while (size < (std::uint32_t) parameters.size() * 4)
         size <<= 1;
@@ -443,6 +543,8 @@ void IlanaSynthAudioProcessor::buildParamCache()
                              || dynamic_cast<juce::AudioParameterBool*> (parameter) != nullptr;
             if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (parameter))
                 entry.fallback = ranged->convertFrom0to1 (ranged->getDefaultValue());
+            if (parameter != nullptr)
+                entry.parameterIndex = parameter->getParameterIndex();
         }
 
         if (const auto found = rawToParamDestination.find (entry.value); found != rawToParamDestination.end())
@@ -513,6 +615,9 @@ float IlanaSynthAudioProcessor::readParam (const ParamCacheEntry& entry) const
 {
     auto& thread = audioThreadParams;
     auto result = entry.value->load();
+    if (entry.parameterIndex >= 0)
+        if (const auto heard = ccOverrides[(size_t) entry.parameterIndex].load (std::memory_order_relaxed); heard == heard)
+            result = heard;
     if (thread.fxValues != nullptr && entry.index >= 0)
         if (const auto own = thread.fxValues[entry.index]; own == own)
             result = own;
@@ -569,6 +674,9 @@ float IlanaSynthAudioProcessor::getRawParam (const ParamRef& ref) const
     }
 
     auto value = entry->value->load();
+    if (entry->parameterIndex >= 0)
+        if (const auto heard = ccOverrides[(size_t) entry->parameterIndex].load (std::memory_order_relaxed); heard == heard)
+            value = heard;
     if (const auto* own = audioThreadParams.fxValues; own != nullptr && entry->index >= 0 && own[entry->index] == own[entry->index])
         value = own[entry->index];
     if (! std::isfinite (value))
@@ -595,6 +703,7 @@ float IlanaSynthAudioProcessor::getParam (const ParamRef& ref) const
 
 void IlanaSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    repeatWasPlaying = false; // (an export that starts playing re-seeds)
     noteSpray.reset();
     arpHeldNotes.clearQuick();   // what's sounding is released by its gate
     generatedMidi.ensureSize (4096);
@@ -645,7 +754,8 @@ void IlanaSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     restoreSustainPedal();
     // MULTI-CORE: up to three more threads (the host runs its own too), with
     // buffers for a chunk at the highest oversampling.
-    synth.prepareVoiceThreads (juce::jlimit (0, 3, juce::SystemStats::getNumCpus() - 1), expectedBlockSize * 4);
+    synth.prepareVoiceThreads (juce::jlimit (0, 3, juce::SystemStats::getNumCpus() - 1), expectedBlockSize * 4,
+                               expectedBlockSize, sampleRate);
 
     scaledMidiBuffer.ensureSize (4096); // (a dense MPE block; sized like chunkMidi)
 
@@ -839,8 +949,15 @@ void IlanaSynthAudioProcessor::cutPatchTails()
     // The modulators start over too, as in a new instance, so a patch sounds
     // the same whatever played before it (a slow free-running LFO otherwise
     // starts wherever the last patch left it).
-    lfoRandom.setSeed (27182);
-    lfoPoolRandom.setSeed (31415);
+    restartModulators (0);
+}
+
+// The free LFOs, MSEG, clocked S&H, vector path and the Evolve drifts start
+// over, their generators seeded with salt added (0: as a new instance).
+void IlanaSynthAudioProcessor::restartModulators (juce::int64 salt)
+{
+    lfoRandom.setSeed (27182 + salt);
+    lfoPoolRandom.setSeed (31415 + salt);
     for (int lfo = 0; lfo < numLfos; ++lfo)
     {
         lfoPhases[(size_t) lfo] = 0.0;
@@ -858,10 +975,28 @@ void IlanaSynthAudioProcessor::cutPatchTails()
     clockShPhase = 0.0;
     clockShValue = 0.0f;
     vectorPathPhase = 0.0;
-    evolve.reset (4242u);
-    vectorDrift.reset (9191u);
+    evolve.reset (4242u + (std::uint32_t) salt);
+    vectorDrift.reset (9191u + (std::uint32_t) salt);
     for (auto& drift : macroDrift)
         drift.store (0.0f);
+}
+
+// REPEATABLE RANDOM (stability review 5): at play start every random
+// generator that runs free (the arp's, the probability sequencer's, the note
+// spray's, the voices' analog drift and random, the LFOs') is seeded from the
+// transport position and the free modulators start over, so a take, a Freeze
+// and an Export from the same bar play the same notes and movement.
+void IlanaSynthAudioProcessor::restartRandomAtPlayStart (double ppq)
+{
+    const auto tick = (juce::int64) std::llround (ppq * 960.0);
+    const auto salt = (juce::int64) (((juce::uint64) tick * 0x9e3779b97f4a7c15ull) >> 33);
+    arpRandom.setSeed (31415 + salt);
+    pseqRandom.setSeed (16180 + salt);
+    noteSpray.reseed (salt);
+    for (int i = 0; i < synth.getNumVoices(); ++i)
+        if (auto* voice = dynamic_cast<Voice*> (synth.getVoice (i)))
+            voice->reseedRandom (salt + 7919 * (juce::int64) i);
+    restartModulators (salt);
 }
 
 // The oversamplers' filters delay the output a little; the host compensates.
@@ -982,6 +1117,9 @@ void IlanaSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     // callback: hosts reset MXCSR between calls (see docs/ROUTING-CPU.md).
     juce::ScopedNoDenormals noDenormals;
 
+    if (hostWorkgroupPending)
+        hostWorkgroupPending = ! synth.setVoiceThreadsWorkgroup (hostWorkgroup);
+
     const auto total = buffer.getNumSamples();
 
     if (total <= expectedBlockSize)
@@ -1003,6 +1141,14 @@ void IlanaSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     }
 
     mixSamplePreview (buffer);
+}
+
+// Called by the host on its audio thread (an AU's render context). The
+// voice threads join it as they next wake (stability review 1).
+void IlanaSynthAudioProcessor::audioWorkgroupContextChanged (const juce::AudioWorkgroup& workgroup)
+{
+    hostWorkgroup = workgroup;
+    hostWorkgroupPending = ! synth.setVoiceThreadsWorkgroup (hostWorkgroup);
 }
 
 void IlanaSynthAudioProcessor::mixSamplePreview (juce::AudioBuffer<float>& buffer) noexcept
@@ -1258,6 +1404,22 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
     if (patchCut.exchange (false))
         cutPatchTails();
 
+    // REPEATABLE RANDOM: the transport starting re-seeds (off: nothing changes).
+    {
+        auto playing = false;
+        auto ppq = 0.0;
+        if (auto* head = getPlayHead())
+            if (const auto position = head->getPosition(); position.hasValue() && position->getIsPlaying())
+                if (const auto at = position->getPpqPosition(); at.hasValue() && std::isfinite (*at))
+                {
+                    playing = true;
+                    ppq = *at;
+                }
+        if (playing && ! repeatWasPlaying && getParam (repeatRandomRef) > 0.5f)
+            restartRandomAtPlayStart (ppq);
+        repeatWasPlaying = playing;
+    }
+
     {
         const juce::SpinLock::ScopedLockType lock (lfoShapeLock);
         activeLfoCustom = lfoCustom;
@@ -1290,6 +1452,10 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
         addPreview (scope.startIndex1, scope.blockSize1);
         addPreview (scope.startIndex2, scope.blockSize2);
     }
+
+    // Learned and macro CCs reach the sound in this block (before anything
+    // reads the parameters).
+    takeLearnedCcs (midiMessages);
 
     {
         if (wantedOversamplingFactor() != oversamplingFactor.load() || BuiltInTables::anyWanted())

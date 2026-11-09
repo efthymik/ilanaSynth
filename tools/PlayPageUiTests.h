@@ -260,4 +260,45 @@ void runPlayPageTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProce
                     "PLAY: opening the block again puts every card back where it was");
         }
     }
+
+    // The fold state is remembered: folding writes "playBandsFolded" to the settings file, and an editor opened
+    // later starts folded (and an unfolded one starts open).
+    {
+        auto*& shared = tableBrowserSettings();
+        auto* saved = shared;
+        const auto setFolded = [&] (juce::Component& root, bool want)
+        {
+            std::vector<juce::Button*> found;
+            findAll<juce::Button> (root, found);
+            for (auto* button : found)
+                if (button->getName() == (want ? "Fold modules" : "Unfold modules"))
+                {
+                    button->triggerClick();
+                    settle (60);
+                    return;
+                }
+        };
+        if (saved != nullptr)
+        {
+            setFolded (editor, true);
+            expect (saved->getBoolValue ("playBandsFolded", false), "PLAY: folding the module block is saved in the settings file");
+
+            {
+                std::unique_ptr<juce::AudioProcessorEditor> second (processor.createEditor());
+                settle (200);
+                std::vector<juce::Button*> found;
+                findAll<juce::Button> (*second, found);
+                auto startsFolded = false;
+                for (auto* button : found)
+                    if (button->getName() == "Unfold modules" && button->getParentComponent() != nullptr)
+                        startsFolded = (bool) button->getParentComponent()->getProperties()["bandsFolded"];
+                expect (startsFolded, "PLAY: an editor opened after folding starts folded");
+            }
+            shared = saved; // (the second editor's destructor cleared it)
+            setFolded (editor, false);
+            expect (! saved->getBoolValue ("playBandsFolded", true), "PLAY: unfolding is saved too");
+        }
+        else
+            expect (false, "PLAY: the editor's settings file is reachable by the tests");
+    }
 }

@@ -238,6 +238,14 @@ inline float& uiScaleRef()
     return scale;
 }
 
+// The editor's Interface size (window height over design height). The tooltip window is a child of the
+// editor, outside the scaled content, so it multiplies its own sizes by this.
+inline float& tooltipZoomRef()
+{
+    static float zoom = 1.0f;
+    return zoom;
+}
+
 // A page that lays text out by its drawn width (the packed cards' buttons, pills and segments)
 // hears when the zoom changes: the floor under the text makes the same words wider at a small zoom.
 struct UiScaleListener
@@ -2042,23 +2050,25 @@ public:
     // with body text, wrapped at about 340 px.
     static juce::TextLayout tooltipLayout (const juce::String& text, juce::Colour colour)
     {
+        const auto zoom = IlanaTheme::tooltipZoomRef();
         juce::AttributedString s;
         s.setJustification (juce::Justification::centredLeft);
         s.setLineSpacing (1.0f);
-        s.append (text.trim(), juce::Font (IlanaTheme::font (IlanaTheme::TextSize::body)), colour);
+        s.append (text.trim(), juce::Font (IlanaTheme::font (IlanaTheme::TextSize::body * zoom)), colour);
         juce::TextLayout layout;
-        layout.createLayoutWithBalancedLineLengths (s, 340.0f);
+        layout.createLayoutWithBalancedLineLengths (s, 340.0f * zoom);
         return layout;
     }
 
     juce::Rectangle<int> getTooltipBounds (const juce::String& tipText, juce::Point<int> screenPos, juce::Rectangle<int> parentArea) override
     {
         const auto layout = tooltipLayout (tipText, IlanaTheme::Ui::text);
-        const auto w = (int) std::ceil (layout.getWidth()) + 22;
-        const auto h = (int) std::ceil (layout.getHeight()) + 14;
+        const auto zoom = IlanaTheme::tooltipZoomRef();
+        const auto w = (int) std::ceil (layout.getWidth()) + juce::roundToInt (22.0f * zoom);
+        const auto h = (int) std::ceil (layout.getHeight()) + juce::roundToInt (14.0f * zoom);
 
-        return juce::Rectangle<int> (screenPos.x > parentArea.getCentreX() ? screenPos.x - (w + 12) : screenPos.x + 24,
-                                     screenPos.y > parentArea.getCentreY() ? screenPos.y - (h + 6) : screenPos.y + 6,
+        return juce::Rectangle<int> (screenPos.x > parentArea.getCentreX() ? screenPos.x - (w + juce::roundToInt (12.0f * zoom)) : screenPos.x + juce::roundToInt (24.0f * zoom),
+                                     screenPos.y > parentArea.getCentreY() ? screenPos.y - (h + juce::roundToInt (6.0f * zoom)) : screenPos.y + juce::roundToInt (6.0f * zoom),
                                      w, h)
             .constrainedWithin (parentArea);
     }
@@ -2066,12 +2076,13 @@ public:
     void drawTooltip (juce::Graphics& g, const juce::String& text, int width, int height) override
     {
         using namespace IlanaTheme;
+        const auto zoom = tooltipZoomRef();
         const auto bounds = juce::Rectangle<float> ((float) width, (float) height);
         g.setColour (Ui::raised);
-        g.fillRoundedRectangle (bounds, 7.0f);
+        g.fillRoundedRectangle (bounds, 7.0f * zoom);
         g.setColour (Ui::hover);
-        g.drawRoundedRectangle (bounds.reduced (0.5f), 6.5f, 1.0f);
-        tooltipLayout (text, Ui::text).draw (g, bounds.reduced (11.0f, 7.0f));
+        g.drawRoundedRectangle (bounds.reduced (0.5f), 6.5f * zoom, 1.0f);
+        tooltipLayout (text, Ui::text).draw (g, bounds.reduced (11.0f * zoom, 7.0f * zoom));
     }
 
     //==============================================================================

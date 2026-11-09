@@ -3,7 +3,7 @@
 <PARAMS presetName="caribbean keys" presetCategory="Keys" presetTags="Bright, Sustained, Wavetable"
         presetAuthor="ilana" presetComment="" macroName1="" macroName2=""
         macroName3="" macroName4="" macroName5="" macroName6="" macroName7=""
-        macroName8="" osc3Schema="2" destSchema="2" tableSchema="3" exciterLevels="1"
+        macroName8="" osc3Schema="2" destSchema="2" tableSchema="4" exciterLevels="1"
         lfo1Draw="0.00000,0.09802,0.19509,0.29028,0.38268,0.47140,0.55557,0.63439,0.70711,0.77301,0.83147,0.88192,0.92388,0.95694,0.98079,0.99518,1.00000,0.99518,0.98079,0.95694,0.92388,0.88192,0.83147,0.77301,0.70711,0.63439,0.55557,0.47140,0.38268,0.29028,0.19509,0.09802,0.00000,-0.09802,-0.19509,-0.29028,-0.38268,-0.47140,-0.55557,-0.63439,-0.70711,-0.77301,-0.83147,-0.88192,-0.92388,-0.95694,-0.98079,-0.99518,-1.00000,-0.99518,-0.98079,-0.95694,-0.92388,-0.88192,-0.83147,-0.77301,-0.70711,-0.63439,-0.55557,-0.47140,-0.38268,-0.29028,-0.19509,-0.09802"
         lfo1Curve="0.0000,0.0000,-0.450;0.2500,1.0000,0.450;0.5000,0.0000,-0.450;0.7500,-1.0000,0.450;1.0000,0.0000,0.000"
         lfo2Draw="0.00000,0.09802,0.19509,0.29028,0.38268,0.47140,0.55557,0.63439,0.70711,0.77301,0.83147,0.88192,0.92388,0.95694,0.98079,0.99518,1.00000,0.99518,0.98079,0.95694,0.92388,0.88192,0.83147,0.77301,0.70711,0.63439,0.55557,0.47140,0.38268,0.29028,0.19509,0.09802,0.00000,-0.09802,-0.19509,-0.29028,-0.38268,-0.47140,-0.55557,-0.63439,-0.70711,-0.77301,-0.83147,-0.88192,-0.92388,-0.95694,-0.98079,-0.99518,-1.00000,-0.99518,-0.98079,-0.95694,-0.92388,-0.88192,-0.83147,-0.77301,-0.70711,-0.63439,-0.55557,-0.47140,-0.38268,-0.29028,-0.19509,-0.09802"
@@ -38,7 +38,8 @@
         lfo16Curve="0.0000,0.0000,-0.450;0.2500,1.0000,0.450;0.5000,0.0000,-0.450;0.7500,-1.0000,0.450;1.0000,0.0000,0.000"
         macroCc0="20" macroCc1="21" macroCc2="22" macroCc3="23" macroCc4="24"
         macroCc5="25" macroCc6="26" macroCc7="27" oscRevealMask="5" envRevealMask="7"
-        lfoRevealMask="7" osc1SamplePath="C:\Users\ilanf\Documents\DrumKits\ILANAPILLED DRUMKIT\lil phos 808.wav">
+        lfoRevealMask="7" osc1SamplePath="C:\Users\ilanf\Documents\DrumKits\ILANAPILLED DRUMKIT\lil phos 808.wav"
+        stringSchema="2">
   <PARAM id="amp_acurve" value="0.0"/>
   <PARAM id="amp_attack" value="0.01788252964615822"/>
   <PARAM id="amp_curve" value="0.0"/>
@@ -2536,4 +2537,64 @@
   <PARAM id="west_stages" value="4.0"/>
   <PARAM id="west_strike" value="0.7579830884933472"/>
   <PARAM id="west_sym" value="0.0"/>
+  <PARAM id="noise_on" value="1.0"/>
+  <PARAM id="noise_type" value="0.0"/>
+  <PARAM id="sub_colour" value="0.0"/>
+  <PARAM id="fx_patcher" value="1.0"/>
+  <PARAM id="route_cables" value="0.0"/>
+  <PARAM id="cable_osc1" value="1.0"/>
+  <PARAM id="cable_osc2" value="1.0"/>
+  <PARAM id="cable_osc3" value="1.0"/>
+  <PARAM id="cable_osc4" value="1.0"/>
+  <PARAM id="cable_osc5" value="1.0"/>
+  <PARAM id="cable_osc6" value="1.0"/>
+  <PARAM id="cable_subnoise" value="1.0"/>
+  <PARAM id="cable_f1" value="2.0"/>
+  <PARAM id="cable_f2" value="8.0"/>
+  <PARAM id="cable_west" value="8.0"/>
+  <PARAM id="fx_filter_type" value="0.0"/>
+  <PARAM id="fx_filter_slope" value="0.0"/>
+  <PARAM id="fx_filter_cutoff" value="2000.000366210938"/>
+  <PARAM id="fx_filter_reso" value="0.300000011920929"/>
+  <PARAM id="fx_filter_drive" value="1.0"/>
+  <PARAM id="fx_filter_morph" value="0.0"/>
+  <PARAM id="fx_filter_spread" value="0.0"/>
+  <PARAM id="osc1_sample_sync" value="0.0"/>
+  <PARAM id="osc1_sample_bpm" value="120.0"/>
+  <PARAM id="osc1_sample_stretch" value="0.0"/>
+  <PARAM id="osc2_sample_sync" value="0.0"/>
+  <PARAM id="osc2_sample_bpm" value="120.0"/>
+  <PARAM id="osc2_sample_stretch" value="0.0"/>
+  <PARAM id="sub_sample_sync" value="0.0"/>
+  <PARAM id="sub_sample_bpm" value="120.0"/>
+  <PARAM id="sub_sample_stretch" value="0.0"/>
+  <PARAM id="osc4_sample_sync" value="0.0"/>
+  <PARAM id="osc4_sample_bpm" value="120.0"/>
+  <PARAM id="osc4_sample_stretch" value="0.0"/>
+  <PARAM id="osc5_sample_sync" value="0.0"/>
+  <PARAM id="osc5_sample_bpm" value="120.0"/>
+  <PARAM id="osc5_sample_stretch" value="0.0"/>
+  <PARAM id="osc6_sample_sync" value="0.0"/>
+  <PARAM id="osc6_sample_bpm" value="120.0"/>
+  <PARAM id="osc6_sample_stretch" value="0.0"/>
+  <FxPatch version="1">
+    <PatchGraph version="1">
+      <Node id="1" x="40.0" y="0.0"/>
+      <Node id="2" x="960.0" y="0.0"/>
+      <Node id="3" kind="7" ref="1" ins="1" outs="1" x="160.0" y="0.0" label="CHORUS"/>
+      <Node id="4" kind="9" ref="2" ins="1" outs="1" x="320.0" y="0.0" label="DELAY"/>
+      <Node id="5" kind="20" ref="3" ins="1" outs="1" x="480.0" y="0.0" label="OTT"/>
+      <Node id="6" kind="29" ref="4" ins="1" outs="1" x="640.0" y="0.0" label="EQ"/>
+      <Node id="7" kind="13" ref="5" ins="1" outs="1" x="800.0" y="0.0" label="REVERB"/>
+      <Cable from="1" fromPort="0" to="3" toPort="0"/>
+      <Cable from="3" fromPort="0" to="4" toPort="0"/>
+      <Cable from="4" fromPort="0" to="5" toPort="0"/>
+      <Cable from="5" fromPort="0" to="6" toPort="0"/>
+      <Cable from="6" fromPort="0" to="7" toPort="0"/>
+      <Cable from="7" fromPort="0" to="2" toPort="0"/>
+      <Cable from="4" fromPort="0" to="3" toPort="0" gain="0.699999988079071"/>
+      <Cable from="5" fromPort="0" to="4" toPort="0" gain="0.07000000029802322"
+             delay="3.000000715255737"/>
+    </PatchGraph>
+  </FxPatch>
 </PARAMS>

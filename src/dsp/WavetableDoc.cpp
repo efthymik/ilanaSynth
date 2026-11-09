@@ -554,15 +554,20 @@ bool WavetableDoc::exportWav (const juce::File& file) const
     writeChunk (body, "clm ", clmText.toRawUTF8(), clmSize);
     writeChunk (body, "data", data.getData(), data.getDataSize());
 
-    file.deleteFile();
-    juce::FileOutputStream out (file);
-    if (! out.openedOk())
-        return false;
-    out.write ("RIFF", 4);
-    out.writeInt ((int) body.getDataSize());
-    out.write (body.getData(), body.getDataSize());
-    out.flush();
-    return ! out.getStatus().failed();
+    // Written beside the file and swapped in, so a failed write keeps the old one.
+    juce::TemporaryFile temp (file);
+    {
+        juce::FileOutputStream out (temp.getFile());
+        if (! out.openedOk())
+            return false;
+        out.write ("RIFF", 4);
+        out.writeInt ((int) body.getDataSize());
+        out.write (body.getData(), body.getDataSize());
+        out.flush();
+        if (out.getStatus().failed())
+            return false;
+    }
+    return temp.overwriteTargetFileWithTemporary();
 }
 
 juce::File WavetableDoc::getLibraryFolder()
@@ -570,13 +575,27 @@ juce::File WavetableDoc::getLibraryFolder()
     return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("ilanaSynth Wavetables");
 }
 
+juce::File WavetableDoc::getLibraryFile (const juce::String& fileName)
+{
+    const auto safeName = juce::File::createLegalFileName (fileName.isNotEmpty() ? fileName : juce::String ("Wavetable"));
+    return getLibraryFolder().getChildFile (safeName + ".wav");
+}
+
+juce::String WavetableDoc::getUnusedLibraryName (const juce::String& fileName)
+{
+    const auto base = getLibraryFile (fileName).getFileNameWithoutExtension();
+    auto candidate = base;
+    for (int number = 2; getLibraryFile (candidate).existsAsFile() || getLibraryFile (candidate).withFileExtension ("ilwt").existsAsFile(); ++number)
+        candidate = base + " " + juce::String (number);
+    return candidate;
+}
+
 bool WavetableDoc::saveToLibrary (const juce::String& fileName, juce::File* written) const
 {
     auto folder = getLibraryFolder();
     if (! folder.createDirectory())
         return false;
-    const auto safeName = juce::File::createLegalFileName (fileName.isNotEmpty() ? fileName : juce::String ("Wavetable"));
-    const auto wav = folder.getChildFile (safeName + ".wav");
+    const auto wav = getLibraryFile (fileName);
     if (! exportWav (wav))
         return false;
     auto recipe = recipeTree();
