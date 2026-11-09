@@ -916,6 +916,12 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
 #else
     const auto gpuByDefault = true;
 #endif
+#if ILANA_VULKAN
+    // Before OpenGL, so it never makes a context only to drop it. Like
+    // OpenGL, it attaches once the editor is on screen.
+    setVulkanRendering (settings->getBoolValue ("vulkanRendering", true)
+                        && juce::SystemStats::getEnvironmentVariable ("ILANA_NO_VULKAN", "").isEmpty());
+#endif
     setGpuRendering (settings->getBoolValue ("gpuRendering", gpuByDefault)
                      && juce::SystemStats::getEnvironmentVariable ("ILANA_NO_GPU", "").isEmpty());
 
@@ -924,6 +930,12 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
 
 void IlanaSynthAudioProcessorEditor::setGpuRendering (bool shouldUseGpu)
 {
+   #if ILANA_VULKAN
+    // While Vulkan draws, OpenGL is only remembered, as its fallback.
+    openGLWanted = shouldUseGpu;
+    if (vulkan != nullptr)
+        shouldUseGpu = false;
+   #endif
    #if ILANA_GPU_UI
     if (shouldUseGpu == (openGL != nullptr))
         return;
@@ -959,6 +971,60 @@ bool IlanaSynthAudioProcessorEditor::isGpuRendering() const
     return false;
    #endif
 }
+
+void IlanaSynthAudioProcessorEditor::setVulkanRendering (bool shouldUseVulkan)
+{
+   #if ILANA_VULKAN
+    if (shouldUseVulkan == (vulkan != nullptr))
+        return;
+
+    if (shouldUseVulkan)
+    {
+        // OpenGL lets go of the editor first: the two never share it.
+        const auto keepOpenGL = openGLWanted;
+        setGpuRendering (false);
+        openGLWanted = keepOpenGL;
+
+        vulkan = ilana::vulkan::Attachment::attachTo (*this, [safe = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)]
+        {
+            if (safe != nullptr)
+                safe->vulkanFailed();
+        });
+
+        if (vulkan == nullptr)
+            setGpuRendering (openGLWanted);
+    }
+    else
+    {
+        vulkan.reset();
+        repaint();
+        setGpuRendering (openGLWanted);
+    }
+   #else
+    juce::ignoreUnused (shouldUseVulkan);
+   #endif
+}
+
+bool IlanaSynthAudioProcessorEditor::isVulkanRendering() const
+{
+   #if ILANA_VULKAN
+    return vulkan != nullptr && vulkan->isActive();
+   #else
+    return false;
+   #endif
+}
+
+#if ILANA_VULKAN
+// The device or the window's surface was lost (or the window couldn't take a
+// swapchain): the attachment has already detached; the old renderer takes
+// over for the rest of this editor's life. The setting is left as it is.
+void IlanaSynthAudioProcessorEditor::vulkanFailed()
+{
+    vulkan.reset();
+    repaint();
+    setGpuRendering (openGLWanted);
+}
+#endif
 
 void IlanaSynthAudioProcessorEditor::openWavetableEditor (int slot, juce::Colour colour)
 {
@@ -1059,6 +1125,9 @@ IlanaSynthAudioProcessorEditor::~IlanaSynthAudioProcessorEditor()
     sampleBrowser.reset();
     zoneEditor.reset();
     setGpuRendering (false); // before any child goes: the render thread paints them
+   #if ILANA_VULKAN
+    vulkan.reset(); // (likewise: a frame paints every child)
+   #endif
     scopeWindow.reset();
     sampleBrowserHook() = nullptr;
     FmOperatorInfo::hooks().openOperator = nullptr;
@@ -3522,6 +3591,9 @@ void IlanaSynthAudioProcessorEditor::showSettingsMenu (bool tuningOnly)
    #if ILANA_GPU_UI
     menu.addItem (310, "GPU rendering (OpenGL)", true, openGL != nullptr);
    #endif
+   #if ILANA_VULKAN
+    menu.addItem (340, "Vulkan rendering", true, vulkan != nullptr);
+   #endif
     menu.addItem (500, "MPE mode (per-note pitch, pressure and slide)", true,
                   processorRef.apvts.getRawParameterValue ("mpe_mode")->load() > 0.5f);
     menu.addItem (510, "Multi-core voices (several threads, same sound)", true, read ("multi_core") > 0.5f);
@@ -3574,8 +3646,25 @@ void IlanaSynthAudioProcessorEditor::showSettingsMenu (bool tuningOnly)
                             else if (result == 310)
                             {
                                 const auto useGpu = safeThis->openGL == nullptr;
+                               #if ILANA_VULKAN
+                                // Picking OpenGL while Vulkan draws means OpenGL instead.
+                                if (useGpu && safeThis->vulkan != nullptr)
+                                {
+                                    safeThis->setVulkanRendering (false);
+                                    safeThis->settings->setValue ("vulkanRendering", false);
+                                }
+                               #endif
                                 safeThis->setGpuRendering (useGpu);
                                 safeThis->settings->setValue ("gpuRendering", useGpu);
+                                safeThis->settings->saveIfNeeded();
+                            }
+                           #endif
+                           #if ILANA_VULKAN
+                            else if (result == 340)
+                            {
+                                const auto useVulkan = safeThis->vulkan == nullptr;
+                                safeThis->setVulkanRendering (useVulkan);
+                                safeThis->settings->setValue ("vulkanRendering", useVulkan);
                                 safeThis->settings->saveIfNeeded();
                             }
                            #endif
