@@ -1556,7 +1556,7 @@ void runDefaultExpressionTest()
         return slot.source == S::ModWheel || slot.aux == S::ModWheel || slot.source == S::Aftertouch || slot.aux == S::Aftertouch;
     };
 
-    for (const auto* name : { "Ring Lead", "Warm Analog Pad", "Quad Mod Pluck", "Mellow Rhodes", "Rip Bass", "Ring Drone" })
+    for (const auto* name : { "Ring Lead", "Comb Choir", "Quad Mod Pluck", "Toy Piano", "Rip Bass", "Ring Drone" })
     {
         const auto render = [name, &expressive] (bool strip, int& routes)
         {
