@@ -5945,12 +5945,20 @@ int runUiTests()
             settle (60);
             const auto suggested = saveOverlay.getSuggestedTags();
             expect (suggested.size() >= 3, "SAVE AS suggests tags to tick (" + suggested.joinIntoString (", ") + ")");
-            if (! suggested.isEmpty())
+            // (The field starts with the loaded preset's own tags, which a click would take out: pick one it lacks.)
+            auto freeTag = juce::String();
+            auto carried = juce::StringArray::fromTokens (saveOverlay.getTagsField().getText(), ",", "");
+            carried.trim();
+            for (const auto& tag : suggested)
+                if (freeTag.isEmpty() && ! carried.contains (tag, true))
+                    freeTag = tag;
+            expect (freeTag.isNotEmpty(), "SAVE AS offers a tag the patch does not carry yet");
+            if (freeTag.isNotEmpty())
             {
-                saveOverlay.toggleSuggestedTag (suggested[0]);
-                expect (saveOverlay.getTagsField().getText().contains (suggested[0]), "a suggested tag goes into TAGS when clicked");
-                saveOverlay.toggleSuggestedTag (suggested[0]);
-                expect (! saveOverlay.getTagsField().getText().contains (suggested[0]), "and comes out when clicked again");
+                saveOverlay.toggleSuggestedTag (freeTag);
+                expect (saveOverlay.getTagsField().getText().contains (freeTag), "a suggested tag goes into TAGS when clicked");
+                saveOverlay.toggleSuggestedTag (freeTag);
+                expect (! saveOverlay.getTagsField().getText().contains (freeTag), "and comes out when clicked again");
             }
             saveOverlay.getTagsField().setText ("dark, wide", false);
             saveOverlay.getAuthorField().setText ("Test Author", false);
