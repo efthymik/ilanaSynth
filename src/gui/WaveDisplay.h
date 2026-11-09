@@ -2486,7 +2486,9 @@ private:
     juce::uint64 warpSignature() const
     {
         const auto stages = readWarp();
-        auto signature = IlanaAnim::phaseSignature (stages.amount1, 11) ^ IlanaAnim::phaseSignature (stages.amount2, 12);
+        auto signature = IlanaAnim::phaseSignature (stages.amount1, 11) ^ IlanaAnim::phaseSignature (stages.amount2, 12)
+                         ^ IlanaAnim::phaseSignature (stages.fmAmount, 14) ^ IlanaAnim::phaseSignature (stages.noiseAmount, 15)
+                         ^ IlanaAnim::phaseSignature (stages.ringAmount1, 16) ^ IlanaAnim::phaseSignature (stages.ringAmount2, 17);
 
         // A modulated spectral amount rebuilds the warped table in 64 steps;
         // redraw when the step moves, not on every tiny change.
@@ -2713,12 +2715,22 @@ private:
         IlanaTrace::paintTrace (g, path, colour, thickness);
     }
 
-    // The phase warps the oscillator applies itself (not FM or Ring), for
-    // the preview.
+    // The warps on the card, for the preview: the phase warps the oscillator
+    // applies itself, plus FM, Ring and FM Noise from either stage (those read
+    // another oscillator, so the picture uses that oscillator's shown frame in
+    // place of its live sound, one cycle per cycle).
     struct WarpStages
     {
         int mode1 = 0, mode2 = 0;
         float amount1 = 0.0f, amount2 = 0.0f;
+        float fmAmount = 0.0f, noiseAmount = 0.0f, ringAmount1 = 0.0f, ringAmount2 = 0.0f;
+        const float* source = nullptr; // the source oscillator's frame (null: a sine)
+
+        bool any() const
+        {
+            return amount1 > 0.0f || amount2 > 0.0f || fmAmount > 0.0f || noiseAmount > 0.0f
+                   || ringAmount1 > 0.0f || ringAmount2 > 0.0f;
+        }
     };
 
     WarpStages readWarp() const
@@ -2730,8 +2742,34 @@ private:
         stages.mode2 = Warp::modeForStageTwoChoice (readChoice (prefix + "_warp2"));
         stages.amount2 = readModulated (prefix + "_warp2_amt");
 
+        const auto sourceWarp = [&stages] (int mode, float amount, float& ring)
+        {
+            if (mode == Warp::Fm) stages.fmAmount += amount;
+            else if (mode == Warp::NoiseFm) stages.noiseAmount += amount;
+            else if (mode == Warp::Ring) ring = amount;
+        };
+
+        sourceWarp (stages.mode1, stages.amount1, stages.ringAmount1);
+        sourceWarp (stages.mode2, stages.amount2, stages.ringAmount2);
+
         if (! Warp::isOscillatorWarp (stages.mode1)) stages.amount1 = 0.0f;
         if (! Warp::isOscillatorWarp (stages.mode2)) stages.amount2 = 0.0f;
+
+        if (stages.fmAmount > 0.0f || stages.ringAmount1 > 0.0f || stages.ringAmount2 > 0.0f)
+        {
+            // OSC 1 reads OSC 2, every other oscillator reads OSC 1 (the voice's warp source).
+            const juce::String sourcePrefix (OscillatorIds::prefixes[oscIndex == 0 ? 1 : 0]);
+
+            if (OscMode::playsWavetable (readChoice (sourcePrefix + "_mode")))
+                if (const auto* table = processorRef.getWavetable (readChoice (sourcePrefix + "_table"));
+                    table != nullptr && table->getNumFrames() > 0)
+                {
+                    const auto frame = (int) std::round (juce::jlimit (0.0f, 1.0f, readValue (sourcePrefix + "_frame"))
+                                                         * (float) (table->getNumFrames() - 1));
+                    stages.source = table->getFrameData (0, frame);
+                }
+        }
+
         return stages;
     }
 
@@ -2740,8 +2778,7 @@ private:
         if (subTableMapping || (modeId.isNotEmpty() && ! OscMode::playsWavetable (readChoice (modeId))))
             return false;
 
-        const auto stages = readWarp();
-        return stages.amount1 > 0.0f || stages.amount2 > 0.0f;
+        return readWarp().any();
     }
 
     // A frame's value at a cycle position with the card's warp stages on it (the picture of what the oscillator reads).
@@ -2758,15 +2795,42 @@ private:
             return Warp::apply (mode, amount, phase, silent);
         };
 
+        const auto sourceAt = [&stages] (double at)
+        {
+            if (stages.source == nullptr)
+                return (float) std::sin (juce::MathConstants<double>::twoPi * at);
+
+            const auto wrapped = at - std::floor (at);
+            return stages.source[juce::jlimit (1, Wavetable::frameSize, (int) (wrapped * (double) Wavetable::frameSize) + 1)];
+        };
+
         auto silent = false;
         auto gain = 1.0f, gain2 = 1.0f;
         auto phase = juce::jlimit (0.0, 0.999999, position);
+
+        // FM and FM Noise move the phase before the warps, as in the voice.
+        if (stages.fmAmount > 0.0f)
+            phase += (double) stages.fmAmount * (double) sourceAt (position);
+
+        if (stages.noiseAmount > 0.0f)
+        {
+            // A fixed scatter, so the picture holds still.
+            const auto bucket = (juce::uint32) (position * 256.0) * 2654435761u;
+            phase += (double) stages.noiseAmount * ((double) ((bucket >> 8) & 0xffff) / 32768.0 - 1.0);
+        }
+
+        phase -= std::floor (phase);
+        phase = juce::jlimit (0.0, 0.999999, phase);
         phase = applyStage (stages.mode1, stages.amount1, phase, silent, gain);
         if (! silent)
             phase = applyStage (stages.mode2, stages.amount2, phase, silent, gain2);
 
         const auto index = (int) (phase * (double) Wavetable::frameSize);
-        return silent ? 0.0f : data[juce::jlimit (1, Wavetable::frameSize, index + 1)] * gain * gain2;
+        auto value = silent ? 0.0f : data[juce::jlimit (1, Wavetable::frameSize, index + 1)] * gain * gain2;
+
+        if (stages.ringAmount1 > 0.0f) value *= 1.0f + (sourceAt (position) - 1.0f) * stages.ringAmount1;
+        if (stages.ringAmount2 > 0.0f) value *= 1.0f + (sourceAt (position) - 1.0f) * stages.ringAmount2;
+        return value;
     }
 
     void drawWarpedFrame (juce::Graphics& g, const Wavetable* table, int frameIndex, juce::Rectangle<float> plot,
@@ -3082,27 +3146,9 @@ private:
 
         for (int i = 0; i < size; ++i)
         {
-            auto phase = (double) i / (double) size;
-            auto silent = false;
-            auto gain = 1.0f, gain2 = 1.0f;
-
-            if (warped)
-            {
-                const auto applyStage = [&silent] (int mode, float amount, double p, float& stageGain)
-                {
-                    if (amount <= 0.0f)
-                        return p;
-                    if (Warp::isPhaseDistortion (mode))
-                        return Warp::applyPhaseDistortion (mode, amount, p, stageGain);
-                    return Warp::apply (mode, amount, p, silent);
-                };
-                phase = applyStage (stages.mode1, stages.amount1, juce::jlimit (0.0, 0.999999, phase), gain);
-                if (! silent)
-                    phase = applyStage (stages.mode2, stages.amount2, phase, gain2);
-            }
-
-            const auto index = (int) (phase * (double) Wavetable::frameSize);
-            out[(size_t) i] = silent ? 0.0f : data[juce::jlimit (1, Wavetable::frameSize, index + 1)] * gain * gain2;
+            const auto position = (double) i / (double) size;
+            out[(size_t) i] = warped ? warpedSampleAt (stages, data, position)
+                                     : data[juce::jlimit (1, Wavetable::frameSize, (int) (position * (double) Wavetable::frameSize) + 1)];
         }
     }
 

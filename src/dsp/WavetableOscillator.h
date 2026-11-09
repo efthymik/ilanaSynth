@@ -58,18 +58,28 @@ inline bool isResonance (int mode) { return mode >= PdRes1 && mode <= PdRes3; }
 inline bool isShaper (int mode) { return mode == Formant || mode == Squeeze; }
 inline bool isOscillatorWarp (int mode) { return isPhaseWarp (mode) || isPhaseDistortion (mode) || isShaper (mode); }
 
-// The second stage of the PD chain offers only the warps an oscillator can
-// apply on its own: every mode except FM and Ring.
+// The second stage lists the warps an oscillator applies on its own first,
+// then (appended, so saved choices keep their meaning) FM, Ring and FM Noise,
+// which the voice applies from another source.
 inline juce::StringArray getStageTwoNames()
 {
     auto names = getNames();
     names.removeString ("FM");
     names.removeString ("Ring");
     names.removeString ("FM Noise");
+    names.add ("FM");
+    names.add ("Ring");
+    names.add ("FM Noise");
     return names;
 }
 
-inline int modeForStageTwoChoice (int choice) { return choice < Fm ? choice : choice + 2; }
+inline int modeForStageTwoChoice (int choice)
+{
+    if (choice >= 16)
+        return choice == 16 ? Fm : choice == 17 ? Ring : NoiseFm;
+
+    return choice < Fm ? choice : choice + 2;
+}
 
 // PD knee and resonance settings, shared by the oscillator and the displays.
 inline double pdKnee (int mode, double a)
