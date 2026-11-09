@@ -1,4 +1,5 @@
 #include "ProcessorInternal.h"
+#include "../dsp/VectorShape.h"
 
 juce::AudioProcessorValueTreeState::ParameterLayout IlanaSynthAudioProcessor::createParameterLayout()
 {
@@ -1433,6 +1434,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout IlanaSynthAudioProcessor::cr
     // voices read it before.
     for (int osc = 4; osc <= 6; ++osc)
         addFloat ("osc" + juce::String (osc) + "_string_split", "Osc" + juce::String (osc) + " String Split", 0.0f, 1.0f, 0.0f);
+
+    // The vector pad's shape: one corner per oscillator, a slider for two up to
+    // a hexagon for six (dsp/VectorShape.h; ilana, UI review 29). Square, the
+    // pad every older patch has; corners E and F for the five- and six-cornered
+    // shapes, OSC 5 and OSC 6 as A-D's defaults run on.
+    {
+        juce::StringArray shapes;
+        for (const auto* shapeName : VectorShape::names)
+            shapes.add (shapeName);
+        addChoice ("vec_shape", "Vector Shape", shapes, VectorShape::square);
+        const juce::StringArray oscillators { "OSC 1", "OSC 2", "OSC 3", "OSC 4", "OSC 5", "OSC 6" };
+        addChoice ("vec_e", "Vector Corner E", oscillators, 4);
+        addChoice ("vec_f", "Vector Corner F", oscillators, 5);
+    }
 
     return layout;
 }

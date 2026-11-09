@@ -1,8 +1,9 @@
 #pragma once
 
-// M8.5: the vector pad. An XY square whose corners are four of the six
-// oscillators; the puck sets how much of each you hear (equal-power
-// bilinear). Drag the puck, or switch on PATH and drag its eight points: the
+// M8.5: the vector pad. An XY field whose corners are oscillators: four on
+// the square (equal-power bilinear), or one per corner of the SHAPE's slider,
+// triangle, pentagon or hexagon (dsp/VectorShape.h, UI review 29); the puck
+// sets how much of each you hear. Drag the puck, or switch on PATH and drag its eight points: the
 // puck then travels the path at RATE. The live position (after the path,
 // Evolve's drift and any modulation) is drawn as a ring.
 
@@ -14,6 +15,7 @@
 #include "IlanaLookAndFeel.h"
 #include "AnimationUtils.h"
 #include "DisplayStyle.h"
+#include "../dsp/VectorShape.h"
 
 // One cycle (128 points) of the wavetable frame an oscillator plays, for the
 // pictures on the VECTOR page; false while the oscillator isn't a plain
@@ -125,7 +127,7 @@ public:
     explicit VectorPadDisplay (IlanaSynthAudioProcessor& p)
         : processorRef (p)
     {
-        setTooltip ("Vector pad\nDrag the dot to mix the four corner oscillators.\n"
+        setTooltip ("Vector pad\nDrag the dot to mix the corner oscillators (SHAPE sets how many corners).\n"
                     "With PATH on, drag the numbered points: the dot then travels the path.\n"
                     "Double-click to centre the dot. Esc cancels a drag.");
         setWantsKeyboardFocus (true);
@@ -150,55 +152,120 @@ public:
         }
 
         const auto live = processorRef.getVectorPosition();
-        const auto weights = IlanaSynthAudioProcessor::vectorWeights (live.x, live.y);
-        const juce::Point<float> corners[4] { area.getTopLeft(), area.getTopRight(), area.getBottomLeft(), area.getBottomRight() };
+        const auto shape = processorRef.getVectorShape();
+        const auto count = VectorShape::cornerCount (shape);
+        const auto weights = VectorShape::gains (shape, { live.x, live.y });
+        const auto squarePad = shape == VectorShape::square;
+        const auto vectorOn = read ("vec_on") > 0.5f;
 
-        // Each quadrant is tinted in its corner's oscillator colour and holds
+        // Where each corner sits, and the patch of pad that is "its" (the
+        // square's quadrants; on the other shapes, the part of the shape
+        // nearest the corner, cut at the edges' middles and the centre).
+        std::array<juce::Point<float>, VectorShape::maxCorners> corners {};
+        std::array<juce::Path, VectorShape::maxCorners> regions {};
+        const auto shapeCorners = VectorShape::corners (shape);
+        const auto order = VectorShape::ring (shape);
+        juce::Path outline;
+        if (squarePad)
+        {
+            const juce::Point<float> square4[4] { area.getTopLeft(), area.getTopRight(), area.getBottomLeft(), area.getBottomRight() };
+            for (int c = 0; c < 4; ++c)
+            {
+                corners[(size_t) c] = square4[c];
+                regions[(size_t) c].addRectangle (juce::Rectangle<float> (area.getWidth() * 0.5f, area.getHeight() * 0.5f)
+                                                      .withPosition (c % 2 == 0 ? area.getX() : area.getCentreX(), c < 2 ? area.getY() : area.getCentreY())
+                                                      .reduced (1.0f));
+            }
+        }
+        else
+        {
+            for (int c = 0; c < count; ++c)
+                corners[(size_t) c] = toScreen ({ shapeCorners[(size_t) c].x, shapeCorners[(size_t) c].y });
+            if (shape == VectorShape::slider)
+            {
+                // Two halves, and the slider's track across the middle.
+                for (int c = 0; c < 2; ++c)
+                    regions[(size_t) c].addRectangle (area.withWidth (area.getWidth() * 0.5f).withX (c == 0 ? area.getX() : area.getCentreX()).reduced (1.0f));
+                outline.startNewSubPath (corners[0]);
+                outline.lineTo (corners[1]);
+            }
+            else
+            {
+                const auto centreValue = VectorShape::balance (shape);
+                const auto centre = toScreen ({ centreValue.x, centreValue.y });
+                for (int i = 0; i < count; ++i)
+                {
+                    const auto here = corners[(size_t) order[(size_t) i]];
+                    const auto next = corners[(size_t) order[(size_t) ((i + 1) % count)]];
+                    const auto previous = corners[(size_t) order[(size_t) ((i + count - 1) % count)]];
+                    auto& region = regions[(size_t) order[(size_t) i]];
+                    region.startNewSubPath (here);
+                    region.lineTo ((here + next) * 0.5f);
+                    region.lineTo (centre);
+                    region.lineTo ((here + previous) * 0.5f);
+                    region.closeSubPath();
+                    if (i == 0) outline.startNewSubPath (here); else outline.lineTo (here);
+                }
+                outline.closeSubPath();
+            }
+        }
+
+        // Each corner's patch is tinted in its oscillator's colour and holds
         // that oscillator's cycle, faded, so the pad carries content at rest
-        // (A16-5, V15-6). The puck's weights brighten the quadrant it nears.
-        for (int c = 0; c < 4; ++c)
+        // (A16-5, V15-6). The puck's weights brighten the corner it nears.
+        for (int c = 0; c < count; ++c)
         {
             const auto osc = processorRef.getVectorCorner (c);
             if (osc < 0 || osc >= OscillatorIds::count || ! processorRef.isOscillatorShown (osc))
                 continue;
-            const auto quadrant = juce::Rectangle<float> (area.getWidth() * 0.5f, area.getHeight() * 0.5f)
-                                      .withPosition (c % 2 == 0 ? area.getX() : area.getCentreX(), c < 2 ? area.getY() : area.getCentreY());
+            const auto patch = regions[(size_t) c].getBounds();
             const auto tint = IlanaTheme::oscColour (osc);
-            // (An oscillator that is switched off adds nothing: its quadrant and cycle step well back, S1-13.)
+            // (An oscillator that is switched off adds nothing: its patch and cycle step well back, S1-13.)
             const auto presence = isCornerSounding (c) ? 1.0f : 0.3f;
-            juce::ColourGradient wash (tint.withAlpha ((0.16f + 0.14f * weights[(size_t) c]) * presence), corners[c],
-                                       tint.withAlpha (0.04f * presence), quadrant.getCentre(), true);
+            juce::ColourGradient wash (tint.withAlpha ((0.16f + 0.14f * weights[(size_t) c]) * presence), corners[(size_t) c],
+                                       tint.withAlpha (0.04f * presence), patch.getCentre(), true);
             g.setGradientFill (wash);
-            g.fillRect (quadrant.reduced (1.0f));
+            g.fillPath (regions[(size_t) c]);
 
             std::array<float, 128> cycle {};
             if (vectorCornerCycle (processorRef, osc, cycle))
             {
-                const auto plot = quadrant.reduced (16.0f, 0.0f).withSizeKeepingCentre (quadrant.getWidth() - 32.0f, quadrant.getHeight() * 0.5f);
+                juce::Graphics::ScopedSaveState inPatch (g);
+                g.reduceClipRegion (regions[(size_t) c]);
+                const auto plot = patch.reduced (16.0f, 0.0f).withSizeKeepingCentre (juce::jmax (8.0f, patch.getWidth() - 32.0f), patch.getHeight() * 0.5f);
                 juce::Path wave;
                 for (int i = 0; i < (int) cycle.size(); ++i)
                 {
-                    const auto x = plot.getX() + plot.getWidth() * (float) i / (float) (cycle.size() - 1);
-                    const auto y = plot.getCentreY() - juce::jlimit (-1.0f, 1.0f, cycle[(size_t) i]) * plot.getHeight() * 0.5f;
-                    if (i == 0) wave.startNewSubPath (x, y); else wave.lineTo (x, y);
+                    const auto px = plot.getX() + plot.getWidth() * (float) i / (float) (cycle.size() - 1);
+                    const auto py = plot.getCentreY() - juce::jlimit (-1.0f, 1.0f, cycle[(size_t) i]) * plot.getHeight() * 0.5f;
+                    if (i == 0) wave.startNewSubPath (px, py); else wave.lineTo (px, py);
                 }
                 g.setColour (tint.withAlpha ((0.28f + 0.2f * weights[(size_t) c]) * presence));
                 g.strokePath (wave, juce::PathStrokeType (1.4f));
             }
         }
-        for (int c = 0; c < 4; ++c)
+
+        // The shape's edge (the slider's track): where the dot can go.
+        if (! squarePad)
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.22f));
+            g.strokePath (outline, juce::PathStrokeType (shape == VectorShape::slider ? 2.0f : 1.4f));
+        }
+
+        for (int c = 0; c < count; ++c)
         {
             // A corner whose oscillator is off (or not on the page) adds
             // nothing: it is greyed and says so (UI review 4, S27).
             const auto sounding = isCornerSounding (c);
+            const auto corner = corners[(size_t) c];
 
-            if (sounding && read ("vec_on") > 0.5f)
+            if (sounding && vectorOn)
             {
                 const auto radius = area.getWidth() * (0.12f + 0.3f * weights[(size_t) c]);
-                juce::ColourGradient glow (accent.withAlpha (0.35f * weights[(size_t) c] + 0.05f), corners[c],
-                                           accent.withAlpha (0.0f), corners[c].translated (radius, 0.0f), true);
+                juce::ColourGradient glow (accent.withAlpha (0.35f * weights[(size_t) c] + 0.05f), corner,
+                                           accent.withAlpha (0.0f), corner.translated (radius, 0.0f), true);
                 g.setGradientFill (glow);
-                g.fillEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (corners[c]));
+                g.fillEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (corner));
             }
 
             // Each corner names its oscillator on a small pill with the
@@ -209,8 +276,17 @@ public:
             const auto tint = osc >= 0 && osc < OscillatorIds::count ? IlanaTheme::oscColour (osc) : IlanaTheme::Ui::text3;
             const auto textWidth = (float) juce::GlyphArrangement::getStringWidthInt (juce::Font (font), label);
             auto pill = juce::Rectangle<float> (textWidth + 28.0f, 20.0f);
-            pill.setPosition (c % 2 == 0 ? area.getX() + 6.0f : area.getRight() - pill.getWidth() - 6.0f,
-                              c < 2 ? area.getY() + 6.0f : area.getBottom() - 26.0f);
+            if (squarePad)
+                pill.setPosition (c % 2 == 0 ? area.getX() + 6.0f : area.getRight() - pill.getWidth() - 6.0f,
+                                  c < 2 ? area.getY() + 6.0f : area.getBottom() - 26.0f);
+            else
+            {
+                // On the corner, kept inside the pad.
+                const auto inside = area.reduced (6.0f);
+                pill = pill.withCentre (corner);
+                pill.setPosition (juce::jlimit (inside.getX(), inside.getRight() - pill.getWidth(), pill.getX()),
+                                  juce::jlimit (inside.getY(), inside.getBottom() - pill.getHeight(), pill.getY()));
+            }
             g.setColour (IlanaTheme::Ui::raised.withAlpha (0.85f));
             g.fillRoundedRectangle (pill, 10.0f);
             g.setColour ((sounding ? tint : IlanaTheme::Ui::line).withAlpha (sounding ? 0.7f : 1.0f));
@@ -223,23 +299,29 @@ public:
                                     juce::Justification::centredLeft, 1);
         }
 
-        // Where the puck sits, over the pad's top edge (the design's readout).
+        // Where the puck sits: over the pad's top edge on the square (the design's readout); at the top left on
+        // the other shapes, whose top middle is a corner (or the slider's empty field).
         {
             g.setColour (IlanaTheme::Ui::text2); // (ink 2: ink 3 was hard to read on the field, S1-12)
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true));
-            g.drawText ("X " + juce::String (juce::roundToInt (live.x * 100.0f)) + "%  "
-                            + juce::String::fromUTF8 ("\xc2\xb7") + "  Y "
-                            + juce::String (juce::roundToInt (live.y * 100.0f)) + "%",
-                        area.withHeight (16.0f).translated (0.0f, 8.0f).toNearestInt(), juce::Justification::centred);
+            const auto readout = shape == VectorShape::slider
+                                     ? "X " + juce::String (juce::roundToInt (live.x * 100.0f)) + "%"
+                                     : "X " + juce::String (juce::roundToInt (live.x * 100.0f)) + "%  "
+                                           + juce::String::fromUTF8 ("\xc2\xb7") + "  Y "
+                                           + juce::String (juce::roundToInt (live.y * 100.0f)) + "%";
+            if (squarePad)
+                g.drawText (readout, area.withHeight (16.0f).translated (0.0f, 8.0f).toNearestInt(), juce::Justification::centred);
+            else
+                g.drawText (readout, area.reduced (12.0f, 0.0f).withHeight (16.0f).translated (0.0f, 10.0f).toNearestInt(), juce::Justification::centredLeft);
         }
 
-        // The mix itself: the four corners' cycles at the puck's weights,
+        // The mix itself: the corners' cycles at the puck's weights,
         // one trace across the pad, so the pad is a picture of what it
         // makes (V14-2).
         {
             std::array<float, 128> mix {}, one {};
             auto any = false;
-            for (int c = 0; c < 4; ++c)
+            for (int c = 0; c < count; ++c)
                 if (isCornerSounding (c) && vectorCornerCycle (processorRef, processorRef.getVectorCorner (c), one))
                 {
                     any = true;
@@ -253,12 +335,12 @@ public:
                 juce::Path trace;
                 for (int i = 0; i < (int) mix.size(); ++i)
                 {
-                    const auto x = plot.getX() + plot.getWidth() * (float) i / (float) (mix.size() - 1);
+                    const auto px = plot.getX() + plot.getWidth() * (float) i / (float) (mix.size() - 1);
                     // (Kept inside the pad: a loud mix used to run off its foot.)
-                    const auto y = area.getCentreY() - juce::jlimit (-1.0f, 1.0f, mix[(size_t) i]) * area.getHeight() * 0.3f;
-                    if (i == 0) trace.startNewSubPath (x, y); else trace.lineTo (x, y);
+                    const auto py = area.getCentreY() - juce::jlimit (-1.0f, 1.0f, mix[(size_t) i]) * area.getHeight() * 0.3f;
+                    if (i == 0) trace.startNewSubPath (px, py); else trace.lineTo (px, py);
                 }
-                g.setColour (accent.withAlpha (read ("vec_on") > 0.5f ? 0.55f : 0.4f));
+                g.setColour (accent.withAlpha (vectorOn ? 0.55f : 0.4f));
                 g.strokePath (trace, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved));
             }
         }
@@ -266,24 +348,25 @@ public:
         // While VECTOR is off the pad does nothing (the page dims it too), but
         // it still shows what it would mix: each corner in its oscillator's
         // colour, dim (V11-24).
-        if (read ("vec_on") < 0.5f)
+        if (! vectorOn)
         {
-            for (int c = 0; c < 4; ++c)
+            for (int c = 0; c < count; ++c)
             {
                 const auto osc = processorRef.getVectorCorner (c);
                 if (osc < 0 || osc >= OscillatorIds::count || ! processorRef.isOscillatorShown (osc))
                     continue;
                 const auto tint = IlanaTheme::oscColour (osc);
-                juce::ColourGradient glow (tint.withAlpha (0.22f), corners[c], tint.withAlpha (0.0f),
-                                           corners[c].translated (area.getWidth() * 0.4f, 0.0f), true);
+                const auto corner = corners[(size_t) c];
+                juce::ColourGradient glow (tint.withAlpha (0.22f), corner, tint.withAlpha (0.0f),
+                                           corner.translated (area.getWidth() * 0.4f, 0.0f), true);
                 g.setGradientFill (glow);
-                g.fillEllipse (juce::Rectangle<float> (area.getWidth() * 0.8f, area.getWidth() * 0.8f).withCentre (corners[c]));
+                g.fillEllipse (juce::Rectangle<float> (area.getWidth() * 0.8f, area.getWidth() * 0.8f).withCentre (corner));
             }
 
             g.setColour (IlanaTheme::Ui::text2);
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true));
             g.drawText (juce::String::fromUTF8 ("VECTOR OFF  \xc2\xb7  switch on to mix the corners"),
-                        area.withSizeKeepingCentre (area.getWidth(), 18.0f).withY (area.getBottom() - 44.0f),
+                        area.withSizeKeepingCentre (area.getWidth(), 18.0f).withY (area.getBottom() - (squarePad ? 44.0f : 70.0f)),
                         juce::Justification::centred);
         }
 
@@ -369,7 +452,13 @@ public:
         if (gestures.cancelled())
             return;
 
-        const auto p = fromScreen (event.position);
+        auto p = fromScreen (event.position);
+        // (The dot stays on the shape: off it, it would sound like the nearest edge point anyway.)
+        if (dragPoint < 0)
+        {
+            const auto inside = VectorShape::clamp (processorRef.getVectorShape(), { p.x, p.y });
+            p = { inside.x, inside.y };
+        }
         if (dragPoint >= 0)
         {
             setParam ("vec_px" + juce::String (dragPoint + 1), p.x);
@@ -398,8 +487,10 @@ public:
 
         processorRef.performEdit ("Centre vector position", [this]
         {
-            setParam ("vec_x", 0.5f);
-            setParam ("vec_y", 0.5f);
+            // (The shape's balance: the middle of the square or the slider, a triangle's lower third.)
+            const auto centre = VectorShape::balance (processorRef.getVectorShape());
+            setParam ("vec_x", centre.x);
+            setParam ("vec_y", centre.y);
             gestures.end();
         });
     }
