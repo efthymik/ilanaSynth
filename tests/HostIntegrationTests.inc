@@ -34,9 +34,11 @@ inline void block (IlanaSynthAudioProcessor& processor, juce::MidiBuffer& midi)
     processor.processBlock (buffer, midi);
 }
 
-// A random arp's note-ons from the transport's start: `stoppedBlocks` blocks
-// with the chord held and the transport stopped first (so the generators
-// have run a while), then 160 blocks from bar 1.
+// A random arp's note-ons from the transport's start, as a clip plays it:
+// first `stoppedBlocks` blocks with the transport stopped and the chord held
+// (so the arp's generator has run a while), the chord let go, then the
+// transport plays from bar 1 with the chord pressed on its first sample,
+// for 600 blocks of 1/16 steps (about 50 notes).
 inline std::vector<int> randomArpNotes (bool repeatable, int stoppedBlocks)
 {
     IlanaSynthAudioProcessor processor;
@@ -46,18 +48,22 @@ inline std::vector<int> randomArpNotes (bool repeatable, int stoppedBlocks)
     set (processor, "arp_on", 1.0f);
     set (processor, "arp_mode", 3.0f); // Random
     set (processor, "arp_octaves", 3.0f);
-    set (processor, "arp_div", 6.0f);
+    set (processor, "arp_div", 4.0f);  // 1/16
     set (processor, "repeat_random", repeatable ? 1.0f : 0.0f);
 
+    const int chord[] { 60, 63, 67, 70 };
     std::vector<int> notes;
-    for (int i = 0; i < stoppedBlocks + 160; ++i)
+    for (int i = 0; i < stoppedBlocks + 1 + 600; ++i)
     {
         juce::MidiBuffer midi;
-        if (i == 0)
-            for (auto note : { 60, 63, 67, 70 })
+        head.playing = i > stoppedBlocks;
+        head.ppq = head.playing ? (double) (i - stoppedBlocks - 1) * 256.0 / 48000.0 * 2.0 : 0.0;
+        if (i == 0 || i == stoppedBlocks + 1)
+            for (auto note : chord)
                 midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 100), 0);
-        head.playing = i >= stoppedBlocks;
-        head.ppq = head.playing ? (double) (i - stoppedBlocks) * 256.0 / 48000.0 * 2.0 : 0.0;
+        if (i == stoppedBlocks)
+            for (auto note : chord)
+                midi.addEvent (juce::MidiMessage::noteOff (1, note), 0);
         block (processor, midi);
         if (head.playing)
             for (const auto metadata : processor.getSynthMidiForTest())
