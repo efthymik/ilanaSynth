@@ -37,7 +37,8 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
            vib_ct, vib_rate, vib_delay, vib_rise, attack_s, swell_s, swell_amt,
            rosin, jitter_amt, rel_s, fade_db,
            bz_b0, bz_a1, bz_a2, bz_g, outgain, hiss, hiss_hp, lp_hz,
-           size, rip_db, rip_c, slow_db, slow_hz, loud_db, vib_rate_dev, vib_depth_dev, vib_drift_hz, direct, ring, lift, ring_s):
+           size, rip_db, rip_c, slow_db, slow_hz, loud_db, vib_rate_dev, vib_depth_dev, vib_drift_hz, direct, ring, lift, ring_s,
+           fl_db, fl_hz, fl_slope, fl_hzslope, jit_ct, jit_hz, pdrift_ct, pdrift_hz):
     k = 1.0 / sr
     n_ = np.arange(1, modes + 1).astype(np.float64)
     shape = np.sin(n_ * np.pi * beta)
@@ -82,6 +83,15 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
     _, vg_d = drift_gain(sr, vib_drift_hz, vib_depth_dev)
     wander = np.zeros(modes); wander1 = np.zeros(modes); loud = 0.0; loud1 = 0.0
     vr = 0.0; vr1 = 0.0; vd = 0.0; vd1 = 0.0
+    # The bow's fast randomness (a third noise stream): each partial's level
+    # flutters on its own (fl_db at about fl_hz), the pitch jitters (jit_ct at
+    # about jit_hz) and drifts slowly (the player's intonation, pdrift_ct).
+    e = s ^ 0x85EBCA6B
+    fa, fg = drift_gain(sr, min(100.0, fl_hz * (f0 / 440.0) ** fl_hzslope), fl_db * (f0 / 440.0) ** fl_slope)
+    ja, jg = drift_gain(sr, jit_hz, jit_ct)
+    pa, pg = drift_gain(sr, pdrift_hz, pdrift_ct)
+    flut = np.zeros(modes); flut1 = np.zeros(modes)
+    jit = 0.0; jit1 = 0.0; pdr = 0.0; pdr1 = 0.0
     loud_f = 1.0
     for i in range(total):
         if i % 32 == 0 and i >= held:
@@ -108,18 +118,28 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
             d = (d * 1664525 + 1013904223) % 4294967296
             vd1 += va * (vg_d * ((d >> 8) * (2.0 / 16777216.0) - 1.0) - vd1)
             vd += va * (vd1 - vd)
+            for m in range(modes):
+                e = (e * 1664525 + 1013904223) % 4294967296
+                flut1[m] += fa * (fg * ((e >> 8) * (2.0 / 16777216.0) - 1.0) - flut1[m])
+                flut[m] += fa * (flut1[m] - flut[m])
+            e = (e * 1664525 + 1013904223) % 4294967296
+            jit1 += ja * (jg * ((e >> 8) * (2.0 / 16777216.0) - 1.0) - jit1)
+            jit += ja * (jit1 - jit)
+            e = (e * 1664525 + 1013904223) % 4294967296
+            pdr1 += pa * (pg * ((e >> 8) * (2.0 / 16777216.0) - 1.0) - pdr1)
+            pdr += pa * (pdr1 - pdr)
             loud_f = np.exp(DB * loud)
             phase += 2 * np.pi * vib_rate * (1.0 + vr) * 32.0 / sr
             if phase > 2 * np.pi:
                 phase -= 2 * np.pi
-            cents = vib_ct * (1.0 + vd) * vib_env * np.sin(phase)
+            cents = vib_ct * (1.0 + vd) * vib_env * np.sin(phase) + jit + pdr
             ratio = 2.0 ** (cents / 1200.0)
             hz = np.minimum(hz0 * ratio, sr * 0.49)
             turn = 2.0 * decay * np.cos(2 * np.pi * hz * k)
             swing = 2 * np.pi * rip_c * cents / 1200.0
             ripple = 0.5 * rip_db * (np.sin(ph1 + swing) - base1 + np.sin(ph2 + 1.618034 * swing) - base2)
             # (glided to over the block: a step would zip)
-            out_step = (out0 * np.exp(DB * (ripple + wander)) - out) / 32.0
+            out_step = (out0 * np.exp(DB * (ripple + wander + flut)) - out) / 32.0
         nxt = turn * q - fall * qp
         v = np.sum(shape * (nxt - qp)) * 0.5 * sr
         on = 1.0 if i < held else 0.0
@@ -184,8 +204,9 @@ DEFAULT = dict(beta=0.11, loss0=0.8, loss1=3.947e-06, bright=2.144, b=1.0e-5, gr
                vib_ct=9.0, vib_rate=5.2, vib_delay=0.25, vib_rise=0.4, swell_s=0.34, swell_amt=0.97,
                rosin=0.02795, jitter=0.1001, rel_s=1.0, fade_db=36.96, hiss=0.0003336, hiss_hp=8000.0, top=12000.0,
                attack_scale=0.05, lp_hz=5590.0,
-               rip_db=6.186, rip_c=18.68, slow_db=2.035, slow_hz=0.6, loud_db=1.742,
-               vib_rate_dev=0.12, vib_depth_dev=0.3, vib_drift_hz=0.8, direct_db=-10.33, ring=16.05, lift=1.0, ring_s=0.494)
+               rip_db=6.737, rip_c=20.24, slow_db=2.069, slow_hz=0.6, loud_db=1.742,
+               vib_rate_dev=0.06047, vib_depth_dev=0.6121, vib_drift_hz=0.8, direct_db=-10.33, ring=16.05, lift=1.0, ring_s=0.494,
+               fl_db=2.674, fl_hz=14.95, fl_slope=0.4562, fl_hzslope=0.7853, jit_ct=0.0, jit_hz=20.0, pdrift_ct=2.881, pdrift_hz=0.5)
 
 
 def play(inst, note, seconds=4.8, held=4.0, seed=1, **kw):
@@ -202,4 +223,5 @@ def play(inst, note, seconds=4.8, held=4.0, seed=1, **kw):
                   b0, a1, a2, g, 30000.0, p["hiss"], p["hiss_hp"], p["lp_hz"],
                   SIZES[inst], p["rip_db"], p["rip_c"], p["slow_db"], p["slow_hz"], p["loud_db"],
                   p["vib_rate_dev"], p["vib_depth_dev"], p["vib_drift_hz"],
-                  10 ** ((p["direct_db"] + BODY[inst].max()) / 20), p["ring"], p["lift"], p["ring_s"])
+                  10 ** ((p["direct_db"] + BODY[inst].max()) / 20), p["ring"], p["lift"], p["ring_s"],
+                  p["fl_db"], p["fl_hz"], p["fl_slope"], p["fl_hzslope"], p["jit_ct"], p["jit_hz"], p["pdrift_ct"], p["pdrift_hz"])
