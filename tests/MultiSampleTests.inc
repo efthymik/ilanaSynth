@@ -304,10 +304,11 @@ inline void runSamplePortabilityTests (const juce::File& folder)
         check (underHome ("D:\\Samples\\a.wav", "/Users/leo").isEmpty() && underHome ("C:\\Users\\ilana", "/Users/leo").isEmpty(),
                "portable: a path outside a home folder has no home match");
 
+        work.getChildFile ("from-windows").createDirectory(); // (writeWav doesn't make the folder)
         writeWav (work.getChildFile ("from-windows/solo.wav"), sine (330.0, 44100.0, 5000), 44100.0);
         IlanaSynthAudioProcessor saver;
         setUp (saver);
-        saver.loadUserSample (0, work.getChildFile ("from-windows/solo.wav"));
+        check (saver.loadUserSample (0, work.getChildFile ("from-windows/solo.wav")), "portable: the sample to save under a Windows path loads");
         auto block = stateOf (saver);
         if (auto xml = juce::AudioProcessor::getXmlFromBinary (block.getData(), (int) block.getSize()))
         {
