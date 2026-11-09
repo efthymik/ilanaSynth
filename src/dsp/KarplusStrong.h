@@ -172,7 +172,11 @@ public:
         pickHardness = juce::jlimit (0.0f, 1.0f, newPickHardness);
         pickPosition = 0.0f;
         slap = newSlap;
-        dispersionCoefficient = allpassFrom48k (-0.95f * stiffness, sampleRate); // the same stretch in Hz at any rate
+        // Per sample, so the stretch in Hz shrinks at higher rates. Kept so on
+        // purpose: holding it at 48 kHz's stretch pulls the heard pitch of a
+        // stiff string (Nylon String) 8 cents sharp at 96 kHz, though the
+        // fundamental itself stays in tune.
+        dispersionCoefficient = -0.95f * stiffness;
         loopSetupDirty = true;
         updateDispersionDelay();
         updatePianoDispersion();
