@@ -1355,7 +1355,7 @@ void runGlideMigrationTest()
     const auto glideDst = (float) Mod::destinationForParamId ("glide");
     const auto cutoffDst = (float) (int) Mod::Destination::Filter1Cutoff;
     {
-        std::map<juce::String, float> values { { "glide", 0.01f }, { "mod1_dst", glideDst }, { "mod1_amt", 0.3f },
+        std::map<juce::String, float> values { { "glide", 0.002f }, { "mod1_dst", glideDst }, { "mod1_amt", 0.1f },
                                                { "mod2_dst", cutoffDst }, { "mod2_amt", 0.3f } };
         const auto get = [&values] (const juce::String& id, float fallback)
         {
@@ -1363,14 +1363,15 @@ void runGlideMigrationTest()
             return found != values.end() ? found->second : fallback;
         };
         const auto set = [&values] (const juce::String& id, float value) { values[id] = value; };
-        check (IlanaSynthAudioProcessor::migrateGlideTime (get, set) == 2 && near (values["glide"], 0.16f)
-                   && near (values["mod1_amt"], 0.3f * std::pow (16.0f, 0.13f)) && near (values["mod2_amt"], 0.3f),
+        check (IlanaSynthAudioProcessor::migrateGlideTime (get, set) == 2 && near (values["glide"], 0.032f)
+                   && near (values["mod1_amt"], 0.1f * std::pow (16.0f, 0.13f)) && near (values["mod2_amt"], 0.3f),
                "glide migration: GLIDE x16, a route into it scaled by 16^skew, other routes alone");
 
-        // The route reaches as far in seconds: old base + route, x16, is the new base + route.
+        // The route reaches as far in seconds: old base + route, x16, is the new base + route
+        // (values that stay under the knob's 2 s once x16).
         IlanaSynthAudioProcessor p;
         auto* parameter = dynamic_cast<juce::RangedAudioParameter*> (p.apvts.getParameter ("glide"));
-        const auto oldAt = parameter->convertFrom0to1 (parameter->convertTo0to1 (0.01f) + 0.3f);
+        const auto oldAt = parameter->convertFrom0to1 (parameter->convertTo0to1 (0.002f) + 0.1f);
         const auto newAt = parameter->convertFrom0to1 (parameter->convertTo0to1 (values["glide"]) + values["mod1_amt"]);
         check (std::abs (newAt - 16.0f * oldAt) < 1.0e-3f * newAt,
                "glide migration: a route into GLIDE reaches 16 times as far (" + juce::String (oldAt, 4) + " -> " + juce::String (newAt, 4) + " s)");
@@ -1493,7 +1494,11 @@ void runBlockGlideTest()
         }
     };
 
+    Wavetable table; // (with no table the oscillator is silent)
+    table.buildFromFrames (TableFactory::generate (7));
     VoiceParams params;
+    params.oscillators[0].table = &table;
+    params.oscillators[0].level = 0.8f;
     params.oscillatorEnabled[2] = false;
     params.oscillators[0].pan = -1.0f;
     params.filter1.cutoffHz = 2000.0f;
