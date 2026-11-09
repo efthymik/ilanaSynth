@@ -224,6 +224,8 @@ private:
     SectionPage* currentSection() const;
     void applyDisplayScale();
     void applyUiZoom (float newZoom);
+    void updateKeysTooltip();
+    float fitZoom() const;
     float displayScale() const;
     float hostScaleFactor() const;
 
@@ -478,6 +480,7 @@ private:
     void* previousDpiContext = nullptr;
     float uiZoom = 1.0f;
     bool zoomNeedsSaving = false;
+    int shownTableNoticeVersion = 0;
 
    #if ILANA_GPU_UI
     std::unique_ptr<juce::OpenGLContext> openGL;

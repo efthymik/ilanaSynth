@@ -4,6 +4,7 @@
 // ILANA_MULTISAMPLE_TEST=1 runs only these.
 
 #include "dsp/MultiSample.h"
+#include "SamplePaths.h"
 
 namespace MultiSampleLab
 {
@@ -283,6 +284,45 @@ inline void runSamplePortabilityTests (const juce::File& folder)
             check (third.relinkSample (osc, file), "portable: relinks osc " + juce::String (osc + 1));
         check (third.getMissingSamples().empty() && third.getSampleForOsc (1) != nullptr && third.getSampleForOsc (1)->zones.size() == 2,
                "portable: relinked samples play and nothing is missing");
+    }
+
+    // A set saved on Windows, opened on the Mac (or here): the path is read as
+    // text with either slash, and the same place under this home folder is tried.
+    {
+        using SamplePaths::fileNameOf;
+        using SamplePaths::underHome;
+        const juce::String windows ("C:\\Users\\ilana\\Documents\\ilanaSynth Samples\\kick.wav");
+        check (fileNameOf (windows) == "kick.wav" && fileNameOf ("/Users/leo/a b.wav") == "a b.wav" && fileNameOf ("c.wav") == "c.wav",
+               "portable: a file name is read from Windows and Mac paths alike");
+        check (underHome (windows, "/Users/leo") == juce::StringArray ("/Users/leo/Documents/ilanaSynth Samples/kick.wav"),
+               "portable: a Windows home path maps under the Mac home folder");
+        check (underHome ("/Users/leo/Music/a.wav", "C:\\Users\\ilana") == juce::StringArray ("C:\\Users\\ilana\\Music\\a.wav"),
+               "portable: a Mac home path maps under the Windows home folder");
+        const auto oneDrive = underHome ("C:\\Users\\ilana\\OneDrive\\Documents\\a.wav", "/Users/leo/");
+        check (oneDrive.size() == 2 && oneDrive[0] == "/Users/leo/OneDrive/Documents/a.wav" && oneDrive[1] == "/Users/leo/Documents/a.wav",
+               "portable: a OneDrive path also tries the place without OneDrive");
+        check (underHome ("D:\\Samples\\a.wav", "/Users/leo").isEmpty() && underHome ("C:\\Users\\ilana", "/Users/leo").isEmpty(),
+               "portable: a path outside a home folder has no home match");
+
+        work.getChildFile ("from-windows").createDirectory(); // (writeWav doesn't make the folder)
+        writeWav (work.getChildFile ("from-windows/solo.wav"), sine (330.0, 44100.0, 5000), 44100.0);
+        IlanaSynthAudioProcessor saver;
+        setUp (saver);
+        check (saver.loadUserSample (0, work.getChildFile ("from-windows/solo.wav")), "portable: the sample to save under a Windows path loads");
+        auto block = stateOf (saver);
+        if (auto xml = juce::AudioProcessor::getXmlFromBinary (block.getData(), (int) block.getSize()))
+        {
+            xml->setAttribute ("osc1SamplePath", "C:\\Users\\nobody-here\\Samples\\solo.wav");
+            block.reset();
+            juce::AudioProcessor::copyXmlToBinary (*xml, block);
+        }
+        IlanaSynthAudioProcessor opener;
+        setUp (opener);
+        restore (opener, block);
+        opener.flushAsyncUpdates();
+        const auto found = opener.findMissingSampleFiles (work.getChildFile ("from-windows"), false);
+        check (opener.getMissingSamples().size() == 1 && found.size() == 1 && found[0].second.getFileName() == "solo.wav",
+               "portable: Search Folder finds a sample saved under a Windows path");
     }
 
     work.deleteRecursively();

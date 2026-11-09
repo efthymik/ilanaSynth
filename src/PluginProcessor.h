@@ -130,6 +130,8 @@ public:
     void releaseResources() override;
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
+    // macOS (AU): the host's audio workgroup, for the MULTI-CORE threads.
+    void audioWorkgroupContextChanged (const juce::AudioWorkgroup& workgroup) override;
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
@@ -148,6 +150,11 @@ public:
 
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
+    // A line for the editor about the last host state load (empty: nothing to
+    // say): a state that could not be read (its bytes are saved back unchanged
+    // until the patch is edited), or one saved by a newer build.
+    juce::String getStateLoadNotice() const;
+    int getStateLoadNoticeVersion() const { return stateLoadNoticeVersion.load(); }
 
    #if JUCE_LINUX || JUCE_BSD
     // Keeps the VST3 host's run loop alive; see HostRunLoopKeepAlive in
@@ -293,7 +300,7 @@ public:
     // from user preset files for the browser. Message thread only.
     static juce::StringArray getPresetCategoryChoices()
     {
-        return { "Bass", "Lead", "Brass", "Wind", "Pluck", "Pad", "Keys", "Chords", "Arp", "Drone", "FX", "Other" };
+        return { "Bass", "Lead", "Brass", "Wind", "Pluck", "Pad", "Keys", "Chords", "Arp", "Drone", "FX", "Generative", "Drums", "FX Input", "Other" };
     }
 
     void setPresetMeta (const juce::String& category, const juce::String& tags)
@@ -358,6 +365,12 @@ public:
     // drive, space), chosen from what the patch uses. Silent at macro 0.
     // Macros marked in keep (the preset voicing's own) are left alone.
     void applyDefaultMacros (const std::array<bool, 4>& keep = {});
+    // A factory preset that routes neither the mod wheel nor aftertouch gets
+    // one route each, chosen by category. Silent until they are touched.
+    void applyDefaultExpression (const char* presetName, const juce::String& category);
+    // Plucks, keys, basses and leads with no velocity on their timbre get a
+    // steep velocity route to FILTER 1's cutoff (bright on hard hits).
+    void applyDefaultVelocity (const char* presetName, const juce::String& category);
 
     static void migrateLegacyOsc3 (const std::function<float (const juce::String&, float)>& get,
                                    const std::function<void (const juce::String&, float)>& set);
@@ -404,9 +417,17 @@ public:
     // (DenseSoundboard::mixRange): a patch on the Dense board from before
     // gets its MIX, and the depth of every route or macro into MIX, divided
     // by that, so its wood stays where it was heard.
-    // Returns 1 if it changed the value.
+    // Returns 1 if it changed the value. mixKnob false divides only the routes
+    // (a state the 2026-11-05 build saved: its MIX was already divided).
     static int migrateDenseBoardMix (const std::function<float (const juce::String&, float)>& get,
-                                     const std::function<void (const juce::String&, float)>& set);
+                                     const std::function<void (const juce::String&, float)>& set,
+                                     bool mixKnob = true);
+    // GLIDE took 16 times its knob's time until 2026-11 (Voice::glideCoeff):
+    // a patch or factory recipe from before gets GLIDE x16 (at most the knob's
+    // 2 s), and its routes and macros into GLIDE reach as far in seconds, so
+    // it glides as it did. Returns how many values it changed.
+    static int migrateGlideTime (const std::function<float (const juce::String&, float)>& get,
+                                 const std::function<void (const juce::String&, float)>& set);
     // The same on the live parameters (after a bounce or a factory preset).
     void migrateOperatorModes();
     bool clearModSlotsForTarget (int destination);
@@ -511,6 +532,11 @@ public:
     // Every parameter's value (0..1, by index) at that load or save, for the
     // tabs' edited-since-load dots. Message thread only.
     std::vector<float> loadedPresetValues;
+    // The page the editor was last on (a page id such as "MAIN"), so a reopened window lands there.
+    // Not a parameter and not sound: lives as long as the plugin instance. Message thread only.
+    juce::String lastViewPage;
+    // The last session-load notice the editor showed (so reopening the window does not show it again).
+    int shownStateLoadNoticeVersion = 0;
 
     unsigned getDataEpoch() const { return dataEpoch.load(); }
     // Counts sample loads (a new sample can reuse a freed one's address).
@@ -1083,6 +1109,7 @@ private:
         const std::atomic<float>* value = nullptr;
         int index = -1;        // in paramCacheIds (an FX instance's own values are kept by it)
         int destination = -1;
+        int parameterIndex = -1; // in getParameters() (the learned CCs' values, ccOverrides)
         bool discrete = false; // a choice, int or bool: read back rounded
         float fallback = 0.0f; // the default, read in place of a non-finite value
     };
@@ -1195,6 +1222,17 @@ private:
     std::array<std::shared_ptr<const WavetableDoc>, (size_t) numUserSlots> userTableDocs; // null: default
     juce::String tableNotice;
     std::atomic<int> tableNoticeVersion { 0 };
+
+    // A host state setStateInformation could not read, kept so saving the set
+    // doesn't replace it with Init; with the state as it was right after (XML
+    // text), so the first edit lets the patch be saved instead.
+    void keepUnreadableState (const void* data, int sizeInBytes);
+    void setStateLoadNotice (const juce::String& text);
+    juce::MemoryBlock unreadableState;
+    juce::String unreadableStateBase;
+    juce::String stateLoadNotice;
+    std::atomic<int> stateLoadNoticeVersion { 0 };
+    juce::CriticalSection stateLoadLock;
     mutable juce::SpinLock tableLock;
 
     std::array<std::array<ParamRef, 11>, OscillatorIds::count> stringParamIds;
@@ -1215,6 +1253,14 @@ private:
     ParamRef masterRef { "master" }, outputTrimRef { "output_trim" };
     ParamRef fxRoutingRef { "fx_routing" };
     ParamRef multiCoreRef { "multi_core" };
+    ParamRef repeatRandomRef { "repeat_random" };
+    bool repeatWasPlaying = false;
+    void restartModulators (juce::int64 salt);
+    void restartRandomAtPlayStart (double ppq);
+    // The host's workgroup (audio thread only), still to reach the voice
+    // threads when they were busy taking the last one.
+    juce::AudioWorkgroup hostWorkgroup;
+    bool hostWorkgroupPending = false;
     ParamRef sustainVoicesRef { "sustain_voices" };
     ParamRef midiProgramChangeRef { "midi_program_change" }, msegLoopRef { "mseg_loop" };
     // The Airwindows category modules (FX types 32-41), one engine each;
@@ -1538,8 +1584,19 @@ private:
     std::array<std::atomic<int>, 128> ccParameter;
     std::atomic<int> paramLearn { -1 };
     std::array<std::atomic<float>, 128> pendingCcValues;
+    std::array<std::atomic<int>, 128> pendingCcParameter; // the parameter each queued value is for
     std::array<std::atomic<bool>, 128> ccValuePending;
     std::atomic<bool> ccPending { false };
+    // Sound review 7: a learned CC's (or a macro CC's) value as the audio
+    // thread heard it, read by getParam in place of the parameter's own until
+    // the message thread has set the parameter to it (then NaN again). So a
+    // CC moves the sound in the block it arrives in, live and in an offline
+    // export, however busy the message thread is. Indexed by getParameters().
+    std::unique_ptr<std::atomic<float>[]> ccOverrides;
+    std::vector<juce::RangedAudioParameter*> rangedParameters; // getParameters(), as ranged ones (or null)
+    void takeLearnedCcs (const juce::MidiBuffer& midiMessages);
+    void setCcOverride (int parameterIndex, float normalised) noexcept;
+    void applyCcOverride (int parameterIndex, float normalised);
     juce::String getParamCcMapText() const;
     void setParamCcMapText (const juce::String& text);
     std::atomic<float> envMonitorAmp { 0.0f };
@@ -1571,6 +1628,33 @@ private:
     };
     std::atomic<unsigned> paramEpoch { 0 }, liveEpoch { 0 }, dataEpoch { 0 }, sampleEpoch { 0 };
     ParamEpoch paramEpochListener { paramEpoch };
+
+    // Undo (stability review 4): the value tree has no undo manager, so a
+    // host's automation or a learned CC no longer lands in her history (and
+    // wipes Redo). This records the parameter changes made on the message
+    // thread instead, by the editor (not those of the audio thread, nor a CC
+    // the message thread applies, nor an undo or redo itself), each as a
+    // step that merges with the same parameter's last one, as the tree's
+    // did. A gesture starts a new step (as JUCE's attachments did) unless an
+    // edit (beginEdit) or a named step is waiting for it; the gestures of
+    // one message (a menu choice that sets several parameters) share it.
+    struct ParamUndoRecorder : juce::AudioProcessorParameter::Listener, juce::AsyncUpdater
+    {
+        explicit ParamUndoRecorder (IlanaSynthAudioProcessor& p) : processor (p) {}
+        void prepare (const juce::Array<juce::AudioProcessorParameter*>& parameters);
+        void parameterValueChanged (int index, float value) override;
+        void parameterGestureChanged (int index, bool starting) override;
+        void handleAsyncUpdate() override;
+
+        IlanaSynthAudioProcessor& processor;
+        std::unique_ptr<std::atomic<float>[]> lastValues; // every thread writes these (normalised)
+        int numValues = 0;
+        int openGestures = 0;
+        bool gestureStepOpen = false;
+        bool ignoring = false; // set around changes that are not her edits
+    };
+    struct ParamUndoStep;
+    ParamUndoRecorder undoRecorder { *this };
 
    #if JUCE_LINUX || JUCE_BSD
     struct HostRunLoopKeepAlive final : juce::VST3ClientExtensions
@@ -1652,6 +1736,8 @@ public:
 
     // Tests only: what the last block sent to the voices.
     const juce::MidiBuffer& getSynthMidiForTest() const { return midiForSynth; }
+    // Tests only: the message thread's pending work (the CCs it applies) now.
+    void runAsyncUpdateForTest() { handleUpdateNowIfNeeded(); }
 
     // Tests only: one arpeggiator note choice from the currently held notes.
     int pickArpNoteForTest (int mode, int octaves) { return selectArpNote (mode, octaves); }

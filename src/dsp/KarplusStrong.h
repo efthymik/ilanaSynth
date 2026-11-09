@@ -18,6 +18,7 @@
 #include "PianoString.h"
 #include "FeedbackGuitar.h"
 #include "PianoTuning.h"
+#include "RatePole.h"
 
 #if defined (_MSC_VER)
  #define ILANA_NOINLINE __declspec (noinline)
@@ -130,7 +131,10 @@ public:
         damping = juce::jlimit (0.0f, 1.0f, newDamping);
         decay = juce::jlimit (0.0f, 1.0f, newDecay);
 
-        lowpassCoefficient = 1.0f - damping * 0.96f;
+        // The loop low-pass runs once a sample: kept at its 48 kHz sound in
+        // seconds, or a string rings brighter and longer at 96 kHz or with
+        // OVERSAMPLE (the hammer designs its own below, for the real rate).
+        lowpassCoefficient = onePoleFrom48k (1.0f - damping * 0.96f, sampleRate);
         loopSetupDirty = true;
         feedback = 0.90f + decay * 0.0995f;
         updateHammerFeedback();
@@ -168,6 +172,10 @@ public:
         pickHardness = juce::jlimit (0.0f, 1.0f, newPickHardness);
         pickPosition = 0.0f;
         slap = newSlap;
+        // Per sample, so the stretch in Hz shrinks at higher rates. Kept so on
+        // purpose: holding it at 48 kHz's stretch pulls the heard pitch of a
+        // stiff string (Nylon String) 8 cents sharp at 96 kHz, though the
+        // fundamental itself stays in tune.
         dispersionCoefficient = -0.95f * stiffness;
         loopSetupDirty = true;
         updateDispersionDelay();

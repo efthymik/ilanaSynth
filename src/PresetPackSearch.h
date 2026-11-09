@@ -54,7 +54,7 @@ inline void addSearchPresets (const std::function<void (const FactoryPreset&)>& 
         add (p);
     }
     {
-        FactoryPreset p { "Product Supersaw", {} };
+        FactoryPreset p { "Folded Supersaw", {} };
         p.category = "Lead";
         p.values = {
             { "amp_attack", 0.003f }, { "amp_release", 0.5130152f }, { "amp_sustain", 0.2968083f }, { "body_coupling_mode", 1.0f },

@@ -23,7 +23,7 @@ OUT = ROOT / "src" / "PresetPackSearch.h"
 BASE = Path("/mnt/project-files/ilanasynth")
 PACKS = [("search-winners", "qd"), ("search-winners-2", "qd2")]
 NAMES = {
-    ("search-winners", "lead-1"): "Operator Glass Lead", ("search-winners", "lead-2"): "Product Supersaw",
+    ("search-winners", "lead-1"): "Operator Glass Lead", ("search-winners", "lead-2"): "Folded Supersaw",
     ("search-winners", "lead-3"): "Moving Comb Sync", ("search-winners", "lead-6"): "Formant Chorus Lead",
     ("search-winners", "lead-7"): "Formant Operator Lead", ("search-winners", "pad-2"): "Deep Pulse Gate Pad",
     ("search-winners", "pad-3"): "CZ Gate Pad", ("search-winners", "pluck-1"): "Talking Saw Pluck",

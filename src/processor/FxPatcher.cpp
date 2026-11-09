@@ -905,10 +905,11 @@ void IlanaSynthAudioProcessor::swapFxSlots (int a, int b)
         auto child = apvts.state.getChildWithProperty ("id", parameter->paramID);
 
         if (child.isValid())
-            child.setProperty ("value", parameter->convertFrom0to1 (normalised), apvts.undoManager);
+            child.setProperty ("value", parameter->convertFrom0to1 (normalised), nullptr);
 
         // The parameter object itself (what getValue and the host read) is
-        // separate from the atomic the audio thread reads.
+        // separate from the atomic the audio thread reads; setting it makes
+        // the undo step (undoRecorder).
         parameter->setValueNotifyingHost (normalised);
     };
 

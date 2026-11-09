@@ -3,7 +3,7 @@
 <PARAMS presetName="real piano SOUND" presetCategory="Other" presetTags="Bright, Sustained, Wavetable"
         presetAuthor="ilana" presetComment="" macroName1="" macroName2=""
         macroName3="" macroName4="" macroName5="" macroName6="" macroName7=""
-        macroName8="" osc3Schema="2" destSchema="2" tableSchema="3" exciterLevels="1"
+        macroName8="" osc3Schema="2" destSchema="2" tableSchema="4" exciterLevels="1"
         lfo1Draw="0.00000,0.09802,0.19509,0.29028,0.38268,0.47140,0.55557,0.63439,0.70711,0.77301,0.83147,0.88192,0.92388,0.95694,0.98079,0.99518,1.00000,0.99518,0.98079,0.95694,0.92388,0.88192,0.83147,0.77301,0.70711,0.63439,0.55557,0.47140,0.38268,0.29028,0.19509,0.09802,0.00000,-0.09802,-0.19509,-0.29028,-0.38268,-0.47140,-0.55557,-0.63439,-0.70711,-0.77301,-0.83147,-0.88192,-0.92388,-0.95694,-0.98079,-0.99518,-1.00000,-0.99518,-0.98079,-0.95694,-0.92388,-0.88192,-0.83147,-0.77301,-0.70711,-0.63439,-0.55557,-0.47140,-0.38268,-0.29028,-0.19509,-0.09802"
         lfo1Curve="0.0000,0.0000,-0.450;0.2500,1.0000,0.450;0.5000,0.0000,-0.450;0.7500,-1.0000,0.450;1.0000,0.0000,0.000"
         lfo2Draw="0.00000,0.09802,0.19509,0.29028,0.38268,0.47140,0.55557,0.63439,0.70711,0.77301,0.83147,0.88192,0.92388,0.95694,0.98079,0.99518,1.00000,0.99518,0.98079,0.95694,0.92388,0.88192,0.83147,0.77301,0.70711,0.63439,0.55557,0.47140,0.38268,0.29028,0.19509,0.09802,0.00000,-0.09802,-0.19509,-0.29028,-0.38268,-0.47140,-0.55557,-0.63439,-0.70711,-0.77301,-0.83147,-0.88192,-0.92388,-0.95694,-0.98079,-0.99518,-1.00000,-0.99518,-0.98079,-0.95694,-0.92388,-0.88192,-0.83147,-0.77301,-0.70711,-0.63439,-0.55557,-0.47140,-0.38268,-0.29028,-0.19509,-0.09802"
@@ -38,18 +38,18 @@
         lfo16Curve="0.0000,0.0000,-0.450;0.2500,1.0000,0.450;0.5000,0.0000,-0.450;0.7500,-1.0000,0.450;1.0000,0.0000,0.000"
         macroCc0="20" macroCc1="21" macroCc2="22" macroCc3="23" macroCc4="24"
         macroCc5="25" macroCc6="26" macroCc7="27" oscRevealMask="7" envRevealMask="7"
-        lfoRevealMask="7">
+        lfoRevealMask="7" grainPosSchema="2" stringSchema="2" midiCcMap="">
   <PARAM id="amp_acurve" value="0.0"/>
-  <PARAM id="amp_attack" value="0.002999999560415745"/>
+  <PARAM id="amp_attack" value="0.01772878877818584"/>
   <PARAM id="amp_curve" value="0.0"/>
   <PARAM id="amp_dcurve" value="0.0"/>
-  <PARAM id="amp_decay" value="0.3000000417232513"/>
+  <PARAM id="amp_decay" value="3.263883352279663"/>
   <PARAM id="amp_delay" value="0.0"/>
   <PARAM id="amp_hold" value="0.0"/>
-  <PARAM id="amp_keyrate" value="0.0"/>
+  <PARAM id="amp_keyrate" value="0.9113349914550781"/>
   <PARAM id="amp_rcurve" value="0.0"/>
   <PARAM id="amp_release" value="0.300000011920929"/>
-  <PARAM id="amp_sustain" value="0.800000011920929"/>
+  <PARAM id="amp_sustain" value="0.2559191882610321"/>
   <PARAM id="amp_velocity" value="0.300000011920929"/>
   <PARAM id="arp_chance" value="1.0"/>
   <PARAM id="arp_div" value="3.0"/>
@@ -1809,7 +1809,7 @@
   <PARAM id="osc1_bow_speed" value="0.5"/>
   <PARAM id="osc1_bridge_buzz" value="0.0"/>
   <PARAM id="osc1_chord" value="0.0"/>
-  <PARAM id="osc1_couple" value="0.4873131215572357"/>
+  <PARAM id="osc1_couple" value="0.1274510473012924"/>
   <PARAM id="osc1_damper" value="0.5410001277923584"/>
   <PARAM id="osc1_detune" value="15.00000095367432"/>
   <PARAM id="osc1_eg_ams" value="0.0"/>
@@ -1856,7 +1856,7 @@
   <PARAM id="osc1_pd_env_amt" value="1.0"/>
   <PARAM id="osc1_ratio" value="1.0"/>
   <PARAM id="osc1_ratio_snap" value="1.0"/>
-  <PARAM id="osc1_register" value="0.6339197158813477"/>
+  <PARAM id="osc1_register" value="0.1584799289703369"/>
   <PARAM id="osc1_route" value="0.0"/>
   <PARAM id="osc1_sample_end" value="1.0"/>
   <PARAM id="osc1_sample_factory" value="0.0"/>
@@ -1915,7 +1915,7 @@
   <PARAM id="osc2_eg_vel" value="0.0"/>
   <PARAM id="osc2_ep_distance" value="0.5"/>
   <PARAM id="osc2_ep_position" value="0.5"/>
-  <PARAM id="osc2_excite" value="0.0"/>
+  <PARAM id="osc2_excite" value="5.0"/>
   <PARAM id="osc2_fb_distance" value="0.5"/>
   <PARAM id="osc2_fb_gain" value="0.5"/>
   <PARAM id="osc2_fb_type" value="1.0"/>
@@ -1932,8 +1932,8 @@
   <PARAM id="osc2_hammer_hard" value="0.5"/>
   <PARAM id="osc2_key_level" value="0.0"/>
   <PARAM id="osc2_level" value="0.6000000238418579"/>
-  <PARAM id="osc2_mode" value="0.0"/>
-  <PARAM id="osc2_on" value="0.0"/>
+  <PARAM id="osc2_mode" value="1.0"/>
+  <PARAM id="osc2_on" value="1.0"/>
   <PARAM id="osc2_out" value="1.0"/>
   <PARAM id="osc2_pan" value="0.0"/>
   <PARAM id="osc2_pd_env" value="0.0"/>
@@ -2434,15 +2434,15 @@
   <PARAM id="voice_mode" value="0.0"/>
   <PARAM id="voice_spread" value="0.287019282579422"/>
   <PARAM id="west_decay" value="0.9999999403953552"/>
-  <PARAM id="west_fold" value="0.4321526885032654"/>
+  <PARAM id="west_fold" value="0.4366863667964935"/>
   <PARAM id="west_mode" value="0.0"/>
   <PARAM id="west_on" value="1.0"/>
-  <PARAM id="west_open" value="0.7123855948448181"/>
+  <PARAM id="west_open" value="0.2408490031957626"/>
   <PARAM id="west_pos" value="0.0"/>
   <PARAM id="west_res" value="0.2000000029802322"/>
-  <PARAM id="west_src" value="0.0"/>
+  <PARAM id="west_src" value="5.0"/>
   <PARAM id="west_stages" value="2.0"/>
-  <PARAM id="west_strike" value="1.0"/>
+  <PARAM id="west_strike" value="0.712090790271759"/>
   <PARAM id="west_sym" value="0.0"/>
   <PARAM id="osc1_uni_frame" value="0.0"/>
   <PARAM id="osc1_uni_warp" value="0.0"/>
@@ -2536,4 +2536,148 @@
   <PARAM id="mod62_stereo" value="0.0"/>
   <PARAM id="mod63_stereo" value="0.0"/>
   <PARAM id="mod64_stereo" value="0.0"/>
+  <PARAM id="osc1_grain_pos" value="0.0"/>
+  <PARAM id="osc2_grain_pos" value="0.0"/>
+  <PARAM id="sub_grain_pos" value="0.0"/>
+  <PARAM id="osc4_grain_pos" value="0.0"/>
+  <PARAM id="osc5_grain_pos" value="0.0"/>
+  <PARAM id="osc6_grain_pos" value="0.0"/>
+  <PARAM id="noise_on" value="1.0"/>
+  <PARAM id="noise_type" value="0.0"/>
+  <PARAM id="sub_colour" value="0.0"/>
+  <PARAM id="fx_patcher" value="0.0"/>
+  <PARAM id="route_cables" value="0.0"/>
+  <PARAM id="cable_osc1" value="1.0"/>
+  <PARAM id="cable_osc2" value="1.0"/>
+  <PARAM id="cable_osc3" value="1.0"/>
+  <PARAM id="cable_osc4" value="1.0"/>
+  <PARAM id="cable_osc5" value="1.0"/>
+  <PARAM id="cable_osc6" value="1.0"/>
+  <PARAM id="cable_subnoise" value="1.0"/>
+  <PARAM id="cable_f1" value="2.0"/>
+  <PARAM id="cable_f2" value="8.0"/>
+  <PARAM id="cable_west" value="8.0"/>
+  <PARAM id="fx_filter_type" value="0.0"/>
+  <PARAM id="fx_filter_slope" value="0.0"/>
+  <PARAM id="fx_filter_cutoff" value="2000.000366210938"/>
+  <PARAM id="fx_filter_reso" value="0.300000011920929"/>
+  <PARAM id="fx_filter_drive" value="1.0"/>
+  <PARAM id="fx_filter_morph" value="0.0"/>
+  <PARAM id="fx_filter_spread" value="0.0"/>
+  <PARAM id="osc1_sample_sync" value="0.0"/>
+  <PARAM id="osc1_sample_bpm" value="120.0"/>
+  <PARAM id="osc1_sample_stretch" value="0.0"/>
+  <PARAM id="osc2_sample_sync" value="0.0"/>
+  <PARAM id="osc2_sample_bpm" value="120.0"/>
+  <PARAM id="osc2_sample_stretch" value="0.0"/>
+  <PARAM id="sub_sample_sync" value="0.0"/>
+  <PARAM id="sub_sample_bpm" value="120.0"/>
+  <PARAM id="sub_sample_stretch" value="0.0"/>
+  <PARAM id="osc4_sample_sync" value="0.0"/>
+  <PARAM id="osc4_sample_bpm" value="120.0"/>
+  <PARAM id="osc4_sample_stretch" value="0.0"/>
+  <PARAM id="osc5_sample_sync" value="0.0"/>
+  <PARAM id="osc5_sample_bpm" value="120.0"/>
+  <PARAM id="osc5_sample_stretch" value="0.0"/>
+  <PARAM id="osc6_sample_sync" value="0.0"/>
+  <PARAM id="osc6_sample_bpm" value="120.0"/>
+  <PARAM id="osc6_sample_stretch" value="0.0"/>
+  <PARAM id="osc1_sample_loop_own" value="0.0"/>
+  <PARAM id="osc1_sample_loop_start" value="0.25"/>
+  <PARAM id="osc1_sample_loop_end" value="0.75"/>
+  <PARAM id="osc1_sample_loop_xfade" value="0.0"/>
+  <PARAM id="osc1_sample_snap" value="0.0"/>
+  <PARAM id="osc2_sample_loop_own" value="0.0"/>
+  <PARAM id="osc2_sample_loop_start" value="0.25"/>
+  <PARAM id="osc2_sample_loop_end" value="0.75"/>
+  <PARAM id="osc2_sample_loop_xfade" value="0.0"/>
+  <PARAM id="osc2_sample_snap" value="0.0"/>
+  <PARAM id="sub_sample_loop_own" value="0.0"/>
+  <PARAM id="sub_sample_loop_start" value="0.25"/>
+  <PARAM id="sub_sample_loop_end" value="0.75"/>
+  <PARAM id="sub_sample_loop_xfade" value="0.0"/>
+  <PARAM id="sub_sample_snap" value="0.0"/>
+  <PARAM id="osc4_sample_loop_own" value="0.0"/>
+  <PARAM id="osc4_sample_loop_start" value="0.25"/>
+  <PARAM id="osc4_sample_loop_end" value="0.75"/>
+  <PARAM id="osc4_sample_loop_xfade" value="0.0"/>
+  <PARAM id="osc4_sample_snap" value="0.0"/>
+  <PARAM id="osc5_sample_loop_own" value="0.0"/>
+  <PARAM id="osc5_sample_loop_start" value="0.25"/>
+  <PARAM id="osc5_sample_loop_end" value="0.75"/>
+  <PARAM id="osc5_sample_loop_xfade" value="0.0"/>
+  <PARAM id="osc5_sample_snap" value="0.0"/>
+  <PARAM id="osc6_sample_loop_own" value="0.0"/>
+  <PARAM id="osc6_sample_loop_start" value="0.25"/>
+  <PARAM id="osc6_sample_loop_end" value="0.75"/>
+  <PARAM id="osc6_sample_loop_xfade" value="0.0"/>
+  <PARAM id="osc6_sample_snap" value="0.0"/>
+  <PARAM id="osc1_sample_root" value="60.0"/>
+  <PARAM id="osc2_sample_root" value="60.0"/>
+  <PARAM id="sub_sample_root" value="60.0"/>
+  <PARAM id="osc4_sample_root" value="60.0"/>
+  <PARAM id="osc5_sample_root" value="60.0"/>
+  <PARAM id="osc6_sample_root" value="60.0"/>
+  <PARAM id="midi_program_change" value="0.0"/>
+  <PARAM id="fm_noise_type" value="0.0"/>
+  <PARAM id="osc1_grain_scan" value="0.0"/>
+  <PARAM id="osc1_grain_freeze" value="0.0"/>
+  <PARAM id="osc2_grain_scan" value="0.0"/>
+  <PARAM id="osc2_grain_freeze" value="0.0"/>
+  <PARAM id="sub_grain_scan" value="0.0"/>
+  <PARAM id="sub_grain_freeze" value="0.0"/>
+  <PARAM id="osc4_grain_scan" value="0.0"/>
+  <PARAM id="osc4_grain_freeze" value="0.0"/>
+  <PARAM id="osc5_grain_scan" value="0.0"/>
+  <PARAM id="osc5_grain_freeze" value="0.0"/>
+  <PARAM id="osc6_grain_scan" value="0.0"/>
+  <PARAM id="osc6_grain_freeze" value="0.0"/>
+  <PARAM id="osc1_sample_playback" value="0.0"/>
+  <PARAM id="osc2_sample_playback" value="0.0"/>
+  <PARAM id="sub_sample_playback" value="0.0"/>
+  <PARAM id="osc4_sample_playback" value="0.0"/>
+  <PARAM id="osc5_sample_playback" value="0.0"/>
+  <PARAM id="osc6_sample_playback" value="0.0"/>
+  <PARAM id="osc1_sample_pingpong" value="0.0"/>
+  <PARAM id="osc2_sample_pingpong" value="0.0"/>
+  <PARAM id="sub_sample_pingpong" value="0.0"/>
+  <PARAM id="osc4_sample_pingpong" value="0.0"/>
+  <PARAM id="osc5_sample_pingpong" value="0.0"/>
+  <PARAM id="osc6_sample_pingpong" value="0.0"/>
+  <PARAM id="osc1_sample_start_rand" value="0.0"/>
+  <PARAM id="osc1_sample_start_safe" value="0.0"/>
+  <PARAM id="osc2_sample_start_rand" value="0.0"/>
+  <PARAM id="osc2_sample_start_safe" value="0.0"/>
+  <PARAM id="sub_sample_start_rand" value="0.0"/>
+  <PARAM id="sub_sample_start_safe" value="0.0"/>
+  <PARAM id="osc4_sample_start_rand" value="0.0"/>
+  <PARAM id="osc4_sample_start_safe" value="0.0"/>
+  <PARAM id="osc5_sample_start_rand" value="0.0"/>
+  <PARAM id="osc5_sample_start_safe" value="0.0"/>
+  <PARAM id="osc6_sample_start_rand" value="0.0"/>
+  <PARAM id="osc6_sample_start_safe" value="0.0"/>
+  <PARAM id="osc1_sample_quality" value="0.0"/>
+  <PARAM id="osc2_sample_quality" value="0.0"/>
+  <PARAM id="sub_sample_quality" value="0.0"/>
+  <PARAM id="osc4_sample_quality" value="0.0"/>
+  <PARAM id="osc5_sample_quality" value="0.0"/>
+  <PARAM id="osc6_sample_quality" value="0.0"/>
+  <PARAM id="osc1_sample_unmapped" value="0.0"/>
+  <PARAM id="osc2_sample_unmapped" value="0.0"/>
+  <PARAM id="sub_sample_unmapped" value="0.0"/>
+  <PARAM id="osc4_sample_unmapped" value="0.0"/>
+  <PARAM id="osc5_sample_unmapped" value="0.0"/>
+  <PARAM id="osc6_sample_unmapped" value="0.0"/>
+  <PARAM id="osc1_sample_round_robin" value="0.0"/>
+  <PARAM id="osc1_sample_vel_blend" value="0.0"/>
+  <PARAM id="osc2_sample_round_robin" value="0.0"/>
+  <PARAM id="osc2_sample_vel_blend" value="0.0"/>
+  <PARAM id="sub_sample_round_robin" value="0.0"/>
+  <PARAM id="sub_sample_vel_blend" value="0.0"/>
+  <PARAM id="osc4_sample_round_robin" value="0.0"/>
+  <PARAM id="osc4_sample_vel_blend" value="0.0"/>
+  <PARAM id="osc5_sample_round_robin" value="0.0"/>
+  <PARAM id="osc5_sample_vel_blend" value="0.0"/>
+  <PARAM id="osc6_sample_round_robin" value="0.0"/>
+  <PARAM id="osc6_sample_vel_blend" value="0.0"/>
 </PARAMS>

@@ -992,7 +992,7 @@ inline void addM10Presets (const std::function<void (const FactoryPreset&)>& add
              .filter1 (OtaLP, 450.0f, 0.7f, 3.0f, 2.0f).fenv (0.001f, 0.18f, 0.0f, 0.12f)
              .amp (0.001f, 0.3f, 0.8f, 0.1f).mono (0.06f).set ("glide_legato", 1)
              .macro (1, "CUTOFF", { { D::Filter1Cutoff, 0.45f } })
-             .macro (2, "ACCENT", { { D::Filter1Env, 0.35f } })
+             .macro (2, "ACCENT", { { D::Filter1Env, 0.35f }, { D::Filter1Reso, 0.25f }, { D::Filter1Cutoff, 0.2f } })
              .macro (3, "DECAY", { { D::FeDecay, 0.4f } })
              .macro (4, "ECHO", { { D::FxDelayMix, 0.35f } })
              .fx ({ FxDrive, FxDelay }).driveFx (2.5f, 0.4f).delay (D1_8D, 0.3f, 0.12f, true));

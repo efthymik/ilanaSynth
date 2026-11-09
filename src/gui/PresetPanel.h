@@ -674,6 +674,16 @@ public:
     }
 
 private:
+    // What the OS calls the place deleted files go to.
+    static juce::String binName()
+    {
+       #if JUCE_MAC
+        return "Trash";
+       #else
+        return "recycle bin";
+       #endif
+    }
+
     static constexpr int rowHeight = 28, wideWidth = 900;
 
     // The list sits in a recessed frame; its height is a whole number of
@@ -2080,7 +2090,7 @@ private:
 
         juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::WarningIcon,
                                             "Delete preset",
-                                            "Move '" + name + "' to the recycle bin?",
+                                            "Move '" + name + "' to the " + binName() + "?",
                                             "DELETE", "CANCEL", this,
                                             juce::ModalCallbackFunction::create ([safeThis, file] (int result)
                                             {
@@ -2541,7 +2551,7 @@ private:
     {
         const auto canDelete = juce::isPositiveAndBelow (selectedPreset, names.size()) && isUserPreset (selectedPreset);
         deleteButton.setEnabled (canDelete);
-        deleteButton.setTooltip (canDelete ? "Move '" + names[selectedPreset] + "' to the recycle bin"
+        deleteButton.setTooltip (canDelete ? "Move '" + names[selectedPreset] + "' to the " + binName()
                                            : juce::String ("Delete\nFactory presets can't be deleted: select one of your own (User) to delete it."));
         repaint (detailsArea);
     }
