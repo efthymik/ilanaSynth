@@ -1882,7 +1882,8 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
     {
         anyAltFeedback = anyAltFeedback || (active[osc] && params.oscillators[osc].feedbackType != FmFeedback::Plain);
         anyNoiseOperator = anyNoiseOperator || (active[osc] && params.fmNoise[osc] > 0.0f);
-        anyWarpNoise = anyWarpNoise || (active[osc] && params.oscillators[osc].warpMode == Warp::NoiseFm);
+        anyWarpNoise = anyWarpNoise || (active[osc] && (params.oscillators[osc].warpMode == Warp::NoiseFm
+                                                        || params.oscillators[osc].warpMode2 == Warp::NoiseFm));
 
         // The other operators that feed it: a silent cell adds an exact zero,
         // so leaving it out of the sum changes nothing.
@@ -2335,7 +2336,9 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
             if (mayRender && (settings.sampleMode || settings.granularMode || settings.liveMode
                               || settings.stringMode
                               || settings.warpMode == Warp::Fm || settings.warpMode == Warp::Ring
-                              || settings.warpMode == Warp::NoiseFm))
+                              || settings.warpMode == Warp::NoiseFm
+                              || settings.warpMode2 == Warp::Fm || settings.warpMode2 == Warp::Ring
+                              || settings.warpMode2 == Warp::NoiseFm))
                 return false;
             numRendering += mayRender ? 1 : 0;
             if (altFeedbackInput[osc] && settings.feedbackType == FmFeedback::Cross)
@@ -3224,6 +3227,12 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
                                         ? juce::jlimit (0.0f, 1.0f, settings.warpAmount + mods[(int) warpDestinations[osc]]
                                                                         + settings.pdEnvAmount * envelopeValues[juce::jlimit (0, 16, settings.pdEnv - 1)])
                                         : juce::jlimit (0.0f, 1.0f, settings.warpAmount + mods[(int) warpDestinations[osc]]);
+            // WARP 2 as FM / Ring / FM Noise (appended choices; the oscillator itself skips them).
+            const auto warp2Amount = settings.warpMode2 == Warp::Fm || settings.warpMode2 == Warp::Ring
+                                             || settings.warpMode2 == Warp::NoiseFm
+                                         ? juce::jlimit (0.0f, 1.0f, settings.warpAmount2
+                                                         + (settings.pdEnv > 0 ? settings.pdEnvAmount * envelopeValues[juce::jlimit (0, 16, settings.pdEnv - 1)] : 0.0f))
+                                         : 0.0f;
             const auto enable = oscEnableSmooth[osc].getNextValue();
             const auto level = osc == 2 ? juce::jlimit (0.0f, 1.0f,
                                                         levelSmooth[osc].getNextValue() + mods[(int) levelDestinations[osc]])
@@ -3239,15 +3248,19 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
                 const auto warpSource = osc == 0 ? previousOsc[1] : oscMono[0];
                 const auto phase = fmPhase (fmInput[osc])
                                    + (settings.warpMode == Warp::Fm ? (double) (warpAmount * warpSource) : 0.0)
-                                   + (settings.warpMode == Warp::NoiseFm ? (double) (warpAmount * warpNoiseHeard) : 0.0);
+                                   + (settings.warpMode == Warp::NoiseFm ? (double) (warpAmount * warpNoiseHeard) : 0.0)
+                                   + (settings.warpMode2 == Warp::Fm ? (double) (warp2Amount * warpSource) : 0.0)
+                                   + (settings.warpMode2 == Warp::NoiseFm ? (double) (warp2Amount * warpNoiseHeard) : 0.0);
                 // The Operator EG's pitch envelope and LFO move every ratio
                 // operator it plays (a fixed-frequency one stays put, as on
                 // the DX7).
                 const auto operatorEg = usesOperatorEg (osc);
                 const auto rate = fmRate (fmInput[osc])
                                   * (operatorEg && settings.tuneMode != OscTuning::Fixed ? dx7PitchRate : 1.0);
-                const auto ring = settings.warpMode == Warp::Ring
-                                      ? 1.0f + (warpSource - 1.0f) * warpAmount : 1.0f;
+                const auto ring = (settings.warpMode == Warp::Ring
+                                       ? 1.0f + (warpSource - 1.0f) * warpAmount : 1.0f)
+                                  * (settings.warpMode2 == Warp::Ring
+                                         ? 1.0f + (warpSource - 1.0f) * warp2Amount : 1.0f);
                 const auto frames = WavetableOscillator::frameReadFor (oscBank[osc].getWavetable(), frame, settings.frameBlend == FrameBlend::stepped);
 
                 auto stringSum = 0.0f;

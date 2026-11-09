@@ -4655,6 +4655,64 @@ int runUiTests()
                     + juce::String ((int) processor.getBounceState()) + ", sample knobs " + (sampleShown ? "shown" : "hidden") + ")");
     }
 
+    // WARP 2 as FM / Ring / FM Noise: the wave display draws each one (pictures with ILANA_UITEST_SHOTS).
+    {
+        selectOscTab (0);
+        settle (150);
+        std::vector<WaveDisplay*> waves;
+        findAll<WaveDisplay> (*editor, waves);
+        WaveDisplay* wave = nullptr;
+        for (auto* candidate : waves)
+            if (candidate->getOscIndex() == 0 && (wave == nullptr || (visibleInTree (candidate) && ! candidate->isCompact())))
+                wave = candidate;
+        expect (wave != nullptr, "OSC 1's wave display is shown for the WARP 2 pictures");
+
+        if (wave != nullptr)
+        {
+            const auto set = [&processor] (const char* id, float value)
+            {
+                if (auto* parameter = processor.apvts.getParameter (id))
+                    parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
+            };
+            const auto shotsDir = juce::SystemStats::getEnvironmentVariable ("ILANA_UITEST_SHOTS", "");
+            const auto picture = [&] (const char* name)
+            {
+                settle (200);
+                auto image = wave->createComponentSnapshot (wave->getLocalBounds());
+                if (shotsDir.isNotEmpty())
+                    save (*wave, juce::File (shotsDir).getChildFile (name));
+                return image;
+            };
+            const auto differs = [] (const juce::Image& x, const juce::Image& y)
+            {
+                auto count = 0;
+                for (int j = 0; j < juce::jmin (x.getHeight(), y.getHeight()); ++j)
+                    for (int i = 0; i < juce::jmin (x.getWidth(), y.getWidth()); ++i)
+                        count += x.getPixelAt (i, j) != y.getPixelAt (i, j) ? 1 : 0;
+                return count;
+            };
+
+            set ("osc1_warp", 0.0f);
+            set ("osc1_warp2", 0.0f);
+            set ("osc1_warp2_amt", 0.0f);
+            const auto plain = picture ("warp2-off.png");
+            const char* names[] { "warp2-fm.png", "warp2-ring.png", "warp2-fm-noise.png" };
+            const char* labels[] { "FM", "Ring", "FM Noise" };
+
+            for (int k = 0; k < 3; ++k)
+            {
+                set ("osc1_warp2", (float) (16 + k));
+                set ("osc1_warp2_amt", 0.6f);
+                const auto shown = picture (names[k]);
+                expect (differs (plain, shown) > 100, juce::String ("the wave display draws WARP 2 ") + labels[k]);
+            }
+
+            set ("osc1_warp2", 0.0f);
+            set ("osc1_warp2_amt", 0.0f);
+            settle (150);
+        }
+    }
+
     // Step 30: the sample display zooms, and a typed position sets START / END.
     {
         std::vector<WaveDisplay*> waves;
