@@ -500,6 +500,7 @@ Copy `build/ilanaSynth_artefacts/Release/VST3/ilanaSynth.vst3` to `~/.vst3/` and
 - **SAVE** asks for a name, category and tags, and stores the preset in `Documents/ilanaSynth Presets`.
   - The FOLDER button in the preset browser opens that directory.
   - Use the `…` menu to export a preset file anywhere.
+- **Settings** (theme, UI scale, favourites, recent presets) live in `$XDG_CONFIG_HOME/ilanaSynth/ilanaSynth.settings`, normally `~/.config/ilanaSynth/ilanaSynth.settings` on Linux. An older `~/ilanaSynth/ilanaSynth.settings` is moved there automatically.
 - **The preset browser** (click the preset name) drops down under the name, with every category (and Favourites and User) on the left, and search.
   - Click a preset to hear it. The browser stays open, so you can audition a few.
   - Up/Down step through the list, loading as you go. Enter or a double-click keeps the preset and closes the browser. Esc or a click outside also closes it.
