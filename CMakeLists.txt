@@ -21,6 +21,19 @@ FetchContent_MakeAvailable(JUCE)
 include(cmake/JuceLayerClip.cmake) # greyed-out controls draw through small layers (animation frame rate)
 include(cmake/BuildInfo.cmake) # git hash and date for src/BuildInfo.h and build/build-label.txt
 
+# Linux: link the C++ runtime and libgcc statically, so prebuilt plugins do
+# not require the host's libstdc++.so.6 / libgcc_s.so.1 versions. This does
+# not lower the glibc requirement; build on the oldest glibc you target.
+# The version script exports only the VST3/CLAP entry points and hides the
+# rest, keeping the plugins' symbol tables small and free of clashes.
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        add_link_options(-static-libstdc++ -static-libgcc)
+    endif()
+
+    add_link_options("-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/vst3.map")
+endif()
+
 # Step 40 follow-up: the TIME menu's high-quality stretchers, rendered in the
 # background (src/dsp/stretch). Pinned sources, only downloaded: Signalsmith
 # Stretch and its linear library (MIT), Bungee (MPL-2.0) with Eigen (MPL-2.0)
