@@ -5,6 +5,7 @@
 #include "../PluginProcessor.h"
 #include "../dsp/BuiltInTables.h"
 #include "../dsp/TableFactory.h"
+#include "CallOutHost.h"
 #include "IlanaLookAndFeel.h"
 
 // Where the editor keeps its settings (set while an editor exists): the
@@ -141,7 +142,7 @@ public:
         auto browser = std::make_unique<TableBrowser> (processor, parameterId, colour);
         browser->setLoaders (std::move (onLoadIn), std::move (onLibraryPickIn));
         browser->anchor = target.getScreenBounds();
-        auto* parent = target.getTopLevelComponent();
+        auto* parent = CallOutHost::parentFor (target);
         // The call-out is not guaranteed to sit in the editor's tree, so the
         // browser takes the editor's look itself (HEAR and the scroll bar
         // were the stock widgets: V10-12).
