@@ -840,6 +840,20 @@ void runM6PhaseDistortionTests()
                "the second stage's list skips FM and Ring and maps onto the warp modes");
         check (rmsOf (chain, 9600) > 0.05 && std::abs (centroidOf (chain, 9600, 48000.0) - centroidOf (one, 9600, 48000.0)) > 100.0,
                "the PD chain's second stage changes the wave");
+
+        // WARP 2 also lists FM, Ring and FM Noise (appended after the others).
+        check (Warp::getStageTwoNames().size() == 19 && Warp::getStageTwoNames()[16] == "FM"
+                   && Warp::modeForStageTwoChoice (16) == Warp::Fm && Warp::modeForStageTwoChoice (17) == Warp::Ring
+                   && Warp::modeForStageTwoChoice (18) == Warp::NoiseFm && Warp::modeForStageTwoChoice (15) == Warp::Squeeze,
+               "WARP 2 offers FM, Ring and FM Noise after the old choices");
+        const auto plain = renderCleanPatch ([] (IlanaSynthAudioProcessor& p) { setParam (p, "osc1_warp2", 0.0f); }, 45, 0.5);
+        const auto noiseTwo = renderCleanPatch ([] (IlanaSynthAudioProcessor& p)
+        {
+            setParam (p, "osc1_warp2", 18.0f); // FM Noise
+            setParam (p, "osc1_warp2_amt", 0.4f);
+        }, 45, 0.5);
+        check (std::abs (centroidOf (noiseTwo, 9600, 48000.0) - centroidOf (plain, 9600, 48000.0)) > 20.0,
+               "WARP 2 set to FM Noise changes the sound");
     }
 
     // Old patches: warp modes keep their indices; PD extras default off.
