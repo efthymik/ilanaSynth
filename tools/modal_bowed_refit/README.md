@@ -24,7 +24,14 @@ folder; the scripts read and write there.
    `write_bodies.py violin cello` and `write_engine.py look_fit.json` write
    them into ModalBowedBodies.h and ModalBowed.h. (`fit_att.py`,
    `fit_noise.py`, `score.py` are the first pass's fits, kept for the record.)
-5. `spec_sim.py out.png '{params}'` draws Spitfire against the twin;
+5. `wobble.py '{params}'` measures the bow's fine randomness partial by
+   partial (band-passed, analytic signal: each partial's skirt and flutter up
+   to 40 Hz, the pitch's drift, the vibrato cycle to cycle, the brightness's
+   wobble, the noise under the partials), Spitfire's against the twin's;
+   `fit_wobble.py` fits the flutter, drift and vibrato wander on the picture
+   score plus those (instrument medians: one random take can't match note
+   for note).
+6. `spec_sim.py out.png '{params}'` draws Spitfire against the twin;
    `spec.py PREFIX out.png` and `score_render.py PREFIX` against plugin renders
    of demo-violin.mid / demo-cello.mid (commands in score_render.py);
    `levels.py params.json` compares each note's loudness.
@@ -35,6 +42,10 @@ for slow wander still jitters at the block rate: use two poles. Keep a
 body's loudness offset when refitting its gains. Measure a release on
 high-passed audio: the bow's push leaves a slow offset on the string that
 hid a cliff (the bow slowing to a stop braked the note 0.35 s after the
-note-off; the bow now lifts off at speed).
+note-off; the bow now lifts off at speed). A spectrogram's window hides
+fast flutter: measure it on band-passed partials. Spitfire's partials
+flutter about 2 dB at 10-40 Hz on their own (the violin's quicker than
+the cello's); a pitch jitter on the string's modes instead broke the bow's
+stick-slip into noise on low notes.
 
 Needs numpy, scipy, soundfile, numba, mido, matplotlib.

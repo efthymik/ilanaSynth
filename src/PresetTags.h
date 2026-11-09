@@ -114,6 +114,7 @@ inline const FactoryTagRow factoryTagRows[] {
     { "Morph Filter Bass", "Gritty, Detuned, Evolving, Sustained, Mono, Wavetable" },
     { "Tape Sub", "Lo-Fi, Glide, Bright, Sustained, Wavetable" },
     { "Distorted 808", "Gritty, Glide, Dark, Percussive, Wavetable" },
+    { "Deep Grit 808", "Gritty, Glide, Warm, Percussive, Wavetable" },
     { "Dark Ladder Pluck Bass", "Dark, Percussive, Echo, Wavetable" },
     { "Per-Voice Wobble", "Vocal, Gritty, Evolving, Warm, Sustained, Wavetable" },
     { "Supersaw Anthem", "Supersaw, Resonant, Sustained, Wavetable" },
