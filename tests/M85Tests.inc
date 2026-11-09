@@ -215,6 +215,71 @@ void evolveAndVectorTests()
                "the vector pad's right edge is Osc 2 alone (" + juce::String (juce::Decibels::gainToDecibels (right / onlyOsc2), 2) + " dB)");
     }
 
+    // The pad's shapes (UI review 29): the square is the old pad to the bit;
+    // every shape mixes at equal power with no negative share, a corner is
+    // its oscillator alone, and a point off the shape plays its edge.
+    {
+        juce::Random random (29);
+        auto squareSame = true;
+        for (int i = 0; i < 200; ++i)
+        {
+            const auto x = random.nextFloat(), y = random.nextFloat();
+            const auto old = IlanaSynthAudioProcessor::vectorWeights (x, y);
+            const auto now = VectorShape::gains (VectorShape::square, { x, y });
+            for (int c = 0; c < 4; ++c)
+                squareSame = squareSame && old[(size_t) c] == now[(size_t) c];
+        }
+        check (squareSame, "the square vector pad mixes exactly as before");
+
+        for (int shape = 0; shape < VectorShape::numShapes; ++shape)
+        {
+            const auto count = VectorShape::cornerCount (shape);
+            auto worst = 0.0f, lowest = 0.0f;
+            for (int i = 0; i < 500; ++i)
+            {
+                const auto g = VectorShape::gains (shape, { random.nextFloat(), random.nextFloat() });
+                auto power = 0.0f;
+                for (const auto gain : g)
+                {
+                    power += gain * gain;
+                    lowest = juce::jmin (lowest, gain);
+                }
+                worst = juce::jmax (worst, std::abs (power - 1.0f));
+            }
+            auto cornersAlone = true;
+            const auto corners = VectorShape::corners (shape);
+            for (int c = 0; c < count; ++c)
+                cornersAlone = cornersAlone && std::abs (VectorShape::gains (shape, corners[(size_t) c])[(size_t) c] - 1.0f) < 1.0e-4f;
+            check (worst < 1.0e-4f && lowest >= 0.0f && cornersAlone,
+                   juce::String (VectorShape::names[shape]) + " vector pad: equal power, no negative share, each corner alone");
+        }
+        const auto off = VectorShape::clamp (VectorShape::triangle, { 0.0f, 1.0f }); // the empty top-left of a triangle
+        check (std::abs (VectorShape::cross (VectorShape::corners (VectorShape::triangle)[2], VectorShape::corners (VectorShape::triangle)[0], off)) < 1.0e-4f,
+               "a point off the triangle plays the nearest point of its edge");
+
+        // Through the processor: on a slider of Osc 1 and Osc 2 the right end is Osc 2 alone, as on the square.
+        const auto render = [] (int shape, float x)
+        {
+            IlanaSynthAudioProcessor processor;
+            processor.prepareToPlay (48000.0, 256);
+            setParam (processor, "osc1_on", 1.0f);
+            setParam (processor, "osc2_on", 1.0f);
+            setParam (processor, "osc2_semi", 7.0f);
+            setParam (processor, "vec_on", 1.0f);
+            setParam (processor, "vec_shape", (float) shape);
+            setParam (processor, "vec_a", 0.0f);
+            setParam (processor, "vec_b", 1.0f);
+            setParam (processor, "vec_x", x);
+            setParam (processor, "vec_y", 0.9f); // (ignored by the slider)
+            return renderRms (processor);
+        };
+        const auto sliderLeft = render (VectorShape::slider, 0.0f), sliderRight = render (VectorShape::slider, 1.0f);
+        const auto onlyOsc1 = [] { IlanaSynthAudioProcessor processor; processor.prepareToPlay (48000.0, 256);
+                                   setParam (processor, "osc1_on", 1.0f); setParam (processor, "osc2_on", 0.0f); return renderRms (processor); }();
+        check (std::abs (juce::Decibels::gainToDecibels (sliderLeft / onlyOsc1)) < 0.5f && sliderRight > 0.01f,
+               "the slider's left end is Osc 1 alone (" + juce::String (juce::Decibels::gainToDecibels (sliderLeft / onlyOsc1), 2) + " dB)");
+    }
+
     // The path moves the position, and Vector X / Y are mod sources.
     {
         IlanaSynthAudioProcessor processor;

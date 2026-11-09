@@ -26,6 +26,7 @@
 #include "gui/CardTabs.h"
 #include "gui/FilterWidgets.h"
 #include "gui/VectorPad.h"
+#include "dsp/VectorShape.h"
 #include "gui/PhysicalView.h"
 #include "gui/EnvThumbs.h"
 #include "gui/TableBrowser.h"
@@ -7609,6 +7610,84 @@ int runUiTests()
     runLayoutReview10Tests (processor, *pages);
     runOscCardOverlapTests (processor, *pages);
     runPlayPageTests (processor, *pages);
+    // UI review 29: switching VECTOR on fits the pad's shape to the patch (one corner per oscillator), once.
+    {
+        processor.loadFactoryPreset (processor.getFactoryPresetNames().indexOf ("Neuro Wobble")); // (three oscillators)
+        pages->showPage ("VECTOR");
+        settle (150);
+        ToggleControl* onSwitch = nullptr;
+        std::function<void (juce::Component&)> find = [&] (juce::Component& parent)
+        {
+            for (auto* child : parent.getChildren())
+            {
+                if (auto* toggle = dynamic_cast<ToggleControl*> (child); toggle != nullptr && toggle->getParameterId() == "vec_on" && visibleInTree (toggle))
+                    onSwitch = toggle;
+                find (*child);
+            }
+        };
+        find (*pages);
+        expect (onSwitch != nullptr, "VECTOR page: the ON switch is found");
+        if (onSwitch != nullptr)
+        {
+            onSwitch->getButton().triggerClick();
+            settle (150);
+            const auto shown = [&processor] { auto n = 0; for (int osc = 0; osc < OscillatorIds::count; ++osc) n += processor.isOscillatorShown (osc) ? 1 : 0; return n; }();
+            expect (shown == 3 && processor.getVectorShape() == VectorShape::triangle && processor.getVectorCorner (2) == 2,
+                    "VECTOR on, three oscillators: the pad becomes a triangle on OSC 1-3 (shape " + juce::String (processor.getVectorShape()) + ")");
+            // Off and on again keeps what the pad has (a corner picked by hand stays).
+            if (auto* corner = processor.apvts.getParameter ("vec_c"))
+                corner->setValueNotifyingHost (corner->convertTo0to1 (0.0f));
+            onSwitch->getButton().triggerClick();
+            onSwitch->getButton().triggerClick();
+            settle (150);
+            expect (processor.getVectorShape() == VectorShape::triangle && processor.getVectorCorner (2) == 0,
+                    "VECTOR off and on again keeps the shape and the corners");
+        }
+        processor.loadFactoryPreset (0);
+        settle (100);
+    }
+    // UI review 29, L5: PLAY's LFO graph takes a drag, as the pop-up's does (a preset wave becomes a curve).
+    {
+        processor.setRevealed (IlanaSynthAudioProcessor::Module::Lfo, 0, true);
+        if (auto* lfoShape = processor.apvts.getParameter ("lfo1_shape"))
+            lfoShape->setValueNotifyingHost (lfoShape->convertTo0to1 (0.0f));
+        pages->showPage ("MAIN");
+        settle (300);
+        LfoDisplay* graph = nullptr;
+        std::function<void (juce::Component&, bool)> find = [&] (juce::Component& parent, bool inCard)
+        {
+            for (auto* child : parent.getChildren())
+            {
+                const auto card = inCard || child->getName() == "PLAY LFO card";
+                if (auto* display = dynamic_cast<LfoDisplay*> (child); display != nullptr && card && visibleInTree (display))
+                    graph = display;
+                find (*child, card);
+            }
+        };
+        find (*pages, false);
+        expect (graph != nullptr, "PLAY: the LFO card shows its graph");
+        if (graph != nullptr)
+        {
+            auto& component = static_cast<juce::Component&> (*graph);
+            const auto area = component.getLocalBounds().toFloat();
+            const auto event = [&component] (juce::Point<float> at, juce::Point<float> from)
+            {
+                return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), at, juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier),
+                                         1.0f, 0.0f, 0.0f, 0.0f, 0.0f, &component, &component, juce::Time::getCurrentTime(),
+                                         from, juce::Time::getCurrentTime(), 1, false);
+            };
+            const juce::Point<float> down (area.getX() + 8.0f, area.getCentreY()), to (area.getX() + 8.0f, area.getY() + 10.0f);
+            component.mouseDown (event (down, down));
+            component.mouseDrag (event (down.translated (0.0f, -6.0f), down));
+            component.mouseDrag (event (to, down));
+            component.mouseUp (event (to, down));
+            settle (100);
+            expect ((int) std::round (processor.apvts.getRawParameterValue ("lfo1_shape")->load()) == IlanaSynthAudioProcessor::curveShape,
+                    "PLAY: a drag on the LFO graph edits the shape (it becomes a curve)");
+        }
+        processor.loadFactoryPreset (0);
+        settle (100);
+    }
     // UI review 8, R6: text fitting, header, browser, SEQ, dialogs.
     runGlobalReview8Tests (processor, *pages);
     // Step 18: every drop-down select opens its list, click after click.

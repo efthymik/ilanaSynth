@@ -280,7 +280,10 @@ public:
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny));
             // One short hint, the same on every type (I15-11); the longer
             // sentence is ENVELOPE's tooltip.
-            IlanaTheme::drawFitted (g, isFmType (selectedOperator) ? "Edit the envelope on PLAY."
+            // (The graph beside it is the envelope itself and takes drags, so the hint says so rather than sending
+            // you to PLAY: UI review 29, B2.)
+            IlanaTheme::drawFitted (g, isFmType (selectedOperator) ? (ampGraph != nullptr ? "Drag the points to edit this envelope."
+                                                                                          : "Edit the envelope on PLAY.")
                                                                     : "Ratio and OP ENV are for FM / DX7 oscillators.",
                                     ampHint.withTrimmedRight (makeOperator.isVisible() ? makeOperator.getWidth() + 6 : 0),
                                     juce::Justification::centredLeft, 3);

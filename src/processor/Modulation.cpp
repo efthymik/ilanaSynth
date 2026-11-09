@@ -1,4 +1,5 @@
 #include "ProcessorInternal.h"
+#include "../dsp/VectorShape.h"
 
 void IlanaSynthAudioProcessor::setLfoCustomPoint (int lfoIndex, int step, float value)
 {
@@ -423,9 +424,17 @@ std::array<float, 4> IlanaSynthAudioProcessor::vectorWeights (float x, float y)
 
 int IlanaSynthAudioProcessor::getVectorCorner (int corner) const
 {
-    const char* ids[] { "vec_a", "vec_b", "vec_c", "vec_d" };
-    return (int) getParam (ids[juce::jlimit (0, 3, corner)]);
+    // (E and F are appended: the five- and six-cornered shapes, UI review 29.)
+    const char* ids[] { "vec_a", "vec_b", "vec_c", "vec_d", "vec_e", "vec_f" };
+    return (int) getParam (ids[juce::jlimit (0, VectorShape::maxCorners - 1, corner)]);
 }
+
+int IlanaSynthAudioProcessor::getVectorShape() const
+{
+    return juce::jlimit (0, VectorShape::numShapes - 1, juce::roundToInt (getParam ("vec_shape")));
+}
+
+int IlanaSynthAudioProcessor::getVectorCornerCount() const { return VectorShape::cornerCount (getVectorShape()); }
 
 bool IlanaSynthAudioProcessor::isVectorPathOn() const { return getParam ("vec_path") > 0.5f; }
 
@@ -501,13 +510,21 @@ void IlanaSynthAudioProcessor::updateEvolveAndVector (int numSamples)
         position += { vectorDrift.offset (0), vectorDrift.offset (1) };
     }
     position = { juce::jlimit (0.0f, 1.0f, position.x), juce::jlimit (0.0f, 1.0f, position.y) };
+    // On a shape other than the square, a point outside it plays its edge's nearest point (VectorShape.h); the
+    // square is every older patch's pad and stays as it was.
+    const auto shape = getVectorShape();
+    if (shape != VectorShape::square)
+    {
+        const auto inside = VectorShape::clamp (shape, { position.x, position.y });
+        position = { inside.x, inside.y };
+    }
     vectorX.store (position.x);
     vectorY.store (position.y);
 
-    const auto weights = vectorWeights (position.x, position.y);
+    const auto weights = VectorShape::gains (shape, { position.x, position.y });
     std::array<float, OscillatorIds::count> power {};
     std::array<bool, OscillatorIds::count> used {};
-    for (int c = 0; c < 4; ++c)
+    for (int c = 0; c < VectorShape::cornerCount (shape); ++c)
     {
         const auto osc = juce::jlimit (0, OscillatorIds::count - 1, getVectorCorner (c));
         power[(size_t) osc] += weights[(size_t) c] * weights[(size_t) c];
