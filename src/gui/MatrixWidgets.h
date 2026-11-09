@@ -5,6 +5,7 @@
 #include <map>
 
 #include "../PluginProcessor.h"
+#include "CallOutHost.h"
 #include "IlanaLookAndFeel.h"
 #include "ModNames.h"
 #include "ParamControls.h"
@@ -426,7 +427,7 @@ public:
         }
 
         auto editor = std::make_unique<RemapEditor> (processorRef, slotIndex, colour);
-        auto* parent = getTopLevelComponent();
+        auto* parent = CallOutHost::parentFor (*this);
         juce::CallOutBox::launchAsynchronously (std::move (editor),
                                                 parent != nullptr ? parent->getLocalArea (this, getLocalBounds())
                                                                   : getScreenBounds(),

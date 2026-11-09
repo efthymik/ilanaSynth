@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "CallOutHost.h"
 #include "FilterWidgets.h"
 #include "IlanaLookAndFeel.h"
 #include "../PluginProcessor.h"
@@ -72,7 +73,7 @@ public:
     // the editor's zoom.
     static void show (IlanaSynthAudioProcessor& p, int key, const juce::String& name, juce::Component& anchor, juce::Rectangle<int> area)
     {
-        auto* parent = anchor.getTopLevelComponent();
+        auto* parent = CallOutHost::parentFor (anchor);
         juce::CallOutBox::launchAsynchronously (std::make_unique<SectionColourPicker> (p, key, name),
                                                 parent->getLocalArea (&anchor, area), parent);
     }
