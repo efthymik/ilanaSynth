@@ -47,6 +47,9 @@ struct ModalPianoTable
 
     bool valid() const { return ! entries.empty() && entries.size() == notes.size() * velocities.size(); }
 
-    // Parsed once, on first use (src/dsp/ModalPianoTable.cpp).
+    // Parsed once, on first use (src/dsp/ModalPianoTable.cpp): the grand,
+    // and the Modal Guitar's nylon-string guitar (content/guitar/modal-guitar.bin,
+    // tools/build_modal_guitar.py, the same format).
     static const ModalPianoTable& get();
+    static const ModalPianoTable& guitar();
 };

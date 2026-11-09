@@ -27,7 +27,8 @@ namespace Exciters
 inline const juce::StringArray& names()
 {
     static const juce::StringArray list { "Burst", "Noise", "Saw", "Pulse", "Bow", "Bright Hammer", "Osc In",
-                                          "Tine", "Reed", "Piano Hammer", "Feedback", "Modal Piano" };
+                                          "Tine", "Reed", "Piano Hammer", "Feedback", "Modal Piano",
+                                          "Modal Guitar", "Modal Bowed" };
     return list;
 }
 
@@ -36,7 +37,7 @@ inline juce::String name (int excite) { return names()[juce::jlimit (0, names().
 inline const std::vector<std::pair<const char*, std::vector<int>>>& groups()
 {
     static const std::vector<std::pair<const char*, std::vector<int>>> list {
-        { "PLUCK", { 0, 1, 2, 3 } }, { "STRIKE", { 9, 11, 5 } }, { "BOW", { 4 } }, { "ELECTRIC PIANO", { 7, 8 } }, { "DRIVEN", { 10, 6 } }
+        { "PLUCK", { 0, 1, 2, 3, 12 } }, { "STRIKE", { 9, 11, 5 } }, { "BOW", { 4, 13 } }, { "ELECTRIC PIANO", { 7, 8 } }, { "DRIVEN", { 10, 6 } }
     };
     return list;
 }
@@ -153,7 +154,7 @@ public:
 
         // The exciter at its position.
         const auto ex = left + (right - left) * strike;
-        if (excite == 4) // bow
+        if (excite == 4 || excite == 13) // bow
         {
             const auto sway = (float) std::sin (clock * 3.0) * 10.0f;
             g.setColour (juce::Colours::white.withAlpha (0.7f));
@@ -428,7 +429,24 @@ inline std::vector<std::pair<juce::String, std::vector<PhysicalSpec>>> physicalC
     if (excite == 11)
         return { { "STRING", { { "_string_decay", "DECAY" }, { "_string_damp", "DAMP" }, { "_string_stiffness", "STIFF" },
                                { "_damper", "DAMPER" } } },
-                 { "EXCITER", { { "_excite", "EXCITE" }, { "_hammer_hard", "HAMMER" } } } };
+                 { "EXCITER", { { "_excite", "EXCITE" }, { "_hammer_hard", "HAMMER" }, { "_modal_size", "SIZE" },
+                                { "_modal_scale", "SCALE" } } } };
+
+    // The Modal Guitar: the same, its HAMMER the pluck.
+    if (excite == 12)
+        return { { "STRING", { { "_string_decay", "DECAY" }, { "_string_damp", "DAMP" }, { "_string_stiffness", "STIFF" },
+                               { "_damper", "DAMPER" } } },
+                 { "EXCITER", { { "_excite", "EXCITE" }, { "_hammer_hard", "PLUCK" }, { "_modal_size", "SIZE" },
+                                { "_modal_scale", "SCALE" } } } };
+
+    // The Modal Bowed string: the bow's knobs, the body's SIZE and the
+    // string's SCALE; SLAP plays it pizzicato.
+    if (excite == 13)
+        return { { "STRING", { { "_string_decay", "DECAY" }, { "_string_damp", "DAMP" }, { "_string_stiffness", "STIFF" },
+                               { "_damper", "DAMPER" } } },
+                 { "EXCITER", { { "_excite", "EXCITE" }, { "_string_slap", "PIZZ" }, { "_string_excite_pos", "POSITION" },
+                                { "_bow_pressure", "GRIP" }, { "_bow_speed", "SPEED" }, { "_hammer_hard", "VIBRATO" }, { "_modal_size", "SIZE" },
+                                { "_modal_scale", "SCALE" } } } };
 
     const auto piano = excite == 9;
     std::vector<PhysicalSpec> string { { "_string_decay", "DECAY" }, { "_string_damp", "DAMP" },

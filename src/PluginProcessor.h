@@ -1240,6 +1240,7 @@ private:
     std::array<std::array<ParamRef, 4>, OscillatorIds::count> keysParamIds;
     std::array<std::array<ParamRef, 2>, OscillatorIds::count> electricParamIds;
     std::array<std::array<ParamRef, 2>, OscillatorIds::count> feedbackParamIds;
+    std::array<std::array<ParamRef, 2>, OscillatorIds::count> modalShapeIds; // the modal exciters' SIZE, SCALE
 
     // M7.5 audio input (ilanaSynth FX). The instrument has no input, so all
     // of this stays silent there.

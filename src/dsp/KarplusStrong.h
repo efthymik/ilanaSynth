@@ -14,6 +14,7 @@
 
 #include "DamperTaper.h"
 #include "ElectricPiano.h"
+#include "ModalBowed.h"
 #include "ModalPiano.h"
 #include "PianoString.h"
 #include "FeedbackGuitar.h"
@@ -44,13 +45,16 @@ public:
         Reed,     // M7.3: a Wurlitzer-style reed
         Piano,    // M8.2: a nonlinear felt hammer on a split waveguide (PianoString)
         Feedback, // M8.5: a pluck, then an amp and speaker in the loop (FeedbackLoop)
-        ModalPiano // a grand rebuilt from its measured partials (ModalPiano)
+        ModalPiano, // a grand rebuilt from its measured partials (ModalPiano)
+        ModalGuitar, // a nylon-string guitar rebuilt the same way (ModalPiano, the guitar's table)
+        ModalBowed   // a bowed string's modes in a violin-family body (ModalBowed)
     };
 
-    static constexpr int numExcites = 12;
+    static constexpr int numExcites = 14;
     bool isElectric() const { return excite == Excite::Tine || excite == Excite::Reed; }
     bool isPiano() const { return excite == Excite::Piano; }
-    bool isModal() const { return excite == Excite::ModalPiano; }
+    bool isModal() const { return excite == Excite::ModalPiano || excite == Excite::ModalGuitar; }
+    bool isBowedModal() const { return excite == Excite::ModalBowed; }
     // Stereo exciters (the Modal Piano): (left - right) / 2 of the sample
     // process() last returned, which is their middle. 0 for the rest.
     float side() const { return isModal() ? modal.side() : 0.0f; }
@@ -81,6 +85,7 @@ public:
         electric.prepare (sampleRate);
         piano.prepare (sampleRate, buffer.data(), (int) buffer.size());
         modal.prepare (sampleRate);
+        bowedModal.prepare (sampleRate);
         feedbackLoop.prepare (sampleRate);
         reset();
     }
@@ -104,6 +109,7 @@ public:
         electric.reset();
         piano.reset();
         modal.reset();
+        bowedModal.reset();
         feedbackLoop.reset();
     }
 
@@ -115,6 +121,7 @@ public:
         const auto midiNote = juce::roundToInt (69.0 + 12.0 * std::log2 (juce::jmax (1.0, hz) / 440.0));
         piano.setNote (hz, midiNote);
         modal.setNote (hz, midiNote);
+        bowedModal.setNote (hz);
         updateHammerFeedback();
         updatePianoDispersion();
     }
@@ -190,6 +197,15 @@ public:
         buzz = juce::jlimit (0.0f, 1.0f, bridgeBuzz);
         rattle = juce::jlimit (0.0f, 1.0f, fretRattle);
         updatePairShape();
+        if (isBowedModal())
+            updatePiano();
+    }
+
+    // The modal exciters' SIZE and SCALE, as factors (1: as recorded).
+    void setModalShape (float size, float scale)
+    {
+        modal.setShape (size, scale);
+        bowedModal.setShape (size, scale);
     }
 
     // The second vibration direction of a plucked string (0 = off, the plain
@@ -234,7 +250,7 @@ public:
             electric.addForce (value * 0.02f);
         else if (isPiano())
             piano.addBridgeInput (value * 0.1f);
-        else if (isModal())
+        else if (isModal() || isBowedModal())
             return;
         else
             bridgeInput += value * 0.1f;
@@ -249,7 +265,7 @@ public:
     {
         if (isPiano())
             piano.addBridgeInput (value * (float) juce::jmin (1.0, 130.81 / frequency));
-        else if (isModal())
+        else if (isModal() || isBowedModal())
             return;
         else
             bridgeInput += value * (float) juce::jmin (1.0, 130.81 / frequency);
@@ -288,6 +304,13 @@ public:
         {
             strikeVelocity = level;
             modal.trigger (level, random.nextFloat());
+            return;
+        }
+
+        if (isBowedModal())
+        {
+            strikeVelocity = level;
+            bowedModal.trigger (level, random.nextFloat());
             return;
         }
 
@@ -425,6 +448,9 @@ public:
 
         if (isModal())
             return modal.process (noteHeld);
+
+        if (isBowedModal())
+            return bowedModal.process (expression, noteHeld);
 
         if (excite == Excite::Bow)
             return processBowed (expression, noteHeld);
@@ -1618,7 +1644,12 @@ private:
         if (isPiano())
             piano.setParams (decay, damping, stiffness, hammerHardness, damper, excitationPosition * 2.0f, eco);
         else if (isModal())
+        {
+            modal.setTable (excite == Excite::ModalGuitar ? ModalPianoTable::guitar() : ModalPianoTable::get());
             modal.setParams (decay, damping, stiffness, hammerHardness, damper, eco);
+        }
+        else if (isBowedModal())
+            bowedModal.setParams (decay, damping, stiffness, excitationPosition, bowPressure, bowSpeed, damper, slap, eco, hammerHardness);
     }
 
 public:
@@ -1752,6 +1783,7 @@ private:
     ElectricPiano electric;
     PianoString piano;
     ModalPiano modal;
+    ModalBowed bowedModal;
     FeedbackLoop feedbackLoop;
     bool eco = false;
 };

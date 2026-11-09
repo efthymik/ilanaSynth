@@ -1309,7 +1309,7 @@ private:
         // Named in the header above the plot (not on it), the caption only
         // where both fit.
         if (! compact)
-            drawHeaderText (g, "STRING", excite == 11 ? Exciters::name (excite).toLowerCase() // (no strike position)
+            drawHeaderText (g, "STRING", excite == 11 || excite == 12 ? Exciters::name (excite).toLowerCase() // (no strike position)
                                                       : Exciters::name (excite).toLowerCase() + " at "
                                              + (position > 0.005f ? juce::String (juce::roundToInt (strike * 100.0f)) + "%" : juce::String ("auto")));
 

@@ -26,11 +26,10 @@ namespace
         }
     };
 
-    ModalPianoTable parse()
+    ModalPianoTable parse (const char* data, int size)
     {
         ModalPianoTable table;
-        Reader in { reinterpret_cast<const unsigned char*> (WavetableData::modalpiano_bin),
-                    (size_t) WavetableData::modalpiano_binSize };
+        Reader in { reinterpret_cast<const unsigned char*> (data), (size_t) size };
         if (! in.has (14) || std::memcmp (in.data, "IMPT", 4) != 0)
             return table;
         in.position = 4;
@@ -136,6 +135,12 @@ namespace
 
 const ModalPianoTable& ModalPianoTable::get()
 {
-    static const ModalPianoTable table = parse();
+    static const ModalPianoTable table = parse (WavetableData::modalpiano_bin, WavetableData::modalpiano_binSize);
+    return table;
+}
+
+const ModalPianoTable& ModalPianoTable::guitar()
+{
+    static const ModalPianoTable table = parse (WavetableData::modalguitar_bin, WavetableData::modalguitar_binSize);
     return table;
 }
