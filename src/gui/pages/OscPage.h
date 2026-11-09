@@ -5247,6 +5247,8 @@ public:
             current = target = (float) getViewPositionY();
 
         target -= wheel.deltaY * wheelPixels;
+        // Settle only towards the wheel's direction.
+        lastTravel = wheel.deltaY > 0.0f ? -1.0f : 1.0f;
         // (Past an end the target goes on at a third of the pace, and never more than overshootMax over.)
         if (target < 0.0f)
             target = juce::jmax (-overshootMax, target * 0.35f);
@@ -5283,7 +5285,7 @@ private:
     juce::uint32 lastWheel = 0;
 
     static constexpr float wheelPixels = 150.0f, overshootMax = 44.0f, snapRange = 120.0f;
-    float current = 0.0f, target = 0.0f, overshoot = 0.0f;
+    float current = 0.0f, target = 0.0f, overshoot = 0.0f, lastTravel = 0.0f;
     bool gliding = false;
 
     int maxScroll() const
@@ -5292,9 +5294,8 @@ private:
         return page == nullptr ? 0 : juce::jmax (0, juce::roundToInt ((float) page->getHeight() * chosenScale) - getHeight());
     }
 
-    // The resting place nearest y: either end, or a card edge (OscPage::scrollStops), so the view never stops
-    // with a row cut through. Stops farther than snapRange away leave y where it is.
-    float nearestStop (float y, float maxY) const
+    // The nearest stop in the direction of travel, so a wheel notch does not snap back.
+    float nearestStop (float y, float maxY, float travel) const
     {
         const auto* page = getPage();
         if (page == nullptr || maxY <= 0.0f)
@@ -5304,6 +5305,10 @@ private:
         const auto consider = [&] (float stop)
         {
             stop = juce::jlimit (0.0f, maxY, stop);
+            if (travel < 0.0f && stop > y + 0.25f)
+                return;
+            if (travel > 0.0f && stop < y - 0.25f)
+                return;
             if (std::abs (stop - y) < bestDistance)
             {
                 best = stop;
@@ -5330,7 +5335,7 @@ private:
         const auto maxY = (float) maxScroll();
         // (Once the wheel rests, a target past an end springs back to it.)
         if (juce::Time::getMillisecondCounter() - lastWheel > 90)
-            target = nearestStop (juce::jlimit (0.0f, maxY, target), maxY);
+            target = nearestStop (juce::jlimit (0.0f, maxY, target), maxY, lastTravel);
 
         current = IlanaAnim::approach (current, target, 0.22f, frameTicks()); // (0.22 a 60 Hz tick, at any frame rate)
         if (std::abs (target - current) < 0.5f)
