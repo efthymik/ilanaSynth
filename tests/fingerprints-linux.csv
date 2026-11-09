@@ -725,6 +725,7 @@ index,name,rms_db,peak,centroid_hz,side_ratio
 723,"Rave Kick",-22.3182,0.542156,743.837,0
 724,"Snap Clap",-26.5874,0.843976,4936.08,0.16083
 725,"Closed Hat",-32.833,0.74498,11394.7,0
+726,"Deep Grit 808",-4.43355,0.971343,1847.02,6.38837e-15
 726,"Filter model: Low Pass",-13.6276,0.811676,1087.94,0
 727,"Filter model: Band Pass",-24.915,0.476539,2809.78,0
 728,"Filter model: High Pass",-25.3912,0.580635,5821.25,0

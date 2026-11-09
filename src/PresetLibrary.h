@@ -606,6 +606,7 @@ namespace Library
 #include "PresetPackSearch.h"
 #include "PresetPackRecipes.h"
 #include "PresetPackShowcase.h"
+#include "PresetPackIlanaOwn.h"
 
 // The owner's blind A/B marked these presets bad in both their old and new
 // form (2026-09-30): rebuilt from scratch (content/analysis/rebuild-8.md).
@@ -2906,6 +2907,9 @@ inline std::vector<FactoryPreset> buildLaterPacks()
 
     // The showcase pack: unplayed features and missing archetypes (blind-spots review).
     addShowcasePresets (add);
+
+    // ilana's own presets, as she made them.
+    addIlanaOwnPresets (add);
 
     return list;
 }

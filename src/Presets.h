@@ -38,6 +38,9 @@ struct FactoryPreset
     // The browser's category when it differs from category (DX7 voices: the
     // kind of sound, while category stays "DX7" for the tools and tests).
     const char* browseCategory = nullptr;
+    // ilana's own presets (PresetPackIlanaOwn.h): her saved file's state, which
+    // loads as the file does (its schemas say what to migrate), not as values.
+    const char* savedState = nullptr;
 };
 
 inline const std::vector<FactoryPreset>& getLegacyPresets()
