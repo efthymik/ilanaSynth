@@ -53,6 +53,12 @@
 // a low note); and the pitch drifts
 // a few cents. The upper register is brighter (the higher strings
 // lose less up high), and a gentle roll-off sets the top of the spectrum.
+// Round 6 (2026-11-09): the upper partials start about 15 dB darker and open
+// up over the first tenth of a second (a bow biting in); the box's own top
+// is rolled off with SIZE (no rosin fizz on a cello); and a small room (four
+// delay lines per voice, darker as it decays, longer for a bigger box) holds
+// the note's tail after the bow lifts, as Spitfire's hall does. Hear the
+// room with an amp release of 2.5 s or more. The pizzicato stays dry.
 // Eco keeps half the modes and the body's lower half.
 
 #include <juce_core/juce_core.h>
@@ -61,6 +67,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 #include "ModalBowedBodies.h"
 
@@ -75,6 +82,7 @@ public:
     {
         sampleRate = newSampleRate;
         bodyDirty = modesDirty = true;
+        updateRoom();
         reset();
     }
 
@@ -87,7 +95,11 @@ public:
         std::fill (std::begin (by1), std::end (by1), 0.0f);
         std::fill (std::begin (by2), std::end (by2), 0.0f);
         hx1 = hx2 = hy1 = hy2 = 0.0f;
+        lx1 = lx2 = ly1 = ly2 = 0.0f;
         tilt = hissState = hissLast = 0.0f;
+        std::fill (roomBuffer.begin(), roomBuffer.end(), 0.0f);
+        std::fill (std::begin (roomLow), std::end (roomLow), 0.0f);
+        std::fill (std::begin (roomAt), std::end (roomAt), 0);
         envelope = 0.0f;
         silent = true;
         untilBlock = 0;
@@ -177,7 +189,8 @@ public:
         updateBody();
         for (int n = 0; n < modes; ++n)
         {
-            out[n] = outBase[n];
+            // (bowed: the onset's darkening from the first sample)
+            out[n] = outBase[n] * (plucked ? 1.0f : std::exp (-decibel * onsetDark[n]));
             outStep[n] = 0.0f;
         }
         std::fill (std::begin (q), std::end (q), 0.0f);
@@ -281,7 +294,13 @@ public:
         hx1 = bridge;
         hy2 = hy1;
         hy1 = radiated;
-        auto sound = bodyDirect * (plucked ? bridge : radiated);
+        // (and falls away up high: a big box's broad radiation is darker)
+        const auto darker = lpB0 * radiated + lpB1 * lx1 + lpB2 * lx2 - lpA1 * ly1 - lpA2 * ly2;
+        lx2 = lx1;
+        lx1 = radiated;
+        ly2 = ly1;
+        ly1 = darker;
+        auto sound = bodyDirect * (plucked ? bridge : darker);
         for (int j = 0; j < bodyCount; ++j)
         {
             const auto y = bodyB0[j] * (bridge - bx2[j]) - bodyA1[j] * by1[j] - bodyA2[j] * by2[j];
@@ -298,6 +317,28 @@ public:
         hissLast = hairNoise;
         hissState = hiss;
         sound += hissLevel * hiss;
+        // The room: four delay lines mixed by a Householder matrix, each
+        // through a one-pole low-pass (the low end rings longer than the
+        // top). It hears the whole note and rings on once it is let go.
+        // (Bowed only: the pizzicato was fitted dry.)
+        if (! plucked)
+        {
+            float* line = roomBuffer.data();
+            auto sum = 0.0f;
+            for (int r = 0; r < roomLines; ++r)
+            {
+                roomLow[r] = roomFeed[r] * line[roomStart[r] + roomAt[r]] + roomPole[r] * roomLow[r];
+                sum += roomLow[r];
+            }
+            sum *= 2.0f / (float) roomLines;
+            for (int r = 0; r < roomLines; ++r)
+            {
+                line[roomStart[r] + roomAt[r]] = roomLow[r] - sum + ((r & 1) != 0 ? -sound : sound);
+                if (++roomAt[r] == roomLength[r])
+                    roomAt[r] = 0;
+            }
+            sound += roomReturn * (roomLow[0] - roomLow[1] + roomLow[2] - roomLow[3]);
+        }
         // A gentle roll-off (tiltHz) sets the top of the spectrum.
         tilt = sound + tiltPole * (tilt - sound);
         sound = tilt;
@@ -318,13 +359,13 @@ private:
         {
             const auto gone = juce::jmin (1.0, (double) (elapsed - releasedAt) / (juce::jmax (1.0e-3, releaseRingSeconds) * sampleRate));
             const auto upper = 1.0 + ((double) releaseRing - 1.0) * gone;
-            if (upper != ringUpper)
+            if (upper != ringUpper || gone < 1.0)
             {
                 ringUpper = upper;
                 const auto low = (double) loss0 / (double) stringScale;
                 for (int n = 0; n < modes; ++n)
                 {
-                    lossOf[n] = (float) juce::jmin (low + (double) lossUpper[n] * upper, sampleRate); // (fastExp's range)
+                    lossOf[n] = (float) juce::jmin (low + (double) lossUpper[n] * upper + gone * (double) releaseLoss[n], sampleRate); // (fastExp's range)
                     const auto decay = std::exp (-(double) lossOf[n] / sampleRate);
                     fall[n] = (float) (decay * decay);
                 }
@@ -348,7 +389,11 @@ private:
             for (int j = 0; j < bodyCount; ++j)
                 body += std::abs (by1[j] * bodyGain[j]);
             // (-90 dB under the note's loudest, or the damper's done.)
-            if ((energy * level < 3.0e-5f * peakBridge && body < 3.0e-5f * peakBody) || level < 1.0e-5f)
+            auto room = 0.0f;
+            for (int r = 0; r < roomLines; ++r)
+                room += std::abs (roomLow[r]);
+            if (((energy * level < 3.0e-5f * peakBridge && body < 3.0e-5f * peakBody) || level < 1.0e-5f)
+                && room * roomReturn < 3.0e-5f * peakBody * outputGain)
                 silent = true;
         }
     }
@@ -414,6 +459,11 @@ private:
         const auto c2 = (float) std::cos (goldenRatio * swing) - 1.0f, s2 = (float) std::sin (goldenRatio * swing);
         const auto half = 0.5f * rippleDb;
         const auto inverseRate = (float) (1.0 / sampleRate);
+        // The onset's brightness: each upper partial's share of the bridge
+        // force starts onsetDarkDb down (onsetDark[n]) and comes back over
+        // onsetDarkSeconds (Spitfire's upper partials build up after the
+        // fundamental: a gentle stroke's rounded Helmholtz corner).
+        const auto dark = (float) std::exp (-seconds / onsetDarkSeconds);
         for (int n = 0; n < modes; ++n)
         {
             // (with the hair on the string: the grip eases off as the bow
@@ -429,7 +479,7 @@ private:
             turn[n] = (float) (2.0 * (double) decay * std::cos (juce::jmin ((double) modeHz[n] * ratio, sampleRate * 0.49) * k));
             const auto ripple = half * (rippleSin[n] * c1 + rippleCos[n] * s1 + rippleSin2[n] * c2 + rippleCos2[n] * s2);
             // (glided to over the block: a step would zip)
-            outStep[n] = (outBase[n] * std::exp (decibel * (ripple + wander[n])) - out[n]) * (1.0f / (float) blockSize);
+            outStep[n] = (outBase[n] * std::exp (decibel * (ripple + wander[n] - dark * onsetDark[n])) - out[n]) * (1.0f / (float) blockSize);
         }
     }
 
@@ -498,7 +548,10 @@ private:
             const auto decay = std::exp (-sigma * k);
             turn[n] = (float) (2.0 * decay * std::cos (juce::MathConstants<double>::twoPi * hz * k));
             modeHz[n] = (float) hz;
+            // (once let go, the mode loses releaseLossHz more a second at 1 kHz, by (hz / 1 kHz) ^ releaseLossSlope)
+            releaseLoss[n] = (float) ((double) releaseLossHz * std::pow (hz / 1000.0, (double) releaseLossSlope));
             flutterShape[n] = (float) juce::jmin (1.0, std::pow (hz / (double) flutterKnee, (double) flutterFreqSlope));
+            onsetDark[n] = (float) (onsetDarkDb * juce::jmin (1.0, std::pow (hz / (double) onsetDarkKnee, (double) onsetDarkSlope)));
             fall[n] = (float) (decay * decay);
             shape[n] = (float) std::sin (index * juce::MathConstants<double>::pi * (double) bowAt);
             shapeSum += (double) shape[n] * shape[n];
@@ -526,7 +579,7 @@ private:
         updateRipple();
         attackCoefficient = (float) (1.0 - std::exp (-1.0 / (attackSeconds () * sampleRate)));
         releaseCoefficient = (float) (1.0 - std::exp (-1.0 / (releaseSeconds * sampleRate)));
-        swellCoefficient = (float) (1.0 - std::exp (-1.0 / (0.34 * sampleRate)));
+        swellCoefficient = (float) (1.0 - std::exp (-1.0 / (swellSeconds * sampleRate)));
         hissPole = (float) std::exp (-juce::MathConstants<double>::twoPi * 8000.0 / sampleRate);
         tiltPole = (float) std::exp (-juce::MathConstants<double>::twoPi * juce::jmin ((double) tiltHz, sampleRate * 0.45) / sampleRate);
         biteFall = (float) std::exp (-1.0 / (0.08 * sampleRate));
@@ -538,6 +591,41 @@ private:
         pluckScale = (float) (5.0 * (double) bowSpeed / (juce::MathConstants<double>::twoPi * juce::jmax (20.0, frequency)));
     }
 
+    // The room's lines (prime lengths near roomMs times the ratios), each
+    // line's gain for roomLowDecay dB a second at DC and its low-pass's pole
+    // for roomHighDecay dB a second at 4 kHz, and the return for a wet level
+    // of roomDb (energy, against the dry note, for a broad noise).
+    void updateRoom()
+    {
+        static constexpr double ratios[roomLines] { 0.8013, 0.9137, 1.0798, 1.2052 };
+        const auto isPrime = [] (int n) { for (int k = 3; k * k <= n; k += 2) if (n % k == 0) return false; return true; };
+        auto meanSquare = 0.0;
+        auto total = 0;
+        for (int r = 0; r < roomLines; ++r)
+        {
+            auto length = juce::jmax (3, (int) std::lround (roomMs * 1.0e-3 * sampleRate * ratios[r])) | 1;
+            while (! isPrime (length))
+                length += 2;
+            roomLength[r] = length;
+            roomStart[r] = total;
+            total += length;
+            const auto seconds = (double) length / sampleRate;
+            const auto feed = std::pow (10.0, -roomLowDecay * seconds / 20.0);
+            const auto extra = juce::jmax (0.0, roomHighDecay - roomLowDecay) * seconds; // (dB more per pass at 4 kHz)
+            const auto c = (std::pow (10.0, extra / 10.0) - 1.0) / (2.0 * (1.0 - std::cos (juce::MathConstants<double>::twoPi * 4000.0 / sampleRate)));
+            const auto pole = c > 1.0e-12 ? ((2.0 * c + 1.0) - std::sqrt (4.0 * c + 1.0)) / (2.0 * c) : 0.0;
+            roomPole[r] = (float) pole;
+            roomFeed[r] = (float) (feed * (1.0 - pole));
+            meanSquare += feed * feed / roomLines;
+        }
+        roomBuffer.assign ((size_t) total, 0.0f);   // (prepare only: about 14 KB at 48 kHz)
+        roomScale = std::sqrt ((1.0 - meanSquare) / roomLines);
+        updateRoomReturn();
+    }
+
+    // The room's return: roomDb for a violin, roomSizeDb more per doubling of the body's size.
+    void updateRoomReturn() { roomReturn = (float) (std::pow (10.0, (roomDb + roomSizeDb * std::log2 ((double) bodySize)) / 20.0) * roomScale); }
+
     // The bow's contact: a low string takes longer to speak (as on the Bow
     // exciter); the swell after it shapes the note's rise.
     double attackSeconds() const { return 0.0025 * juce::jlimit (1.0, 2.5, 220.0 / frequency); }
@@ -545,6 +633,7 @@ private:
     void updateBody()
     {
         bodyDirty = false;
+        updateRoomReturn();
         using B = ModalBowedBodies;
         // Which instruments' gains, and how far between them (log size).
         const auto size = (double) bodySize;
@@ -579,6 +668,26 @@ private:
             hpB1 = (float) (-(1.0 + cw) / a0);
             hpA1 = (float) (-2.0 * cw / a0);
             hpA2 = (float) ((1.0 - alpha) / a0);
+        }
+        {
+            // (and low-passed, two poles, at directLp for a violin, lower for a bigger box)
+            const auto hz = (double) directLp / size;
+            if (hz < sampleRate * 0.45)
+            {
+                const auto w0 = juce::MathConstants<double>::twoPi * hz / sampleRate;
+                const auto alpha = std::sin (w0) / juce::MathConstants<double>::sqrt2;
+                const auto cw = std::cos (w0);
+                const auto a0 = 1.0 + alpha;
+                lpB0 = lpB2 = (float) ((1.0 - cw) * 0.5 / a0);
+                lpB1 = (float) ((1.0 - cw) / a0);
+                lpA1 = (float) (-2.0 * cw / a0);
+                lpA2 = (float) ((1.0 - alpha) / a0);
+            }
+            else
+            {
+                lpB0 = 1.0f;
+                lpB1 = lpB2 = lpA1 = lpA2 = 0.0f;
+            }
         }
         bodyCount = 0;
         for (int j = 0; j < count; ++j)
@@ -615,14 +724,23 @@ private:
     float bowWander = 1.0f, bodyDirect = 0.0f, liftSpeed = 0.0f;
     float flutterPole = 0.1f, flutterGain = 0.0f, pitchPole = 0.01f, pitchGain = 0.0f, pitchDrift = 0.0f, pitchDriftIn = 0.0f;
     float hpB0 = 1.0f, hpB1 = 0.0f, hpB2 = 0.0f, hpA1 = 0.0f, hpA2 = 0.0f, hx1 = 0.0f, hx2 = 0.0f, hy1 = 0.0f, hy2 = 0.0f;
+    float lpB0 = 1.0f, lpB1 = 0.0f, lpB2 = 0.0f, lpA1 = 0.0f, lpA2 = 0.0f, lx1 = 0.0f, lx2 = 0.0f, ly1 = 0.0f, ly2 = 0.0f;
     double ringUpper = 1.0;   // (the release's loss factor the modes have now)
     std::uint32_t seed = 1, driftSeed = 1, flutterSeed = 1;
     // Fitted to the Spitfire long notes (2026-11-08, see the top).
-    static constexpr float swellDepth = 0.97f, rosinJitter = 0.08536f, hissLevel = 3.336e-04f, bodyNoise = 1.572e-06f;
+    // The bow's onset (round 6): the stroke starts at 1 - swellDepth of its
+    // speed and swells over swellSeconds (a bow landing slower stuck to the
+    // string for ~30 ms before it spoke); the upper partials come in darker
+    // (onsetDarkDb at onsetDarkKnee and over, onsetDarkSlope below it) and
+    // brighten over onsetDarkSeconds.
+    static constexpr double swellSeconds = 0.3544;
+    static constexpr float onsetDarkDb = 15.04f, onsetDarkKnee = 1990.0f, onsetDarkSlope = 2.82f;
+    static constexpr double onsetDarkSeconds = 0.1429;
+    static constexpr float swellDepth = 0.8208f, rosinJitter = 0.08536f, hissLevel = 3.336e-04f, bodyNoise = 1.695e-06f;
     static constexpr float brightness = 2.144f, topHz = 12000.0f, tiltHz = 5590.0f, directDb = -10.33f;
     // The body's fine ripple (dB, cycles per octave) the vibrato sweeps the
     // partials across.
-    static constexpr float rippleDb = 8.507f, rippleDensity = 19.46f;
+    static constexpr float rippleDb = 3.326f, rippleDensity = 19.46f;
     // The slow wander (dB standard deviation and corner): each partial's
     // level on its own, the bow's speed; the vibrato's rate and depth
     // (fractions; Spitfire's vibrato is never quite even).
@@ -631,9 +749,9 @@ private:
     // The bow's fast randomness: each partial's flutter (dB standard
     // deviation and corner at A4, and how both grow with the register), the
     // pitch's slow drift (cents).
-    static constexpr float flutterDb = 19.97f, flutterSlope = 0.0f, flutterHzSlope = 0.7853f, pitchDriftCents = 1.441f;
+    static constexpr float flutterDb = 21.35f, flutterSlope = 0.0f, flutterHzSlope = 0.7853f, pitchDriftCents = 1.441f;
     static constexpr double flutterHz = 16.51, pitchDriftHz = 0.5;
-    static constexpr float flutterKnee = 818.2f, flutterFreqSlope = 1.285f, rippleKnee = 963.9f, rippleFreqSlope = 2.074f, directHp = 152.0f;
+    static constexpr float flutterKnee = 818.2f, flutterFreqSlope = 1.285f, rippleKnee = 963.9f, rippleFreqSlope = 2.074f, directHp = 96.61f, directLp = 20000.0f;
     static constexpr float flutterClip = 30.0f;
     static constexpr double vibratoRate = 5.2, vibratoDelay = 0.25, vibratoRise = 0.4;
     // The bow's release: its pressure eases off over releaseSeconds as it
@@ -641,8 +759,14 @@ private:
     // releaseRingSeconds, and the note fades at releaseFadeDb a second
     // (Spitfire's notes once let go).
     static constexpr double releaseSeconds = 1.0;
-    static constexpr float releaseFadeDb = 36.96f, releaseRing = 16.05f;
-    static constexpr double releaseRingSeconds = 0.494;
+    static constexpr float releaseFadeDb = 35.79f, releaseRing = 17.84f;
+    static constexpr double releaseRingSeconds = 0.4991;
+    // Once let go, each mode also loses releaseLossHz more a second at
+    // 1 kHz, by (hz / 1 kHz) ^ releaseLossSlope (ramped in with the ring).
+    static constexpr float releaseLossHz = 23.94f, releaseLossSlope = 3.224f;
+    // The room (fitted to the tails of Spitfire's long notes).
+    static constexpr int roomLines = 4;
+    static constexpr double roomDb = -2.5, roomSizeDb = -19.28, roomMs = 18.44, roomLowDecay = 38.88, roomHighDecay = 159.5;
     static constexpr float decibel = 0.1151292546f, goldenRatio = 1.618034f;
     // The output's level: the string's units are tiny (metres of string,
     // narrow resonators); this brings a violin D4 near a plucked string's.
@@ -650,8 +774,14 @@ private:
 
     alignas (32) float q[maxModes] {}, qp[maxModes] {}, turn[maxModes] {}, fall[maxModes] {};
     alignas (32) float shape[maxModes] {}, push[maxModes] {}, out[maxModes] {}, outBase[maxModes] {}, modeHz[maxModes] {}, lossUpper[maxModes] {}, lossOf[maxModes] {}, decayNow[maxModes] {};
-    alignas (32) float flutter[maxModes] {}, flutterIn[maxModes] {}, flutterShape[maxModes] {};
+    alignas (32) float flutter[maxModes] {}, flutterIn[maxModes] {}, flutterShape[maxModes] {}, onsetDark[maxModes] {};
     alignas (32) float wander[maxModes] {}, wanderIn[maxModes] {}, outStep[maxModes] {}, rippleSin[maxModes] {}, rippleCos[maxModes] {}, rippleSin2[maxModes] {}, rippleCos2[maxModes] {};
     alignas (32) float bodyB0[maxBody] {}, bodyA1[maxBody] {}, bodyA2[maxBody] {}, bodyGain[maxBody] {};
     alignas (32) float bx1[maxBody] {}, bx2[maxBody] {}, by1[maxBody] {}, by2[maxBody] {};
+    alignas (32) float releaseLoss[maxModes] {};
+    std::vector<float> roomBuffer;   // (the four lines end to end)
+    alignas (16) float roomLow[roomLines] {}, roomFeed[roomLines] {}, roomPole[roomLines] {};
+    int roomLength[roomLines] {}, roomStart[roomLines] {}, roomAt[roomLines] {};
+    float roomReturn = 0.0f;
+    double roomScale = 0.0;
 };
