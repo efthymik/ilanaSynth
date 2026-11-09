@@ -3,6 +3,7 @@
 //   ilanaSnapshot <output dir> [factory preset index]
 //   ilanaSnapshot --uitest     (drives the editor and checks the wiring)
 //   ilanaSnapshot --idlecpu    (UI cost of each page while nothing moves)
+//   ilanaSnapshot --vulkanlive <dir>  (on screen through Vulkan: each page against software)
 
 #if __linux__
  #include <dlfcn.h>
@@ -29,6 +30,10 @@
 #include "dsp/VectorShape.h"
 #include "gui/PhysicalView.h"
 #include "gui/EnvThumbs.h"
+#if ILANA_VULKAN
+ #include "gpu/VulkanCanvas.h"
+ #include "gpu/VulkanDevice.h"
+#endif
 #include "gui/TableBrowser.h"
 #include "gui/WavetableEditor.h"
 #include "PluginEditor.h"
@@ -107,6 +112,48 @@ std::function<void()>& beforeSave()
     return callback;
 }
 
+// ILANA_SNAPSHOT_RENDERER: who draws the PNGs that save() writes.
+//   (unset) / software  createComponentSnapshot, JUCE's software renderer
+//   vulkan              ilana::vulkan::renderComponent (the Vulkan renderer,
+//                       offscreen); exits non-zero if Vulkan can't run
+//   both                <name>.png from software, <name>.vulkan.png from
+//                       Vulkan, then <name>.software2.png from software
+//                       again: of the same UI state, except what moves on
+//                       its own while painting (playhead dots, readouts),
+//                       which shows as .png vs .software2.png differences
+//                       that tools/vulkan_parity.py leaves out
+enum class SnapshotRenderer { software, vulkan, both };
+
+SnapshotRenderer snapshotRenderer()
+{
+    static const auto renderer = []
+    {
+        const auto name = juce::SystemStats::getEnvironmentVariable ("ILANA_SNAPSHOT_RENDERER", "software").trim().toLowerCase();
+        if (name.isEmpty() || name == "software")
+            return SnapshotRenderer::software;
+        if (name == "vulkan" || name == "both")
+        {
+           #if ILANA_VULKAN
+            return name == "vulkan" ? SnapshotRenderer::vulkan : SnapshotRenderer::both;
+           #else
+            std::cerr << "ILANA_SNAPSHOT_RENDERER=" << name << ": this build has no Vulkan renderer (ILANA_VULKAN is off)" << std::endl;
+            std::exit (3);
+           #endif
+        }
+        std::cerr << "ILANA_SNAPSHOT_RENDERER=" << name << ": unknown (software, vulkan or both)" << std::endl;
+        std::exit (3);
+    }();
+    return renderer;
+}
+
+void writePng (const juce::Image& image, const juce::File& file)
+{
+    file.deleteFile();
+    juce::FileOutputStream stream (file);
+    juce::PNGImageFormat().writeImageToStream (image, stream);
+    std::cout << file.getFullPathName() << std::endl;
+}
+
 void save (juce::Component& editor, const juce::File& file)
 {
     if (beforeSave() != nullptr)
@@ -115,18 +162,51 @@ void save (juce::Component& editor, const juce::File& file)
     // ILANA_SNAPSHOT_SCALE: the pixel scale of the PNGs (1.5 by default; 3 for close-ups).
     static const auto scale = (float) juce::SystemStats::getEnvironmentVariable ("ILANA_SNAPSHOT_SCALE", "1.5").getDoubleValue();
     const auto pixels = scale > 0.1f ? scale : 1.5f;
+    const auto renderer = snapshotRenderer();
     // The text is sized for the zoom it draws at, as in the host (a 1.5x PNG of a 100 % editor showed the 100 %
     // floors and drew the small OSC card text bigger than ilana's 175 % window, 2026-10-23).
     const auto zoom = IlanaTheme::uiScaleRef();
     IlanaTheme::uiScaleRef() = zoom * pixels;
     IlanaTheme::notifyUiScaleListeners();
-    const auto image = editor.createComponentSnapshot (editor.getLocalBounds(), true, pixels);
+    juce::Image image, gpuImage, image2;
+    // In both mode each capture waits 250 ms first (the message loop doesn't
+    // run, so nothing else changes): the live views' trackers (PhaseTracker,
+    // EnvTracker in gui/AnimationUtils.h) predict from the time since their
+    // last paint and restart from the published value after 150 ms, so with
+    // the wait every capture shows the same phase instead of one moved on
+    // by however long the previous renderer took.
+    const auto settleTrackers = [renderer] { if (renderer == SnapshotRenderer::both) juce::Thread::sleep (250); };
+    if (renderer != SnapshotRenderer::vulkan)
+    {
+        settleTrackers();
+        image = editor.createComponentSnapshot (editor.getLocalBounds(), true, pixels);
+    }
+   #if ILANA_VULKAN
+    if (renderer != SnapshotRenderer::software)
+    {
+        settleTrackers();
+        gpuImage = ilana::vulkan::renderComponent (editor, editor.getLocalBounds(), pixels);
+        if (! gpuImage.isValid())
+        {
+            std::cerr << "ILANA_SNAPSHOT_RENDERER: the Vulkan renderer is unavailable (" << ilana::vulkan::lastError()
+                      << "); no picture written for " << file.getFullPathName() << std::endl;
+            std::exit (4);
+        }
+        if (renderer == SnapshotRenderer::both)
+        {
+            settleTrackers();
+            image2 = editor.createComponentSnapshot (editor.getLocalBounds(), true, pixels);
+        }
+    }
+   #endif
     IlanaTheme::uiScaleRef() = zoom;
     IlanaTheme::notifyUiScaleListeners();
-    file.deleteFile();
-    juce::FileOutputStream stream (file);
-    juce::PNGImageFormat().writeImageToStream (image, stream);
-    std::cout << file.getFullPathName() << std::endl;
+    writePng (renderer == SnapshotRenderer::vulkan ? gpuImage : image, file);
+    if (renderer == SnapshotRenderer::both)
+    {
+        writePng (gpuImage, file.getSiblingFile (file.getFileNameWithoutExtension() + ".vulkan" + file.getFileExtension()));
+        writePng (image2, file.getSiblingFile (file.getFileNameWithoutExtension() + ".software2" + file.getFileExtension()));
+    }
 }
 int uiFailures = 0;
 
@@ -9939,6 +10019,316 @@ struct FillRecorder : public juce::LowLevelGraphicsSoftwareRenderer
     std::vector<Fill> fills;
 };
 
+#if ILANA_VULKAN
+// --vulkanlive <dir>: the editor on screen (Xvfb) at 1060 wide and 175 %,
+// drawn through Vulkan. For every page: vk-<page>.png (the canvas, read
+// back) and sw-<page>.png (the software snapshot at the same scale) for the
+// parity script, and the frames that page took; then the idle frame rate
+// (must be 0), real pointer input through the child window (X11 XTest: the
+// server routes it exactly as a user's mouse), switching off and on, a
+// resize and a window that closes and opens again.
+int runVulkanLive (const juce::File& outDir)
+{
+    outDir.createDirectory();
+    const auto scale = 1.75f;
+    juce::Desktop::getInstance().setGlobalScaleFactor (scale);
+    IlanaSynthAudioProcessor processor;
+    processor.prepareToPlay (48000.0, 512);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+    editor->setSize (1060, 720);
+    auto* shell = dynamic_cast<IlanaSynthAudioProcessorEditor*> (editor.get());
+
+    if (shell == nullptr)
+        return 1;
+
+    shell->setVulkanRendering (true); // (whatever the settings file says)
+    HostWindow window (*editor);
+    settle (1500);
+
+    if (auto* tutorial = findChild<TutorialOverlay> (*editor))
+        tutorial->setVisible (false);
+
+    auto* vk = shell->getVulkanAttachment();
+
+    if (vk == nullptr || ! vk->isActive())
+    {
+        std::cout << "FAIL: Vulkan didn't attach" << (vk != nullptr ? ": " + vk->describe() : juce::String()) << std::endl;
+        return 1;
+    }
+
+    std::cout << "Vulkan: " << vk->describe() << std::endl;
+    int failures = 0;
+    const auto check = [&failures] (bool ok, const juce::String& what)
+    {
+        std::cout << (ok ? "  ok   " : "  FAIL ") << what << std::endl;
+        failures += ok ? 0 : 1;
+    };
+
+    const auto mask = vk->getNativeInputEventMask();
+    check (mask == 0, "the child window asks for no input events (mask " + juce::String (mask) + ")");
+
+    // Text sized for the zoom it draws at, as in the host (as runFlair does).
+    IlanaTheme::uiScaleRef() = IlanaTheme::uiScaleRef() * scale;
+    IlanaTheme::notifyUiScaleListeners();
+    settle (500);
+
+    // Frames presented so far (0 while Vulkan is off).
+    const auto framesSoFar = [shell]
+    {
+        auto* attachment = shell->getVulkanAttachment();
+        return attachment != nullptr ? attachment->getStats().framesPresented : 0;
+    };
+
+    // Waits until no frame has come for 300 ms (at most 5 s).
+    const auto settleFrames = [&]
+    {
+        auto last = framesSoFar();
+        auto quietSince = juce::Time::getMillisecondCounterHiRes();
+        const auto start = quietSince;
+        while (juce::Time::getMillisecondCounterHiRes() - quietSince < 300.0 && juce::Time::getMillisecondCounterHiRes() - start < 5000.0)
+        {
+            settle (20);
+            if (framesSoFar() != last)
+            {
+                last = framesSoFar();
+                quietSince = juce::Time::getMillisecondCounterHiRes();
+            }
+        }
+    };
+
+    const auto writePng = [] (const juce::Image& image, const juce::File& file)
+    {
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    };
+
+    for (const auto& page : shell->getPageIds())
+    {
+        const auto before = vk->getStats();
+        const auto t0 = juce::Time::getMillisecondCounterHiRes();
+        shell->showPage (page);
+        settle (400);
+        settleFrames();
+        const auto after = vk->getStats();
+        const auto frames = after.framesPresented - before.framesPresented;
+        const auto name = page.replaceCharacters ("/ ", "--");
+        const auto gpu = vk->readback();
+        const auto soft = editor->createComponentSnapshot (editor->getLocalBounds(), true, scale);
+        writePng (gpu, outDir.getChildFile ("vk-" + name + ".png"));
+        writePng (soft, outDir.getChildFile ("sw-" + name + ".png"));
+
+        // A first look at parity (the lead's script does the real comparison).
+        double sum = 0.0;
+        int over = 0, total = 0;
+        if (gpu.getWidth() == soft.getWidth() && gpu.getHeight() == soft.getHeight())
+        {
+            const juce::Image::BitmapData a (gpu, juce::Image::BitmapData::readOnly), b (soft, juce::Image::BitmapData::readOnly);
+            for (int y = 0; y < gpu.getHeight(); ++y)
+                for (int x = 0; x < gpu.getWidth(); ++x)
+                {
+                    const auto p = a.getPixelColour (x, y), q = b.getPixelColour (x, y);
+                    const auto d = juce::jmax (std::abs ((int) p.getRed() - (int) q.getRed()), std::abs ((int) p.getGreen() - (int) q.getGreen()),
+                                               std::abs ((int) p.getBlue() - (int) q.getBlue()));
+                    sum += d;
+                    over += d > 16 ? 1 : 0;
+                    ++total;
+                }
+        }
+        std::cout << page << ": " << frames << " frames, " << juce::String (frames > 0 ? (after.totalFrameMs - before.totalFrameMs) / frames : 0.0, 2)
+                  << " ms each (last " << juce::String (after.lastFrameMs, 2) << " ms), settled in "
+                  << juce::String (juce::Time::getMillisecondCounterHiRes() - t0, 0) << " ms; "
+                  << gpu.getWidth() << "x" << gpu.getHeight() << " vs " << soft.getWidth() << "x" << soft.getHeight()
+                  << ", mean diff " << juce::String (total > 0 ? sum / total : -1.0, 3) << ", "
+                  << juce::String (total > 0 ? 100.0 * over / total : -1.0, 3) << "% of pixels off by more than 16" << std::endl;
+    }
+
+    // Idle: nothing changes, so nothing may be drawn.
+    shell->showPage ("MAIN");
+    settle (400);
+    settleFrames();
+    {
+        // (The editor itself repaints a few small areas now and then while
+        // idle, in software too: --idlecpu counts them. Every frame here must
+        // come from such a repaint; none may be drawn for nothing.)
+        const auto before = vk->getStats();
+        settle (3000);
+        const auto after = vk->getStats();
+        const auto idle = (after.framesPresented - before.framesPresented) / 3.0;
+        const auto unasked = (after.framesPresented - before.framesPresented) - (after.repaintFrames - before.repaintFrames);
+        std::cout << "idle: " << juce::String (idle, 2) << " frames per second, " << unasked << " of them without a repaint" << std::endl;
+        check (unasked == 0 && idle <= 2.0, "an idle editor draws only the editor's own repaints");
+
+        // Who keeps drawing: the deepest component at the last frame's dirty area.
+        if (idle > 0.0)
+        {
+            const auto area = vk->getStats().lastDirty.toFloat() / scale;
+            if (auto* who = editor->getComponentAt (area.getCentre().roundToInt()))
+                std::cout << "  idle repaint at " << area.toNearestInt().toString() << " (editor px): " << typeid (*who).name()
+                          << " '" << who->getName() << "', parent " << (who->getParentComponent() != nullptr ? typeid (*who->getParentComponent()).name() : "") << std::endl;
+        }
+    }
+
+#if JUCE_LINUX
+    // Real pointer input: XTest moves and clicks the server's pointer, and
+    // the server delivers it to whichever window wants it under the child.
+    using OpenDisplay = void* (*) (const char*);
+    using FakeMotion = int (*) (void*, int, int, int, unsigned long);
+    using FakeButton = int (*) (void*, unsigned int, int, unsigned long);
+    using Flush = int (*) (void*);
+    auto* x11 = dlopen ("libX11.so.6", RTLD_LAZY);
+    auto* xtst = dlopen ("libXtst.so.6", RTLD_LAZY);
+    auto openDisplay = x11 != nullptr ? (OpenDisplay) dlsym (x11, "XOpenDisplay") : nullptr;
+    auto flush = x11 != nullptr ? (Flush) dlsym (x11, "XFlush") : nullptr;
+    auto motion = xtst != nullptr ? (FakeMotion) dlsym (xtst, "XTestFakeMotionEvent") : nullptr;
+    auto button = xtst != nullptr ? (FakeButton) dlsym (xtst, "XTestFakeButtonEvent") : nullptr;
+    void* display = openDisplay != nullptr ? openDisplay (nullptr) : nullptr;
+
+    // Counts the presses that reach the editor.
+    struct PressProbe : juce::MouseListener
+    {
+        void mouseDown (const juce::MouseEvent&) override { ++downs; }
+        int downs = 0;
+    } probe;
+    editor->addMouseListener (&probe, true);
+
+    // Hover, click and drag through the server's pointer. Run with Vulkan
+    // on (counted) and, at the end, off (the control: the same moves on the
+    // editor's own window).
+    const auto pointerTests = [&] (bool counted)
+    {
+    const auto checkInput = [&] (bool ok, const juce::String& what)
+    {
+        if (counted)
+            check (ok, what);
+        else
+            std::cout << (ok ? "  (control) ok   " : "  (control) FAIL ") << what << std::endl;
+    };
+    if (display != nullptr && motion != nullptr && button != nullptr && flush != nullptr)
+    {
+        const auto toScreen = [&] (juce::Component& c, juce::Point<int> local)
+        {
+            const auto p = editor->getLocalPoint (&c, local.toFloat());
+            return (editor->localPointToGlobal (p) * scale).roundToInt();
+        };
+        const auto moveTo = [&] (juce::Point<int> s) { motion (display, -1, s.x, s.y, 0); flush (display); settle (120); };
+        const auto press = [&] (bool down) { button (display, 1, down ? 1 : 0, 0); flush (display); settle (120); };
+
+        // Hover: the component under the mouse is the editor's own.
+        if (auto* tab = findButtonWithText (*editor, "FX"))
+        {
+            const auto framesBefore = framesSoFar();
+            moveTo (toScreen (*tab, tab->getLocalBounds().getCentre()));
+            moveTo (toScreen (*tab, tab->getLocalBounds().getCentre() + juce::Point<int> (1, 0)));
+            auto* under = juce::Desktop::getInstance().getMainMouseSource().getComponentUnderMouse();
+            checkInput (under != nullptr && (under == tab || tab->isParentOf (under) || under->isParentOf (tab)),
+                   "hover reaches the FX tab (under the mouse: " + juce::String (under != nullptr ? typeid (*under).name() : "nothing") + ")");
+            settleFrames();
+            std::cout << "  hover drew " << framesSoFar() - framesBefore << " frames" << std::endl;
+
+            // Click: the FX page opens.
+            const auto downsBefore = probe.downs;
+            press (true);
+            press (false);
+            settleFrames();
+            std::cout << "  presses seen by the editor: " << probe.downs - downsBefore << " of 1" << std::endl;
+            checkInput (shell->getCurrentPageId() == "FX", "a click on the FX tab opens FX (now " + shell->getCurrentPageId() + ")");
+        }
+        else
+        {
+            checkInput (false, "found the FX tab");
+        }
+
+        // Drag: a knob on MAIN turns.
+        shell->showPage ("MAIN");
+        settleFrames();
+        std::vector<KnobControl*> knobs;
+        findAll<KnobControl> (*editor, knobs);
+        KnobControl* knob = nullptr;
+        for (auto* k : knobs)
+        {
+            if (k->isShowing() && k->getSlider().isShowing() && k->getSlider().getWidth() > 20)
+            {
+                knob = k;
+                break;
+            }
+        }
+        if (knob != nullptr)
+        {
+            auto& slider = knob->getSlider();
+            slider.setValue (slider.proportionOfLengthToValue (0.5), juce::sendNotificationSync);
+            settleFrames();
+            const auto value = slider.getValue();
+            const auto framesBefore = framesSoFar();
+            const auto centre = toScreen (slider, slider.getLocalBounds().getCentre());
+            moveTo (centre);
+            press (true);
+            for (int step = 1; step <= 8; ++step)
+                moveTo (centre - juce::Point<int> (0, step * 12));
+            press (false);
+            settleFrames();
+            checkInput (! juce::approximatelyEqual (slider.getValue(), value),
+                   "dragging " + knob->getParameterId() + " turns it (" + juce::String (value, 3) + " -> " + juce::String (slider.getValue(), 3) + "), "
+                       + juce::String (framesSoFar() - framesBefore) + " frames");
+            if (counted)
+                writePng (shell->getVulkanAttachment()->readback(), outDir.getChildFile ("vk-after-drag.png"));
+            if (counted)
+                writePng (editor->createComponentSnapshot (editor->getLocalBounds(), true, scale), outDir.getChildFile ("sw-after-drag.png"));
+        }
+        else
+        {
+            checkInput (false, "found a knob on MAIN");
+        }
+    }
+    else
+    {
+        checkInput (false, "XTest is available");
+    }
+    };
+    pointerTests (true);
+#endif
+
+    // Off and on again, live, as the settings menu does.
+    shell->setVulkanRendering (false);
+    settle (300);
+    check (shell->getVulkanAttachment() == nullptr, "Vulkan detaches");
+    shell->setVulkanRendering (true);
+    settle (600);
+    check (shell->getVulkanAttachment() != nullptr && shell->getVulkanAttachment()->isActive(), "Vulkan attaches again");
+
+    // A host resize: the canvas and the swapchain follow.
+    window.setSize (1325, 900);
+    editor->setSize (1325, 900);
+    settle (800);
+    if (auto* again = shell->getVulkanAttachment())
+    {
+        std::cout << "after resize: " << again->describe() << std::endl;
+        const auto width = again->readback().getWidth();
+        check (width == juce::roundToInt (1325 * scale), "the canvas follows a resize (" + juce::String (width) + " wide)");
+    }
+
+    // The window closed and opened again (the peer goes and comes back).
+    window.removeFromDesktop();
+    settle (300);
+    window.addToDesktop (juce::ComponentPeer::windowHasTitleBar);
+    window.setVisible (true);
+    settle (800);
+    check (shell->getVulkanAttachment() != nullptr && shell->getVulkanAttachment()->isActive(), "Vulkan comes back with a new window");
+    if (auto* again = shell->getVulkanAttachment())
+        std::cout << "reopened: " << again->describe() << ", " << again->getStats().framesPresented << " frames in all" << std::endl;
+
+#if JUCE_LINUX
+    shell->setVulkanRendering (false);
+    settle (300);
+    pointerTests (false);
+    editor->removeMouseListener (&probe);
+#endif
+
+    std::cout << (failures == 0 ? juce::String ("vulkanlive: all passed") : "vulkanlive: " + juce::String (failures) + " failed") << std::endl;
+    return failures == 0 ? 0 : 1;
+}
+#endif
+
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
@@ -9952,6 +10342,10 @@ int main (int argc, char** argv)
 
     if (juce::String (argv[1]) == "--uitest")
         return runUiTests();
+#if ILANA_VULKAN
+    if (juce::String (argv[1]) == "--vulkanlive" && argc > 2)
+        return runVulkanLive (juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]));
+#endif
 
     if (juce::String (argv[1]) == "--usability3" && argc > 2)
         return runUsability3 (juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]));

@@ -378,6 +378,56 @@ if (NOT WIN32)
     endforeach()
 endif()
 
+# Vulkan UI on Windows and Linux (src/gpu): the editor's pictures are painted
+# by JUCE's rasteriser semantics with Vulkan doing the fills, layers and the
+# presenting; Direct2D (Windows) or OpenGL (Linux) stay as the fallback and in
+# the settings menu. macOS has no native Vulkan and keeps CoreGraphics. The
+# loader is opened at run time (volk), so no Vulkan SDK is needed to build and
+# a PC without a Vulkan driver still runs. Shaders are pre-compiled into
+# src/gpu/VulkanShaders.h (tools/build_vulkan_shaders.sh regenerates it).
+if (WIN32 OR (UNIX AND NOT APPLE))
+    set(ILANA_VULKAN_DEFAULT ON)
+else()
+    set(ILANA_VULKAN_DEFAULT OFF)
+endif()
+option(ILANA_VULKAN "Vulkan editor renderer" ${ILANA_VULKAN_DEFAULT})
+
+if (ILANA_VULKAN)
+    FetchContent_Declare(vulkan_headers
+        GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+        GIT_TAG vulkan-sdk-1.3.296.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_Declare(volk
+        GIT_REPOSITORY https://github.com/zeux/volk.git
+        GIT_TAG vulkan-sdk-1.3.296.0
+        GIT_SHALLOW TRUE
+    )
+    # Headers only: volk is compiled inside src/gpu/VulkanDevice.cpp.
+    FetchContent_GetProperties(vulkan_headers)
+    if (NOT vulkan_headers_POPULATED)
+        FetchContent_Populate(vulkan_headers)
+    endif()
+    FetchContent_GetProperties(volk)
+    if (NOT volk_POPULATED)
+        FetchContent_Populate(volk)
+    endif()
+
+    foreach(target ilanaSynth ilanaSynthFX ilanaSnapshot)
+        target_sources(${target} PRIVATE
+            src/gpu/VulkanDevice.cpp
+            src/gpu/VulkanGraphics.cpp
+            src/gpu/VulkanAttachment.cpp
+            src/gpu/VulkanSurface.cpp
+        )
+        target_include_directories(${target} PRIVATE ${vulkan_headers_SOURCE_DIR}/include ${volk_SOURCE_DIR})
+        target_compile_definitions(${target} PRIVATE ILANA_VULKAN=1 VK_NO_PROTOTYPES=1)
+        if (UNIX AND NOT APPLE)
+            target_link_libraries(${target} PRIVATE ${CMAKE_DL_LIBS})
+        endif()
+    endforeach()
+endif()
+
 # Dev tool: per-preset render fingerprints for regression checks (not shipped).
 juce_add_console_app(ilanaFingerprint PRODUCT_NAME "ilanaFingerprint")
 

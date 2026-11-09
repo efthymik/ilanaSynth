@@ -23,13 +23,24 @@ for e in cc:
     byfile.setdefault(os.path.relpath(e["file"], root), e)
 fail = 0
 for src in sys.argv[1:]:
-    e = byfile.get(src) or next((v for k, v in byfile.items() if k.startswith("src/") or k.startswith("tests/")), None)
-    args = shlex.split(e["command"])[1:]
+    e = byfile.get(src)
+    if e is None:
+        # Not in this build (e.g. a header-only test file): borrow a source's flags.
+        # A file in the same folder first (a new src/gpu file gets the Vulkan include paths and defines).
+        e = next((v for k, v in byfile.items() if os.path.dirname(k) == os.path.dirname(src)), None) \
+            or next((v for k, v in byfile.items() if k.startswith("src/") or k.startswith("tests/")), None)
+        print(f"note {src}: not in build/compile_commands.json, using {os.path.relpath(e['file'], root)}'s flags")
+    args = e["arguments"][1:] if "arguments" in e else shlex.split(e["command"])[1:]
     keep = []
     skip = False
     for a in args:
         if skip: skip = False; continue
         if a in ("-o", "-MF", "-MT", "-MQ"): skip = True; continue
+        # Linux-only: the platform define, system and X11 headers, and the
+        # Vulkan surface platforms of Linux (a Windows source picks its own,
+        # as src/gpu/VulkanSurface.cpp defines VK_USE_PLATFORM_WIN32_KHR).
+        # The Vulkan-Headers / volk -I paths and ILANA_VULKAN / VK_NO_PROTOTYPES pass.
+        if a.startswith("-DVK_USE_PLATFORM_") and "WIN32" not in a: continue
         if a.startswith(("-D", "-I")) and a not in ("-DLINUX=1",) and "x11" not in a.lower() and "/usr/include" not in a:
             keep.append(a)
     cmd = ["clang", "--driver-mode=cl", "--target=x86_64-pc-windows-msvc", "/Zs", "/std:c++20", "/EHsc", "/DNOMINMAX", "/DWIN32",
