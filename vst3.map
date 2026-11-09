@@ -1,0 +1,9 @@
+{
+    global:
+        GetPluginFactory;
+        ModuleEntry;
+        ModuleExit;
+        clap_entry;
+    local:
+        *;
+};
