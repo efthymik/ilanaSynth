@@ -74,6 +74,23 @@
 #include "gui/pages/PatchLfo.h"
 #include "gui/pages/PatchPage.h"
 
+namespace
+{
+#if JUCE_LINUX || JUCE_BSD
+// Linux: follow XDG instead of JUCE's ~/<folderName>.
+juce::File getSettingsFile()
+{
+    const auto xdgConfigHome = juce::SystemStats::getEnvironmentVariable ("XDG_CONFIG_HOME", {});
+    const auto configRoot = xdgConfigHome.isNotEmpty() && juce::File::isAbsolutePath (xdgConfigHome)
+                                ? juce::File (xdgConfigHome)
+                                : juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                                      .getChildFile (".config");
+
+    return configRoot.getChildFile ("ilanaSynth").getChildFile ("ilanaSynth.settings");
+}
+#endif
+} // namespace
+
 
 // The scope over the current page. Docked (the default, review 7) it fills
 // the page area, as the docked preset browser does; FLOAT makes it a small
@@ -299,8 +316,40 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
         juce::PropertiesFile::Options options;
         options.applicationName = "ilanaSynth";
         options.filenameSuffix = "settings";
+
+       #if JUCE_LINUX || JUCE_BSD
+        auto settingsFile = getSettingsFile();
+
+        // Move the old ~/ilanaSynth settings to XDG.
+        const auto legacyFile = juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                                    .getChildFile ("ilanaSynth")
+                                    .getChildFile ("ilanaSynth.settings");
+
+        if (! settingsFile.existsAsFile() && legacyFile.existsAsFile())
+        {
+            settingsFile.getParentDirectory().createDirectory();
+
+            if (legacyFile.moveFileTo (settingsFile) || legacyFile.copyFileTo (settingsFile))
+            {
+                legacyFile.deleteFile();
+
+                const auto legacyFolder = legacyFile.getParentDirectory();
+
+                if (legacyFolder.isDirectory()
+                    && legacyFolder.getNumberOfChildFiles (juce::File::findFilesAndDirectories) == 0)
+                    legacyFolder.deleteRecursively();
+            }
+            else
+            {
+                settingsFile = legacyFile;
+            }
+        }
+       #else
         options.folderName = "ilanaSynth";
-        settings = std::make_unique<juce::PropertiesFile> (options);
+        const auto settingsFile = options.getDefaultFile();
+       #endif
+
+        settings = std::make_unique<juce::PropertiesFile> (settingsFile, options);
         tableBrowserSettings() = settings.get();
     }
 
