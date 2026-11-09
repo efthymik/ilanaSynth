@@ -4373,6 +4373,8 @@ void OscPageViewport::mouseWheelMove (const juce::MouseEvent& event, const juce:
         current = target = (float) getViewPositionY();
 
     target -= wheel.deltaY * wheelPixels;
+    // Settle only towards the wheel's direction.
+    lastTravel = wheel.deltaY > 0.0f ? -1.0f : 1.0f;
     // (Past an end the target goes on at a third of the pace, and never more than overshootMax over.)
     if (target < 0.0f)
         target = juce::jmax (-overshootMax, target * 0.35f);
@@ -4406,7 +4408,7 @@ int OscPageViewport::maxScroll () const
     return page == nullptr ? 0 : juce::jmax (0, juce::roundToInt ((float) page->getHeight() * chosenScale) - getHeight());
 }
 
-float OscPageViewport::nearestStop (float y, float maxY) const
+float OscPageViewport::nearestStop (float y, float maxY, float travel) const
 {
     const auto* page = getPage();
     if (page == nullptr || maxY <= 0.0f)
@@ -4416,6 +4418,10 @@ float OscPageViewport::nearestStop (float y, float maxY) const
     const auto consider = [&] (float stop)
     {
         stop = juce::jlimit (0.0f, maxY, stop);
+        if (travel < 0.0f && stop > y + 0.25f)
+            return;
+        if (travel > 0.0f && stop < y - 0.25f)
+            return;
         if (std::abs (stop - y) < bestDistance)
         {
             best = stop;
@@ -4441,7 +4447,7 @@ void OscPageViewport::timerCallback ()
     const auto maxY = (float) maxScroll();
     // (Once the wheel rests, a target past an end springs back to it.)
     if (juce::Time::getMillisecondCounter() - lastWheel > 90)
-        target = nearestStop (juce::jlimit (0.0f, maxY, target), maxY);
+        target = nearestStop (juce::jlimit (0.0f, maxY, target), maxY, lastTravel);
 
     current = IlanaAnim::approach (current, target, 0.22f, frameTicks()); // (0.22 a 60 Hz tick, at any frame rate)
     if (std::abs (target - current) < 0.5f)

@@ -1542,14 +1542,15 @@ private:
     juce::uint32 lastWheel = 0;
 
     static constexpr float wheelPixels = 150.0f, overshootMax = 44.0f, snapRange = 120.0f;
-    float current = 0.0f, target = 0.0f, overshoot = 0.0f;
+    float current = 0.0f, target = 0.0f, overshoot = 0.0f, lastTravel = 0.0f;
     bool gliding = false;
 
     int maxScroll() const;
 
     // The resting place nearest y: either end, or a card edge (OscPage::scrollStops), so the view never stops
-    // with a row cut through. Stops farther than snapRange away leave y where it is.
-    float nearestStop (float y, float maxY) const;
+    // with a row cut through. Stops farther than snapRange away leave y where it is. Only stops in the direction
+    // of travel count, so a wheel notch does not snap back.
+    float nearestStop (float y, float maxY, float travel) const;
 
     // The part of the glide past an end: the page is drawn that far over, the view itself stays at its end.
     void setOvershoot (float pixels);
