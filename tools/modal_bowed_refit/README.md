@@ -31,7 +31,12 @@ folder; the scripts read and write there.
    `fit_wobble.py` fits the flutter, drift and vibrato wander on the picture
    score plus those (instrument medians: one random take can't match note
    for note).
-6. `spec_sim.py out.png '{params}'` draws Spitfire against the twin;
+6. `wood.py '{params}'` measures what sits between and under the partials
+   (the floor per octave with each partial's vibrato skirt masked out, and
+   all of it below the fundamental) and each partial's fast flutter by the
+   octave it sits in; `fit_wood.py` (FIT=names) fits on the picture score,
+   the wobble measures and those together, each note rendered once.
+7. `spec_sim.py out.png '{params}'` draws Spitfire against the twin;
    `spec.py PREFIX out.png` and `score_render.py PREFIX` against plugin renders
    of demo-violin.mid / demo-cello.mid (commands in score_render.py);
    `levels.py params.json` compares each note's loudness.
@@ -47,5 +52,18 @@ fast flutter: measure it on band-passed partials. Spitfire's partials
 flutter about 2 dB at 10-40 Hz on their own (the violin's quicker than
 the cello's); a pitch jitter on the string's modes instead broke the bow's
 stick-slip into noise on low notes.
+
+Lessons (2026-11-09, round 5, from difference spectrograms: Spitfire minus
+the engine over time): the flutter goes by where a partial sits, not by the
+note (Spitfire's partials under 500 Hz hold within about half a dB, those
+over 1 kHz shake 2 to 3 dB, violin and cello alike). Flutter on each mode's
+output gain also shakes that mode's off-resonance share of the other
+partials, which smeared noise onto the fundamental (the floor next to it
+rose 10 dB): put it on each mode's loss instead (only the mode's own ring
+moves), with the hair on the string, and bounded (an unbounded log-normal
+swing choked a partial for a moment, a dropout). The body's fine ripple
+swept by the vibrato filled the space under a low cello note: thin it out
+low down. The box's direct path needs a high-pass at its lowest resonance
+or a low note booms.
 
 Needs numpy, scipy, soundfile, numba, mido, matplotlib.

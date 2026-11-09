@@ -45,9 +45,12 @@
 // the note fades at about 37 dB a second. The vibrato is
 // never quite even (its rate and depth wander), and it sweeps each partial
 // across the body's fine ripple, so each one's level rises and falls on its
-// own; each partial's level and the bow's speed also wander slowly, as a
-// player's bow does, each partial's level flutters quickly on its own (more
-// and faster up high: a grainy line, not a clean one) and the pitch drifts
+// own (less so low down, where the body's resonances thin out); each
+// partial's level and the bow's speed also wander slowly, as a player's bow
+// does; the hair's grip on each upper partial wavers quickly (its loss: the
+// partial's own ring flutters, a grainy line, while the low partials hold
+// solid); the box radiates little below its lowest resonance (no boom under
+// a low note); and the pitch drifts
 // a few cents. The upper register is brighter (the higher strings
 // lose less up high), and a gentle roll-off sets the top of the spectrum.
 // Eco keeps half the modes and the body's lower half.
@@ -57,6 +60,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 
 #include "ModalBowedBodies.h"
 
@@ -82,6 +86,7 @@ public:
         std::fill (std::begin (bx2), std::end (bx2), 0.0f);
         std::fill (std::begin (by1), std::end (by1), 0.0f);
         std::fill (std::begin (by2), std::end (by2), 0.0f);
+        hx1 = hx2 = hy1 = hy2 = 0.0f;
         tilt = hissState = hissLast = 0.0f;
         envelope = 0.0f;
         silent = true;
@@ -269,8 +274,14 @@ public:
 
         // The body: every resonator driven by the bridge, summed (and a
         // little of the bridge straight through: the box's broad radiation
-        // between its resonances).
-        auto sound = bodyDirect * bridge;
+        // between its resonances, which falls away below its lowest
+        // resonance: the bowed string's push there is a boom, not wood).
+        const auto radiated = hpB0 * bridge + hpB1 * hx1 + hpB2 * hx2 - hpA1 * hy1 - hpA2 * hy2;
+        hx2 = hx1;
+        hx1 = bridge;
+        hy2 = hy1;
+        hy1 = radiated;
+        auto sound = bodyDirect * (plucked ? bridge : radiated);
         for (int j = 0; j < bodyCount; ++j)
         {
             const auto y = bodyB0[j] * (bridge - bx2[j]) - bodyA1[j] * by1[j] - bodyA2[j] * by2[j];
@@ -313,8 +324,8 @@ private:
                 const auto low = (double) loss0 / (double) stringScale;
                 for (int n = 0; n < modes; ++n)
                 {
-                    const auto decay = std::exp (-(low + (double) lossUpper[n] * upper) / sampleRate);
-                    decayOf[n] = (float) decay;
+                    lossOf[n] = (float) juce::jmin (low + (double) lossUpper[n] * upper, sampleRate); // (fastExp's range)
+                    const auto decay = std::exp (-(double) lossOf[n] / sampleRate);
                     fall[n] = (float) (decay * decay);
                 }
             }
@@ -369,8 +380,10 @@ private:
         depthDriftIn += vibratoPole * (depthDriftGain * draw() - depthDriftIn);
         depthDrift += vibratoPole * (depthDriftIn - depthDrift);
         bowWander = std::exp (decibel * bowDrift);
-        // The bow's fast randomness: each partial's level flutters on its own
-        // (Spitfire's partials are grainy lines, not clean ones), and the
+        // The bow's fast randomness: the hair's grip on each partial wavers
+        // (its loss: a driven partial's level goes as one over it, so only
+        // the partial's own ring moves, and no faster than it can; Spitfire's
+        // upper partials are grainy lines, its low ones hold steady), and the
         // pitch drifts slowly (the player's intonation).
         const auto drawFast = [this]
         {
@@ -379,8 +392,9 @@ private:
         };
         for (int n = 0; n < modes; ++n)
         {
-            flutterIn[n] += flutterPole * (flutterGain * drawFast() - flutterIn[n]);
-            flutter[n] += flutterPole * (flutterIn[n] - flutter[n]);
+            flutterIn[n] += flutterPole * (flutterGain * flutterShape[n] * drawFast() - flutterIn[n]);
+            // (bounded far past any real swing, for fastExp)
+            flutter[n] = juce::jlimit (-600.0f, 600.0f, flutter[n] + flutterPole * (flutterIn[n] - flutter[n]));
         }
         pitchDriftIn += pitchPole * (pitchGain * drawFast() - pitchDriftIn);
         pitchDrift += pitchPole * (pitchDriftIn - pitchDrift);
@@ -399,12 +413,23 @@ private:
         const auto c1 = (float) std::cos (swing) - 1.0f, s1 = (float) std::sin (swing);
         const auto c2 = (float) std::cos (goldenRatio * swing) - 1.0f, s2 = (float) std::sin (goldenRatio * swing);
         const auto half = 0.5f * rippleDb;
+        const auto inverseRate = (float) (1.0 / sampleRate);
         for (int n = 0; n < modes; ++n)
         {
-            turn[n] = (float) (2.0 * (double) decayOf[n] * std::cos (juce::jmin ((double) modeHz[n] * ratio, sampleRate * 0.49) * k));
+            // (with the hair on the string: the grip eases off as the bow
+            // lifts; held within about flutterClip dB either way, as an
+            // unbounded swing would choke a partial for a moment)
+            const auto grip = flutterClip * (1.0f - 2.0f / (fastExp (2.0f * envelope * flutter[n] * (1.0f / flutterClip)) + 1.0f)); // (tanh)
+            decayNow[n] = fastExp (-lossOf[n] * fastExp (-decibel * grip) * inverseRate);
+            fall[n] = decayNow[n] * decayNow[n];
+        }
+        for (int n = 0; n < modes; ++n)
+        {
+            const auto decay = decayNow[n];
+            turn[n] = (float) (2.0 * (double) decay * std::cos (juce::jmin ((double) modeHz[n] * ratio, sampleRate * 0.49) * k));
             const auto ripple = half * (rippleSin[n] * c1 + rippleCos[n] * s1 + rippleSin2[n] * c2 + rippleCos2[n] * s2);
             // (glided to over the block: a step would zip)
-            outStep[n] = (outBase[n] * std::exp (decibel * (ripple + wander[n] + flutter[n])) - out[n]) * (1.0f / (float) blockSize);
+            outStep[n] = (outBase[n] * std::exp (decibel * (ripple + wander[n])) - out[n]) * (1.0f / (float) blockSize);
         }
     }
 
@@ -417,11 +442,28 @@ private:
             const auto octave = std::log2 ((double) modeHz[n] * (double) bodySize / 1000.0);
             const auto phase = juce::MathConstants<double>::twoPi * rippleDensity * octave;
             const auto phase2 = juce::MathConstants<double>::twoPi * rippleDensity * goldenRatio * octave + 1.3;
-            rippleSin[n] = (float) std::sin (phase);
-            rippleCos[n] = (float) std::cos (phase);
-            rippleSin2[n] = (float) std::sin (phase2);
-            rippleCos2[n] = (float) std::cos (phase2);
+            // (The body's resonances thin out low down: a low partial pulses less.)
+            const auto depth = juce::jmin (1.0, std::pow ((double) modeHz[n] * (double) bodySize / (double) rippleKnee, (double) rippleFreqSlope));
+            rippleSin[n] = (float) (depth * std::sin (phase));
+            rippleCos[n] = (float) (depth * std::cos (phase));
+            rippleSin2[n] = (float) (depth * std::sin (phase2));
+            rippleCos2[n] = (float) (depth * std::cos (phase2));
         }
+    }
+
+    // e^x to about 1e-4, for |x| under 87 (the grip's flutter runs per mode
+    // per block: the library's exp and tanh there cost a third more CPU per
+    // voice; no branches, so the loop over the modes goes in vectors).
+    static float fastExp (float x)
+    {
+        const auto t = x * 1.442695041f;
+        const auto whole = (int) (t + 128.0f) - 128; // (floor: t + 128 is positive)
+        const auto f = t - (float) whole;
+        const auto fraction = 1.0f + f * (0.6960656f + f * (0.2244943f + f * 0.0794402f));
+        const auto bits = (std::int32_t) ((whole + 127) << 23);
+        float scale;
+        std::memcpy (&scale, &bits, sizeof (scale));
+        return fraction * scale;
     }
 
     // Uniform noise at the block rate through two one-poles in a row
@@ -452,10 +494,11 @@ private:
             const auto hz = juce::jmin (index * frequency * std::sqrt (1.0 + b * index * index), sampleRate * 0.49);
             lossUpper[n] = (float) (lossHigh * hz * hz * lossScale);
             const auto sigma = (double) loss0 * lossScale + (double) lossUpper[n];
+            lossOf[n] = (float) juce::jmin (sigma, sampleRate); // (fastExp's range)
             const auto decay = std::exp (-sigma * k);
             turn[n] = (float) (2.0 * decay * std::cos (juce::MathConstants<double>::twoPi * hz * k));
-            decayOf[n] = (float) decay;
             modeHz[n] = (float) hz;
+            flutterShape[n] = (float) juce::jmin (1.0, std::pow (hz / (double) flutterKnee, (double) flutterFreqSlope));
             fall[n] = (float) (decay * decay);
             shape[n] = (float) std::sin (index * juce::MathConstants<double>::pi * (double) bowAt);
             shapeSum += (double) shape[n] * shape[n];
@@ -526,6 +569,17 @@ private:
         for (int j = 0; j < B::count; ++j)
             loudest = juce::jmax (loudest, (double) lower[j] + blend * ((double) upper[j] - (double) lower[j]));
         bodyDirect = (float) std::pow (10.0, ((double) directDb + loudest) / 20.0);
+        {
+            // (Two poles, Butterworth, at directHp for a violin, lower for a bigger box.)
+            const auto w0 = juce::MathConstants<double>::twoPi * juce::jmin ((double) directHp / size, sampleRate * 0.45) / sampleRate;
+            const auto alpha = std::sin (w0) / juce::MathConstants<double>::sqrt2; // (Q = 1 / sqrt 2)
+            const auto cw = std::cos (w0);
+            const auto a0 = 1.0 + alpha;
+            hpB0 = hpB2 = (float) ((1.0 + cw) * 0.5 / a0);
+            hpB1 = (float) (-(1.0 + cw) / a0);
+            hpA1 = (float) (-2.0 * cw / a0);
+            hpA2 = (float) ((1.0 - alpha) / a0);
+        }
         bodyCount = 0;
         for (int j = 0; j < count; ++j)
         {
@@ -560,24 +614,27 @@ private:
     float bowDrift = 0.0f, rateDrift = 0.0f, depthDrift = 0.0f, bowDriftIn = 0.0f, rateDriftIn = 0.0f, depthDriftIn = 0.0f;
     float bowWander = 1.0f, bodyDirect = 0.0f, liftSpeed = 0.0f;
     float flutterPole = 0.1f, flutterGain = 0.0f, pitchPole = 0.01f, pitchGain = 0.0f, pitchDrift = 0.0f, pitchDriftIn = 0.0f;
+    float hpB0 = 1.0f, hpB1 = 0.0f, hpB2 = 0.0f, hpA1 = 0.0f, hpA2 = 0.0f, hx1 = 0.0f, hx2 = 0.0f, hy1 = 0.0f, hy2 = 0.0f;
     double ringUpper = 1.0;   // (the release's loss factor the modes have now)
     std::uint32_t seed = 1, driftSeed = 1, flutterSeed = 1;
     // Fitted to the Spitfire long notes (2026-11-08, see the top).
-    static constexpr float swellDepth = 0.97f, rosinJitter = 0.1001f, hissLevel = 3.336e-04f, bodyNoise = 2.795e-06f;
+    static constexpr float swellDepth = 0.97f, rosinJitter = 0.08536f, hissLevel = 3.336e-04f, bodyNoise = 1.572e-06f;
     static constexpr float brightness = 2.144f, topHz = 12000.0f, tiltHz = 5590.0f, directDb = -10.33f;
     // The body's fine ripple (dB, cycles per octave) the vibrato sweeps the
     // partials across.
-    static constexpr float rippleDb = 6.737f, rippleDensity = 20.24f;
+    static constexpr float rippleDb = 8.507f, rippleDensity = 19.46f;
     // The slow wander (dB standard deviation and corner): each partial's
     // level on its own, the bow's speed; the vibrato's rate and depth
     // (fractions; Spitfire's vibrato is never quite even).
-    static constexpr float wanderDb = 2.069f, bowDriftDb = 1.742f, rateWander = 0.06047f, depthWander = 0.6121f;
+    static constexpr float wanderDb = 2.052f, bowDriftDb = 1.742f, rateWander = 0.09024f, depthWander = 0.4561f;
     static constexpr double wanderHz = 0.6, vibratoWanderHz = 0.8;
     // The bow's fast randomness: each partial's flutter (dB standard
     // deviation and corner at A4, and how both grow with the register), the
     // pitch's slow drift (cents).
-    static constexpr float flutterDb = 2.674f, flutterSlope = 0.4562f, flutterHzSlope = 0.7853f, pitchDriftCents = 2.881f;
-    static constexpr double flutterHz = 14.95, pitchDriftHz = 0.5;
+    static constexpr float flutterDb = 19.97f, flutterSlope = 0.0f, flutterHzSlope = 0.7853f, pitchDriftCents = 1.441f;
+    static constexpr double flutterHz = 16.51, pitchDriftHz = 0.5;
+    static constexpr float flutterKnee = 818.2f, flutterFreqSlope = 1.285f, rippleKnee = 963.9f, rippleFreqSlope = 2.074f, directHp = 152.0f;
+    static constexpr float flutterClip = 30.0f;
     static constexpr double vibratoRate = 5.2, vibratoDelay = 0.25, vibratoRise = 0.4;
     // The bow's release: its pressure eases off over releaseSeconds as it
     // lifts, the upper partials come to lose releaseRing times more over
@@ -592,8 +649,8 @@ private:
     static constexpr float outputGain = 30000.0f;
 
     alignas (32) float q[maxModes] {}, qp[maxModes] {}, turn[maxModes] {}, fall[maxModes] {};
-    alignas (32) float shape[maxModes] {}, push[maxModes] {}, out[maxModes] {}, outBase[maxModes] {}, decayOf[maxModes] {}, modeHz[maxModes] {}, lossUpper[maxModes] {};
-    alignas (32) float flutter[maxModes] {}, flutterIn[maxModes] {};
+    alignas (32) float shape[maxModes] {}, push[maxModes] {}, out[maxModes] {}, outBase[maxModes] {}, modeHz[maxModes] {}, lossUpper[maxModes] {}, lossOf[maxModes] {}, decayNow[maxModes] {};
+    alignas (32) float flutter[maxModes] {}, flutterIn[maxModes] {}, flutterShape[maxModes] {};
     alignas (32) float wander[maxModes] {}, wanderIn[maxModes] {}, outStep[maxModes] {}, rippleSin[maxModes] {}, rippleCos[maxModes] {}, rippleSin2[maxModes] {}, rippleCos2[maxModes] {};
     alignas (32) float bodyB0[maxBody] {}, bodyA1[maxBody] {}, bodyA2[maxBody] {}, bodyGain[maxBody] {};
     alignas (32) float bx1[maxBody] {}, bx2[maxBody] {}, by1[maxBody] {}, by2[maxBody] {};

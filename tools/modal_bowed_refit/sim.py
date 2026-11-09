@@ -38,7 +38,8 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
            rosin, jitter_amt, rel_s, fade_db,
            bz_b0, bz_a1, bz_a2, bz_g, outgain, hiss, hiss_hp, lp_hz,
            size, rip_db, rip_c, slow_db, slow_hz, loud_db, vib_rate_dev, vib_depth_dev, vib_drift_hz, direct, ring, lift, ring_s,
-           fl_db, fl_hz, fl_slope, fl_hzslope, jit_ct, jit_hz, pdrift_ct, pdrift_hz):
+           fl_db, fl_hz, fl_slope, fl_hzslope, jit_ct, jit_hz, pdrift_ct, pdrift_hz,
+           fl_knee, fl_fslope, rip_knee, rip_fslope, direct_hp, fl_damp, fl_clip):
     k = 1.0 / sr
     n_ = np.arange(1, modes + 1).astype(np.float64)
     shape = np.sin(n_ * np.pi * beta)
@@ -54,6 +55,11 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
     ph1 = 2 * np.pi * rip_c * oct_
     ph2 = 2 * np.pi * rip_c * 1.618034 * oct_ + 1.3
     base1 = np.sin(ph1); base2 = np.sin(ph2)
+    # How deep each partial's ripple and flutter go: the body's resonances
+    # thin out low down (little pulsing on a low partial), and the hair
+    # shakes the upper partials more than the low ones.
+    rshape = np.minimum(1.0, (hz0 * size / rip_knee) ** rip_fslope)
+    fshape = np.minimum(1.0, (hz0 / fl_knee) ** fl_fslope)
     sigma = loss0 + loss1 * hz0 * hz0
     decay = np.exp(-sigma * k)
     turn = 2.0 * decay * np.cos(2 * np.pi * hz0 * k)
@@ -73,6 +79,16 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
     lp_a = np.exp(-2 * np.pi * lp_hz / sr) if lp_hz < sr * 0.45 else 0.0
     lp = 0.0
     level = 1.0; fade = 10 ** (-fade_db / 20 / sr)
+    # The box radiates little below its lowest resonance: the direct path is
+    # high-passed (two poles, Butterworth) at direct_hp / size.
+    use_hp = direct_hp > 0.0
+    hb0 = 1.0; hb1 = 0.0; hb2 = 0.0; ha1 = 0.0; ha2 = 0.0
+    if use_hp:
+        w0 = 2 * np.pi * min(direct_hp / size, sr * 0.45) / sr
+        al = np.sin(w0) / (2 * 0.7071067811865476)
+        cw = np.cos(w0); a0 = 1 + al
+        hb0 = (1 + cw) / 2 / a0; hb1 = -(1 + cw) / a0; hb2 = hb0; ha1 = -2 * cw / a0; ha2 = (1 - al) / a0
+    hx1 = 0.0; hx2 = 0.0; hy1 = 0.0; hy2 = 0.0
     # The slow wander: each partial's level, the bow's speed, and the
     # vibrato's rate and depth (a second noise stream, so the audio noise
     # stays as it was).
@@ -135,11 +151,23 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
             cents = vib_ct * (1.0 + vd) * vib_env * np.sin(phase) + jit + pdr
             ratio = 2.0 ** (cents / 1200.0)
             hz = np.minimum(hz0 * ratio, sr * 0.49)
-            turn = 2.0 * decay * np.cos(2 * np.pi * hz * k)
+            if fl_damp > 0:
+                # The flutter as the hair's grip on each partial: its loss
+                # wavers (a driven partial's level goes as 1 / loss), so only
+                # the partial's own ring moves, at no faster than it can.
+                # (with the hair on the string: it eases off as the bow lifts)
+                # (held within about fl_clip dB either way: an unbounded swing
+                # would choke a partial for a moment, a dropout)
+                swing_db = fl_clip * np.tanh(env * flut * fshape / fl_clip)
+                dk = np.exp(-sigma * np.exp(-DB * swing_db) * k)
+                fall = dk * dk
+                turn = 2.0 * dk * np.cos(2 * np.pi * hz * k)
+            else:
+                turn = 2.0 * decay * np.cos(2 * np.pi * hz * k)
             swing = 2 * np.pi * rip_c * cents / 1200.0
-            ripple = 0.5 * rip_db * (np.sin(ph1 + swing) - base1 + np.sin(ph2 + 1.618034 * swing) - base2)
+            ripple = 0.5 * rip_db * rshape * (np.sin(ph1 + swing) - base1 + np.sin(ph2 + 1.618034 * swing) - base2)
             # (glided to over the block: a step would zip)
-            out_step = (out0 * np.exp(DB * (ripple + wander + flut)) - out) / 32.0
+            out_step = (out0 * np.exp(DB * (ripple + wander + (0.0 if fl_damp > 0 else 1.0) * flut * fshape)) - out) / 32.0
         nxt = turn * q - fall * qp
         v = np.sum(shape * (nxt - qp)) * 0.5 * sr
         on = 1.0 if i < held else 0.0
@@ -173,7 +201,11 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
         if i >= held:
             level *= fade
         bridge = (np.sum(out * q) + rosin * noise_out * 1e-4) * level
-        snd = direct * bridge
+        dr = bridge
+        if use_hp:
+            dr = hb0 * bridge + hb1 * hx1 + hb2 * hx2 - ha1 * hy1 - ha2 * hy2
+            hx2 = hx1; hx1 = bridge; hy2 = hy1; hy1 = dr
+        snd = direct * dr
         for j in range(nb):
             yy = bz_b0[j] * (bridge - bx2[j]) - bz_a1[j] * by1[j] - bz_a2[j] * by2[j]
             bx2[j] = bx1[j]; bx1[j] = bridge; by2[j] = by1[j]; by1[j] = yy
@@ -202,11 +234,12 @@ def body_coeffs(inst, size=None):
 
 DEFAULT = dict(beta=0.11, loss0=0.8, loss1=3.947e-06, bright=2.144, b=1.0e-5, grip=0.5, speed=0.5, vel=80 / 127,
                vib_ct=9.0, vib_rate=5.2, vib_delay=0.25, vib_rise=0.4, swell_s=0.34, swell_amt=0.97,
-               rosin=0.02795, jitter=0.1001, rel_s=1.0, fade_db=36.96, hiss=0.0003336, hiss_hp=8000.0, top=12000.0,
+               rosin=0.01572, jitter=0.08536, rel_s=1.0, fade_db=36.96, hiss=0.0003336, hiss_hp=8000.0, top=12000.0,
                attack_scale=0.05, lp_hz=5590.0,
-               rip_db=6.737, rip_c=20.24, slow_db=2.069, slow_hz=0.6, loud_db=1.742,
-               vib_rate_dev=0.06047, vib_depth_dev=0.6121, vib_drift_hz=0.8, direct_db=-10.33, ring=16.05, lift=1.0, ring_s=0.494,
-               fl_db=2.674, fl_hz=14.95, fl_slope=0.4562, fl_hzslope=0.7853, jit_ct=0.0, jit_hz=20.0, pdrift_ct=2.881, pdrift_hz=0.5)
+               rip_db=8.507, rip_c=19.46, slow_db=2.052, slow_hz=0.6, loud_db=1.742,
+               vib_rate_dev=0.09024, vib_depth_dev=0.4561, vib_drift_hz=0.8, direct_db=-10.33, ring=16.05, lift=1.0, ring_s=0.494,
+               fl_db=19.97, fl_hz=16.51, fl_slope=0.0, fl_hzslope=0.7853, jit_ct=0.0, jit_hz=20.0, pdrift_ct=1.441, pdrift_hz=0.5,
+               fl_knee=818.2, fl_fslope=1.285, rip_knee=963.9, rip_fslope=2.074, direct_hp=152.0, fl_damp=1.0, fl_clip=30.0)
 
 
 def play(inst, note, seconds=4.8, held=4.0, seed=1, **kw):
@@ -224,4 +257,5 @@ def play(inst, note, seconds=4.8, held=4.0, seed=1, **kw):
                   SIZES[inst], p["rip_db"], p["rip_c"], p["slow_db"], p["slow_hz"], p["loud_db"],
                   p["vib_rate_dev"], p["vib_depth_dev"], p["vib_drift_hz"],
                   10 ** ((p["direct_db"] + BODY[inst].max()) / 20), p["ring"], p["lift"], p["ring_s"],
-                  p["fl_db"], p["fl_hz"], p["fl_slope"], p["fl_hzslope"], p["jit_ct"], p["jit_hz"], p["pdrift_ct"], p["pdrift_hz"])
+                  p["fl_db"], p["fl_hz"], p["fl_slope"], p["fl_hzslope"], p["jit_ct"], p["jit_hz"], p["pdrift_ct"], p["pdrift_hz"],
+                  p["fl_knee"], p["fl_fslope"], p["rip_knee"], p["rip_fslope"], p["direct_hp"], p["fl_damp"], p["fl_clip"])
