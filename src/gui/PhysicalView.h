@@ -69,19 +69,25 @@ public:
         const auto bounds = getLocalBounds().toFloat();
         IlanaTheme::paintWell (g, bounds, 8.0f);
         const auto accent = colour;
-        auto area = compact ? bounds.reduced (8.0f, 8.0f) : bounds.reduced (18.0f, 14.0f);
+        const auto excite = (int) read ("_excite");
+        // The modal guitar and the bowed string carry their own body: the instrument is drawn at the strip's
+        // left, as big as SIZE and SCALE make it, and named (UI review 30).
+        const auto modal = excite == 12 || excite == 13;
+        auto area = compact ? bounds.reduced (8.0f, modal ? 3.0f : 8.0f) : bounds.reduced (18.0f, 14.0f);
         // The body a slim band under the string, so the string keeps the
         // room (UI review 7, S7-39).
         // (The compact picture, PLAY's, has no band at all while there is no body: the string takes it.)
-        const auto noBandNeeded = compact && ! hasBody();
+        const auto noBandNeeded = compact && (modal || ! hasBody());
         const auto bodyArea = area.removeFromBottom (noBandNeeded ? 0.0f : compact ? juce::jlimit (10.0f, 18.0f, area.getHeight() * 0.2f)
                                                                                     : juce::jlimit (26.0f, 48.0f, area.getHeight() * 0.16f));
         area.removeFromBottom (noBandNeeded ? 0.0f : compact ? 4.0f : 8.0f);
         // The page's picture keeps a footer for the string's ruler (A16-4).
         const auto footer = compact ? juce::Rectangle<float>() : area.removeFromBottom (13.0f);
-        const auto stringY = area.getCentreY() + area.getHeight() * 0.12f;
-        const auto left = area.getX() + 12.0f, right = area.getRight() - 12.0f;
-        const auto excite = (int) read ("_excite");
+        const auto stringY = area.getCentreY() + (modal && compact ? 0.0f : area.getHeight() * 0.12f);
+        auto left = area.getX() + 12.0f;
+        const auto right = area.getRight() - 12.0f;
+        if (modal)
+            left = juce::jmin (right - 120.0f, paintInstrument (g, area, excite == 13, accent) + 22.0f);
         const auto strike = excitePosition();
 
         // The page's picture also carries the string's anatomy (A16-4): its
@@ -205,8 +211,11 @@ public:
         else // pluck
         {
             juce::Path pick;
-            const auto tip = juce::Point<float> (ex, stringY - 4.0f - hammerLift() * 20.0f);
-            pick.addTriangle (tip, tip.translated (-9.0f, -18.0f), tip.translated (9.0f, -18.0f));
+            // (Held inside the picture: on PLAY's short STRING strip the raised pick went past the top, as the
+            // hammer did in UI review 28, so a plucked string showed no exciter at all. UI review 30.)
+            const auto pickH = juce::jmin (18.0f, area.getHeight() * 0.42f);
+            const auto tip = juce::Point<float> (ex, juce::jmax (area.getY() + pickH + 1.0f, stringY - 4.0f - hammerLift() * juce::jmin (20.0f, area.getHeight() * 0.3f)));
+            pick.addTriangle (tip, tip.translated (-pickH * 0.5f, -pickH), tip.translated (pickH * 0.5f, -pickH));
             g.setColour (accent);
             g.fillPath (pick);
         }
@@ -280,6 +289,119 @@ private:
         return 0.0f;
     }
 
+    // The modal instruments' own picture: the body as big as SIZE makes it, the neck as long as SCALE, and
+    // beside it the name of the size (the engine's marks: violin x1, viola x1.17, cello x2.1) with both
+    // factors. Fills a fixed zone at the left of `area` whatever the size, so the string beside it never
+    // jumps; returns the zone's right edge.
+    float paintInstrument (juce::Graphics& g, juce::Rectangle<float> area, bool bowed, juce::Colour accent) const
+    {
+        const auto size = juce::jlimit (0.25f, 4.0f, read ("_modal_size"));
+        const auto scale = juce::jlimit (0.5f, 2.0f, read ("_modal_scale"));
+        const auto sizeT = (std::log2 (size) + 2.0f) / 4.0f;   // 0 at x0.25, 1 at x4
+        const auto scaleT = std::log2 (scale) + 1.0f;          // 0 at x0.5, 1 at x1, 2 at x2
+        const auto maxH = juce::jmin (area.getHeight(), 60.0f);
+        const auto aspect = bowed ? 1.7f : 1.45f;
+        const auto bodyH = maxH * (0.28f + 0.72f * std::pow (sizeT, 1.5f)); // (steep enough that a cello reads as half again a violin)
+        const auto bodyL = bodyH * aspect;
+        const auto maxBodyL = maxH * aspect;
+        const auto neckL = maxH * (0.9f + 0.75f * scaleT);
+        const auto maxNeckL = maxH * 2.4f;
+        const auto headL = maxH * 0.42f;
+        const auto midY = area.getCentreY();
+        const auto bodyX = area.getX() + 4.0f + (maxBodyL - bodyL) * 0.5f;
+
+        // The body's outline: two bouts and a waist, the lower bout (at the tail, left) the wider.
+        const auto halfHeight = [&] (float u)
+        {
+            const auto round = std::pow (std::sin (juce::MathConstants<float>::pi * juce::jlimit (0.0f, 1.0f, u)), 0.5f);
+            const auto bout = 1.0f - 0.2f * u;
+            const auto waist = 1.0f - (bowed ? 0.36f : 0.22f) * std::exp (-std::pow ((u - 0.54f) / 0.13f, 2.0f));
+            return bodyH * 0.5f * round * bout * waist;
+        };
+        juce::Path body;
+        constexpr int steps = 48;
+        for (int i = 0; i <= steps; ++i)
+        {
+            const auto u = (float) i / (float) steps;
+            const juce::Point<float> point (bodyX + bodyL * u, midY - halfHeight (u));
+            if (i == 0) body.startNewSubPath (point); else body.lineTo (point);
+        }
+        for (int i = steps; i >= 0; --i)
+        {
+            const auto u = (float) i / (float) steps;
+            body.lineTo (bodyX + bodyL * u, midY + halfHeight (u));
+        }
+        body.closeSubPath();
+
+        const auto glow = juce::jlimit (0.0f, 1.0f, bodyGlow);
+        // The neck and the head behind the body.
+        const auto neckX = bodyX + bodyL * 0.94f;
+        const auto neckH = juce::jmax (2.0f, bodyH * 0.13f);
+        g.setColour (accent.withAlpha (0.55f));
+        g.fillRect (juce::Rectangle<float> (neckX, midY - neckH * 0.5f, neckL, neckH));
+        if (bowed) // the scroll
+            g.fillEllipse (juce::Rectangle<float> (headL * 0.55f, headL * 0.55f).withCentre ({ neckX + neckL + headL * 0.2f, midY }));
+        else       // the head, with its pegs' side wider
+            g.fillRoundedRectangle (juce::Rectangle<float> (neckX + neckL - 1.0f, midY - neckH * 1.1f, headL, neckH * 2.2f), 1.5f);
+
+        g.setColour (IlanaTheme::Ui::well.interpolatedWith (accent, 0.14f + 0.22f * glow));
+        g.fillPath (body);
+        g.setColour (accent.withAlpha (0.9f));
+        g.strokePath (body, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved));
+
+        // What tells them apart at a glance: the guitar's round hole, the bowed body's two f-holes.
+        const auto bridgeX = bodyX + bodyL * 0.3f;
+        g.setColour (accent.withAlpha (0.75f));
+        if (bowed)
+        {
+            for (const auto side : { -1.0f, 1.0f })
+                g.drawLine (bodyX + bodyL * 0.38f, midY + side * bodyH * 0.2f, bodyX + bodyL * 0.6f, midY + side * bodyH * 0.14f, juce::jmax (1.0f, bodyH * 0.05f));
+        }
+        else
+            g.drawEllipse (juce::Rectangle<float> (bodyH * 0.3f, bodyH * 0.3f).withCentre ({ bodyX + bodyL * 0.64f, midY }), 1.2f);
+        g.fillRect (juce::Rectangle<float> (juce::jmax (1.5f, bodyL * 0.035f), bodyH * (bowed ? 0.22f : 0.34f)).withCentre ({ bridgeX, midY }));
+        // Its string, bridge to nut.
+        g.setColour (juce::Colours::white.withAlpha (0.75f));
+        g.drawLine (bridgeX, midY, neckX + neckL, midY, 1.0f);
+
+        // The name of the size and the two factors, on a fixed column.
+        const auto textX = area.getX() + 4.0f + maxBodyL + maxNeckL - maxBodyL * 0.06f + headL + 10.0f;
+        const auto nameFont = IlanaTheme::font (IlanaTheme::TextSize::label, true);
+        const auto textWidth = 150.0f;
+        const auto lineH = juce::jmin (area.getHeight() * 0.5f, nameFont.getHeight() + 2.0f);
+        auto text = juce::Rectangle<float> (textX, midY - lineH, textWidth, lineH * 2.0f);
+        g.setFont (nameFont);
+        g.setColour (IlanaTheme::Ui::text);
+        g.drawText (instrumentName (bowed, size), text.removeFromTop (lineH).toNearestInt(), juce::Justification::centredLeft);
+        g.setColour (IlanaTheme::Ui::text2);
+        g.drawText (juce::String::fromUTF8 ("BODY \xc3\x97") + factorText (size) + juce::String::fromUTF8 ("  NECK \xc3\x97") + factorText (scale),
+                    text.toNearestInt(), juce::Justification::centredLeft);
+        return textX + textWidth;
+    }
+
+    static juce::String factorText (float factor)
+    {
+        return juce::String (factor, std::abs (factor * 10.0f - std::round (factor * 10.0f)) < 0.05f ? 1 : 2);
+    }
+
+public:
+    // The engine's instrument marks on SIZE (ModalBowedBodies.h): the violin is x1, the viola x1.17, the cello x2.1.
+    static constexpr float violaSize = 1.17f, celloSize = 2.1f;
+
+    // What a modal body of this SIZE is called: an instrument at its mark, else where it sits between them.
+    static juce::String instrumentName (bool bowed, float size)
+    {
+        const auto atMark = [size] (float mark) { return std::abs (std::log2 (size / mark)) < 0.045f; };
+        const auto to = juce::String::fromUTF8 (" \xe2\x80\xba ");
+        if (! bowed)
+            return atMark (1.0f) ? "NYLON GUITAR" : size < 1.0f ? "SMALL GUITAR" : "BIG GUITAR";
+        if (atMark (1.0f)) return "VIOLIN";
+        if (atMark (violaSize)) return "VIOLA";
+        if (atMark (celloSize)) return "CELLO";
+        return size < 1.0f ? juce::String ("SMALL VIOLIN") : size < violaSize ? "VIOLIN" + to + "VIOLA" : size < celloSize ? "VIOLA" + to + "CELLO" : juce::String ("BIG CELLO");
+    }
+
+private:
     float excitePosition() const
     {
         const auto position = read ("_string_excite_pos");

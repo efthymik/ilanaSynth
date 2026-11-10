@@ -1158,6 +1158,20 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
         return;
 
     ++patchGeneration; // a bounce still rendering belongs to the patch that started it
+
+    // One of ilana's own presets: her file's state, loaded as the file loads.
+    if (const auto* saved = presets[(size_t) index].savedState)
+    {
+        if (const auto xml = juce::parseXML (juce::String::fromUTF8 (saved)))
+        {
+            applyFullState (juce::ValueTree::fromXml (*xml));
+            loadedPresetFile = juce::File();
+            setCurrentPresetName (presets[(size_t) index].name);
+            return;
+        }
+        jassertfalse;
+    }
+
     loadedPresetFile = juce::File();
     setCurrentPresetName (presets[(size_t) index].name);
     setPresetMeta (presets[(size_t) index].browseCategory != nullptr ? juce::String (presets[(size_t) index].browseCategory)

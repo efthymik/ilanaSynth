@@ -1367,6 +1367,31 @@ public:
         g.strokePath (notch, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 
+    // Named places on a knob's range (the slider's "ringMarks": real values, comma-separated), as small
+    // ticks on the track: SIZE's violin, viola and cello (UI review 30).
+    static void paintRingMarks (juce::Graphics& g, juce::Slider& slider, juce::Point<float> centre, float arcRadius, float lineWidth,
+                                float rotaryStartAngle, float rotaryEndAngle)
+    {
+        const auto marks = slider.getProperties()["ringMarks"].toString();
+        if (marks.isEmpty())
+            return;
+
+        for (const auto& mark : juce::StringArray::fromTokens (marks, ",", ""))
+        {
+            const auto proportion = (float) slider.valueToProportionOfLength (mark.getDoubleValue());
+            if (! std::isfinite (proportion))
+                continue;
+            const auto angle = rotaryStartAngle + juce::jlimit (0.0f, 1.0f, proportion) * (rotaryEndAngle - rotaryStartAngle);
+            const auto dir = juce::Point<float> (std::cos (angle - juce::MathConstants<float>::halfPi),
+                                                 std::sin (angle - juce::MathConstants<float>::halfPi));
+            juce::Path tick;
+            tick.startNewSubPath (centre + dir * (arcRadius - lineWidth * 0.5f));
+            tick.lineTo (centre + dir * (arcRadius + lineWidth * 0.5f));
+            g.setColour (IlanaTheme::Ui::well.withAlpha (slider.isEnabled() ? 0.95f : 0.5f));
+            g.strokePath (tick, juce::PathStrokeType (1.6f));
+        }
+    }
+
     // Where a dragged knob started (KnobSlider sets "dragGhostPos" on the
     // press and "dragGhostRelease" on the release): a white tick on the
     // track at the starting value and a faint stretch to where it is now,
@@ -1475,6 +1500,7 @@ public:
 
         paintDragGhost (g, slider, centre, arcRadius, lineWidth, angle, rotaryStartAngle, rotaryEndAngle);
         paintDefaultNotch (g, slider, centre, arcRadius, lineWidth, hover, sliderPos, rotaryStartAngle, rotaryEndAngle);
+        paintRingMarks (g, slider, centre, arcRadius, lineWidth, rotaryStartAngle, rotaryEndAngle);
 
         if (flare > 0.01f || (hover > 0.01f && hover < 0.99f))
             slider.repaint();
@@ -1586,6 +1612,7 @@ public:
 
         paintDragGhost (g, slider, centre, arcRadius, lineWidth, angle, rotaryStartAngle, rotaryEndAngle);
         paintDefaultNotch (g, slider, centre, arcRadius, lineWidth, hover, sliderPos, rotaryStartAngle, rotaryEndAngle);
+        paintRingMarks (g, slider, centre, arcRadius, lineWidth, rotaryStartAngle, rotaryEndAngle);
 
         // The cap: ink 3 with a hairline rim, a touch lighter on hover.
         const auto bodyRadius = arcRadius - 4.0f;

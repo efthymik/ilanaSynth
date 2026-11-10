@@ -450,7 +450,7 @@ inline void groupExciteMenu (ComboControl& control)
 // WARP's menu in groups, and FM and Ring saying which oscillator they use
 // (review 23: they read a fixed one, OSC 2 into OSC 1 and OSC 1 into the others, and
 // the menu never said). The items keep their ids, so the saved choice is unchanged.
-inline void groupWarpMenu (ComboControl& control, int osc, std::function<bool (int)> isShown)
+inline void groupWarpMenu (ComboControl& control, int osc, std::function<bool (int)> isShown, bool stageTwo = false)
 {
     auto& box = control.getComboBox();
     const auto source = osc == 0 ? 1 : 0;
@@ -458,30 +458,46 @@ inline void groupWarpMenu (ComboControl& control, int osc, std::function<bool (i
     const auto fmText = "FM from OSC " + juce::String (source + 1);
     const auto ringText = "Ring with OSC " + juce::String (source + 1);
 
-    if (box.getNumItems() > Warp::NoiseFm)
-        box.changeItemText (Warp::NoiseFm + 1, "FM from Noise");
-
-    if (box.getNumItems() > Warp::Ring)
+    // A mode's place in this menu: WARP lists the modes in their own order;
+    // WARP 2 has FM, Ring and FM Noise appended (UI review 30: its menu
+    // never named the oscillator they read).
+    const auto choiceFor = [stageTwo] (int mode)
     {
-        box.changeItemText (Warp::Fm + 1, fmText);
-        box.changeItemText (Warp::Ring + 1, ringText);
+        if (! stageTwo)
+            return mode;
+        for (int choice = 0; choice < Warp::getStageTwoNames().size(); ++choice)
+            if (Warp::modeForStageTwoChoice (choice) == mode)
+                return choice;
+        return 0;
+    };
+
+    // (WARP 2's name is longer and its menu no wider, so the menu itself shows the short form, "FM OSC 2",
+    // behind the oscillator's dot; the list it opens spells both out.)
+    const auto osc2 = "OSC " + juce::String (source + 1);
+    if (box.getNumItems() > choiceFor (Warp::NoiseFm))
+        box.changeItemText (choiceFor (Warp::NoiseFm) + 1, stageTwo ? "FM Noise" : "FM from Noise");
+
+    if (box.getNumItems() > choiceFor (Warp::Ring))
+    {
+        box.changeItemText (choiceFor (Warp::Fm) + 1, stageTwo ? "FM " + osc2 : fmText);
+        box.changeItemText (choiceFor (Warp::Ring) + 1, stageTwo ? "Ring " + osc2 : ringText);
         box.setSelectedId (0, juce::dontSendNotification);
         box.setSelectedId (selectedId, juce::dontSendNotification);
     }
 
     box.getProperties().set ("valueDot", (int) IlanaTheme::oscColour (source).getARGB());
-    box.getProperties().set ("valueDotPrefixes", "FM from OSC|Ring with");
+    box.getProperties().set ("valueDotPrefixes", "FM from OSC|Ring with|FM OSC|Ring OSC");
 
-    control.setPopupOverride ([combo = &box, source, osc, isShown, fmText, ringText]
+    control.setPopupOverride ([combo = &box, source, osc, isShown, fmText, ringText, choiceFor]
     {
         juce::PopupMenu menu;
         const auto current = combo->getSelectedId();
         const auto add = [&] (int mode, const juce::String& text, const juce::String& note = {}, bool enabled = true)
         {
             juce::PopupMenu::Item item (text);
-            item.itemID = mode + 1;
+            item.itemID = choiceFor (mode) + 1;
             item.isEnabled = enabled;
-            item.isTicked = current == mode + 1;
+            item.isTicked = current == choiceFor (mode) + 1;
             item.shortcutKeyDescription = note;
             menu.addItem (item);
         };
@@ -1292,6 +1308,7 @@ public:
             controls[(size_t) i]->setColour (oscColour (i));
             groupExciteMenu (controls[(size_t) i]->excite);
             groupWarpMenu (controls[(size_t) i]->warp, i, [this] (int other) { return processorRef.isOscillatorShown (other); });
+            groupWarpMenu (controls[(size_t) i]->warp2, i, [this] (int other) { return processorRef.isOscillatorShown (other); }, true);
             waveDisplays[(size_t) i] = std::make_unique<WaveDisplay> (
                 p, prefix + "_table", prefix + "_frame", prefix + "_unison",
                 prefix + "_spread", prefix + "_detune", false, juce::String {},
@@ -2537,9 +2554,14 @@ private:
             { "Feedback", "Driven. The amp pushes sound back at the string.", { { "M15 5A6 6 0 1 0 15 11M12 2L16 5 12 7M5 8H11", 1.5f } } },
             { "Modal Piano", "Strike. A measured grand, partial by partial.", { { "M1 8H17V15H1ZM6 8V15M12 8V15", 1.1f }, { "M1 4Q3 1 5 4T9 4T13 4T17 4", 1.2f } } },
             { "Modal Guitar", "Pluck. A measured nylon guitar, partial by partial; SIZE the box, SCALE the neck.",
-              { { "M3 10A4 4 0 1 0 9 14A3 3 0 1 0 9 8L16 2", 1.5f }, { "M6 11H6.1", 2.0f } } },
+              // (A filled guitar, body low and neck up to the right: the outline read as a hook. UI review 30.)
+              { { "M1.3 11.2A4.1 4.1 0 1 0 9.5 11.2A4.1 4.1 0 1 0 1.3 11.2ZM6.6 7.4A3 3 0 1 0 12.6 7.4A3 3 0 1 0 6.6 7.4Z", 0.0f },
+                { "M11 6L15.6 1.9", 1.8f }, { "M14.6 0.9L16.8 3.1", 1.7f } } },
             { "Modal Bowed", "Bow. A bowed string's modes in a body: SIZE flows violin, viola, cello.",
-              { { "M7 2Q4 5 6 8Q4 11 7 15H10Q13 11 11 8Q13 5 10 2Z", 1.4f }, { "M1 13L17 5", 1.2f } } } };
+              // (A filled violin, upright, waisted, its bow behind it: the outline with a line through read as a struck-out 8.)
+              { { "M9 4.5C6.5 4.5 5.4 6 5.9 7.5C6.2 8.3 7.1 8.6 7.1 9.2C7.1 9.8 5 10.5 5 12.5C5 14.6 7 15.6 9 15.6C11 15.6 13 14.6 13 12.5"
+                  "C13 10.5 10.9 9.8 10.9 9.2C10.9 8.6 11.8 8.3 12.1 7.5C12.6 6 11.5 4.5 9 4.5Z", 0.0f },
+                { "M9 0.8V5", 1.7f }, { "M1 13.5L17 6.5", 1.2f } } } };
     }
 
     juce::String physicalHint (int osc) const
@@ -4651,6 +4673,11 @@ private:
             physical[(size_t) index]->hammer.setLabelText (exciteNow == 12 ? "PLUCK" : exciteNow == 13 ? "VIBRATO" : "HAMMER");
             physical[(size_t) index]->slap.setLabelText (exciteNow == 13 ? "PIZZ" : "SLAP");
             physical[(size_t) index]->bridgeBuzz.setLabelText (exciteNow == 13 ? "WOLF" : "BUZZ");
+            // (SIZE's ring carries the bowed body's marks: violin, viola, cello. The STRING picture names them.)
+            if (auto& sizeSlider = physical[(size_t) index]->modalSize.getSlider(); exciteNow == 13)
+                sizeSlider.getProperties().set ("ringMarks", "1," + juce::String (PhysicalView::violaSize) + "," + juce::String (PhysicalView::celloSize));
+            else
+                sizeSlider.getProperties().remove ("ringMarks");
 
             for (const auto& slot : slotsFor (index))
                 slot.item->setVisible (true);

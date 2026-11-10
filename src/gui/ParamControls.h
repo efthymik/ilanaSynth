@@ -1845,6 +1845,11 @@ public:
         if (value.length() == 4 && juce::CharacterFunctions::isDigit (value[0]) && value[1] == '.')
             value = juce::String (value.getDoubleValue(), 1);
 
+        // A small dial (the wave card's AMT knobs, 19 units) has no room for two lines: the number
+        // came to sit on the ring (UI review 30). A % there goes without saying, so the number stands alone.
+        if (packedD < 22.0f && unit == "%")
+            unit = {};
+
         // (While a value is typed over the dial, the box is the value.)
         if (valueEditor != nullptr)
             value = unit = {};
@@ -1855,7 +1860,7 @@ public:
         if (hot != nullptr)
         {
             value = hotDepthText (*hot);
-            unit = "%";
+            unit = packedD < 22.0f ? "" : "%";
             hotColour = modSourceColour (hot->source);
         }
 

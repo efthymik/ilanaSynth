@@ -600,13 +600,72 @@ void runPlayOscReview7Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudi
                     return 1;
             return 0;
         };
+        // (Init's two oscillators fit the pad to the Slider, which uses X only: VECTOR Y then stays out, UI review 30.)
+        const auto wantedChips = processor.getVectorShape() == VectorShape::slider ? 1 : 2;
         const auto barChips = inBar (Mod::Source::VectorX) + inBar (Mod::Source::VectorY);
         setParam ("vec_on", 0.0f);
         settle (300);
         const auto offChips = inBar (Mod::Source::VectorX);
         expect (dim && lit, "VECTOR: off, X dims and says VECTOR is off; on, it lights");
         expect (cornerTexts.replace (": none", "").replace (": off", "") == "OSC 1|OSC 2|OSC 3|OSC 4", "VECTOR: the corners read OSC 1..4 (" + cornerTexts + ")");
-        expect (barChips == 2 && offChips == 0, "VEC X / VEC Y are in the chip bar while VECTOR is on (" + juce::String (barChips) + ")");
+        expect (barChips == wantedChips && offChips == 0, "VEC X / VEC Y are in the chip bar while VECTOR is on (" + juce::String (barChips) + ")");
+    }
+
+    // UI review 30: the Slider shape uses X only, so Y dims and VECTOR Y leaves the chip bar; a corner on an
+    // oscillator the patch doesn't have is a "+ ADD OSC n" button, one undo step.
+    {
+        setParam ("vec_on", 1.0f);
+        setParam ("vec_shape", (float) VectorShape::slider);
+        editor.showPage ("VECTOR");
+        settle (300);
+        auto* x = knobFor ("vec_x");
+        auto* y = knobFor ("vec_y");
+        const auto sliderDims = x != nullptr && y != nullptr && x->getAlpha() > 0.99f && y->getAlpha() < 0.9f;
+        editor.showPage ("MAIN");
+        settle (300);
+        std::vector<ModSourceChip*> chips;
+        findAll<ModSourceChip> (editor, chips);
+        auto xChip = false, yChip = false;
+        for (auto* chip : chips)
+            if (visibleInTree (chip))
+            {
+                xChip = xChip || chip->getSourceIndex() == (int) Mod::Source::VectorX;
+                yChip = yChip || chip->getSourceIndex() == (int) Mod::Source::VectorY;
+            }
+        expect (sliderDims && xChip && ! yChip, "VECTOR: the Slider shape dims Y and keeps only VECTOR X in the chip bar");
+
+        setParam ("vec_shape", (float) VectorShape::hexagon);
+        editor.showPage ("VECTOR");
+        settle (300);
+        auto* pad = findChild<VectorPadDisplay> (editor);
+        if (pad != nullptr)
+            pad->createComponentSnapshot (pad->getLocalBounds()); // (the pills are placed as they are painted)
+        auto corner = -1;
+        for (int c = 0; pad != nullptr && c < processor.getVectorCornerCount(); ++c)
+            if (! processor.isOscillatorShown (processor.getVectorCorner (c)) && ! pad->addPillBounds (c).isEmpty() && corner < 0)
+                corner = c;
+        expect (corner >= 0, "VECTOR: a Hexagon corner on a missing oscillator shows + ADD OSC");
+        if (corner >= 0)
+        {
+            const auto osc = processor.getVectorCorner (corner);
+            const auto at = pad->addPillBounds (corner).getCentre();
+            const juce::MouseEvent down (juce::Desktop::getInstance().getMainMouseSource(), at, {}, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                         pad, pad, juce::Time::getCurrentTime(), at, juce::Time::getCurrentTime(), 1, false);
+            processor.getUndoManager().clearUndoHistory();
+            pad->mouseDown (down);
+            pad->mouseUp (down);
+            settle (300);
+            pad->createComponentSnapshot (pad->getLocalBounds());
+            const auto added = processor.isOscillatorShown (osc) && pad->addPillBounds (corner).isEmpty();
+            const auto steps = processor.getUndoManager().getUndoDescriptions();
+            processor.getUndoManager().undo();
+            settle (300);
+            expect (added && steps.size() == 1 && ! processor.isOscillatorShown (osc),
+                    "VECTOR: + ADD OSC " + juce::String (osc + 1) + " adds the oscillator in one undo step (" + steps.joinIntoString ("|") + ")");
+        }
+        setParam ("vec_shape", (float) VectorShape::square);
+        setParam ("vec_on", 0.0f);
+        settle (200);
     }
 
     // A Physical oscillator's card: the moving string in its well, STRING and
@@ -686,7 +745,7 @@ void runSmallThingsTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioPr
             const auto closedHeight = tutorial->panelBounds().getHeight();
             tutorial->setWhatsNewOpen (true);
             settle (100);
-            expect (tutorial->panelBounds().getHeight() > closedHeight && tutorial->panelBounds().getHeight() < 470, // (the 720 px column wraps the pills to three rows: S11-16)
+            expect (tutorial->panelBounds().getHeight() > closedHeight && tutorial->panelBounds().getHeight() < 520, // (the 720 px column wraps the pills to five rows since UI review 30; the panel still clears the window by 200 px)
                     "opening WHAT'S NEW grows the panel (" + juce::String (closedHeight) + " to " + juce::String (tutorial->panelBounds().getHeight()) + " px)");
             expect (tutorial->chipBounds().size() == features.size(), "every tour chip fits on the panel ("
                                                                           + juce::String ((int) tutorial->chipBounds().size()) + " of "
@@ -7990,6 +8049,22 @@ int runUiTests()
             // (18, 8): the title strip, left of the source name (SourcePopover::padding is 4).
             const auto onStrip = popover != nullptr && popover->getComponentAt (juce::Point<int> (18, 8)) == popover;
             expect (onCross && onStrip, "an LFO's pop-up: the cross and the title strip take the mouse (close, hover, drag)");
+            // UI review 30 (S8): a shape drawn by hand gets a pop-up twice as wide, all of it graph; back
+            // on a plain shape it is ilana's compact card again.
+            if (popover != nullptr)
+            {
+                const auto lfo = Mod::lfoIndexFor ((Mod::Source) chip->getSourceIndex());
+                auto* shape = processor.apvts.getParameter ("lfo" + juce::String (lfo + 1) + "_shape");
+                const auto before = shape->getValue();
+                const auto compactWidth = popover->getWidth();
+                shape->setValueNotifyingHost (shape->convertTo0to1 (7.0f)); // Steps
+                settle (300);
+                const auto wideWidth = popover->getWidth();
+                shape->setValueNotifyingHost (before);
+                settle (300);
+                expect (wideWidth >= compactWidth + 200 && popover->getWidth() == compactWidth && editor->getLocalBounds().contains (popover->getBounds()),
+                        "an LFO's pop-up: Steps widens the graph (" + juce::String (compactWidth) + " to " + juce::String (wideWidth) + " px), a plain shape is compact again");
+            }
             if (cross != nullptr)
                 cross->triggerClick();
             settle (200);
@@ -10507,6 +10582,12 @@ int main (int argc, char** argv)
         tutorial->setVisible (true);
         tutorial->toFront (false);
         settle (200);
+        // (ILANA_SNAPSHOT_TOUR_NEW: with WHAT'S NEW open.)
+        if (juce::SystemStats::getEnvironmentVariable ("ILANA_SNAPSHOT_TOUR_NEW", "").isNotEmpty())
+        {
+            tutorial->setWhatsNewOpen (true);
+            settle (200);
+        }
         save (*editor, outDir.getChildFile ("00-tutorial.png"));
         tutorial->setVisible (false);
     }
