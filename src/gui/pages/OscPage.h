@@ -4669,9 +4669,10 @@ private:
             const juce::String prefix (OscillatorIds::prefixes[(size_t) index]);
             const auto exciteNow = juce::roundToInt (readFloat (prefix + "_excite"));
             osc.stringSustain.setLabelText (exciteNow == 10 ? "FEEDBACK" : "SUSTAIN");
-            // (The modal guitar's HAMMER is its pluck; the bowed string's its vibrato and SLAP its pizzicato.)
+            // (The modal guitar's HAMMER is its pluck; the bowed string's its vibrato, SLAP its pizzicato and BUZZ its wolf.)
             physical[(size_t) index]->hammer.setLabelText (exciteNow == 12 ? "PLUCK" : exciteNow == 13 ? "VIBRATO" : "HAMMER");
             physical[(size_t) index]->slap.setLabelText (exciteNow == 13 ? "PIZZ" : "SLAP");
+            physical[(size_t) index]->bridgeBuzz.setLabelText (exciteNow == 13 ? "WOLF" : "BUZZ");
             // (SIZE's ring carries the bowed body's marks: violin, viola, cello. The STRING picture names them.)
             if (auto& sizeSlider = physical[(size_t) index]->modalSize.getSlider(); exciteNow == 13)
                 sizeSlider.getProperties().set ("ringMarks", "1," + juce::String (PhysicalView::violaSize) + "," + juce::String (PhysicalView::celloSize));
