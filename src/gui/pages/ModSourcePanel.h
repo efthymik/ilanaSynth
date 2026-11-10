@@ -897,6 +897,8 @@ public:
     static constexpr int compactHeader = 26, compactInset = 8, compactTop = 6, routesGap = 6;
     // (390: the envelope's graph about as wide as the LFO's, ilana 2026-10-29; 410: five switch pills in the LFO column at the real fonts.)
     static constexpr int envCardWidth = 390, lfoCardWidth = 410;
+    // (A drawn LFO shape or the MSEG: the graph twice as wide, UI review 30.)
+    static constexpr int lfoWideExtra = 210;
     // (OP PITCH's and OP LFO's DX7 editors, compact as the others (UI review 26): the graph and a column of ring knobs.)
     static constexpr int operatorGraphWidth = 196;
 
@@ -909,7 +911,7 @@ public:
         const auto editorHeight = opPitch ? OperatorEnvEditor::compactHeight : kind == Kind::lfo ? (lfoSection != nullptr ? lfoSection->compactHeight() : 120) : EnvSection::compactHeight;
         const auto width = opPitch ? 2 * compactInset + operatorGraphWidth + OperatorEnvEditor::compactGap + OperatorEnvEditor::compactColumn
                          : opLfo   ? 2 * compactInset + operatorGraphWidth + OperatorLfoEditor::compactGap + OperatorLfoEditor::compactColumn
-                         : kind == Kind::lfo ? lfoCardWidth : envCardWidth;
+                         : kind == Kind::lfo ? lfoCardWidth + (lfoSection != nullptr && lfoSection->compactWantsWideGraph() ? lfoWideExtra : 0) : envCardWidth;
         return { 2 * padding + width,
                  2 * padding + compactHeader + compactTop + editorHeight + routesGap + routesHeight() + compactInset };
     }

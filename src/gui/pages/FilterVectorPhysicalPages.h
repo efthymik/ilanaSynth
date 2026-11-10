@@ -458,8 +458,13 @@ public:
         // Off, the whole block dims and says why, as every card's controls
         // do (one rule, EffectRules: UI review 7, V7-21).
         for (juce::Component* control : { (juce::Component*) &path, (juce::Component*) &shape, (juce::Component*) &x,
-                                          (juce::Component*) &y, (juce::Component*) &drift, (juce::Component*) &driftRate })
+                                          (juce::Component*) &drift, (juce::Component*) &driftRate })
             effectRules.add (*control, effectRules.isOn ("vec_on"), "VECTOR is off", [] { return FilterColours::offAlpha; });
+        // Y too, and on a slider (X only, Y held at the centre) it takes the lighter dim of an idle control: it
+        // looked live there and did nothing (UI review 30).
+        effectRules.add (y, [this] { return readParam ("vec_on") > 0.5f && processorRef.getVectorShape() != VectorShape::slider; },
+                         "The Slider shape uses X only",
+                         [this] { return readParam ("vec_on") > 0.5f ? IlanaTheme::dimmedAlpha : FilterColours::offAlpha; });
         for (auto& corner : cornerMenus)
             effectRules.add (*corner, effectRules.isOn ("vec_on"), "VECTOR is off", [] { return FilterColours::offAlpha; });
         // (The corners' pictures too, as the pad: off, nothing in the card stays lit, UI review 26.)
