@@ -42,7 +42,8 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
            fl_knee, fl_fslope, rip_knee, rip_fslope, direct_hp, fl_damp, fl_clip,
            direct_lp, rosin_hp, jit_hp,
            ob_db, ob_knee, ob_slope, ob_s,
-           room_g, room_len, room_fb, room_p, rloss, rpow):
+           room_g, room_len, room_fb, room_p, rloss, rpow,
+           ob_ksz, sw_sz):
     k = 1.0 / sr
     n_ = np.arange(1, modes + 1).astype(np.float64)
     shape = np.sin(n_ * np.pi * beta)
@@ -76,6 +77,8 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
     bite_fall = np.exp(-1.0 / (0.08 * sr))
     env = 0.0; bite = 1.0; s = seed; swell = 0.0; senv = 0.0
     sc = 1.0 - np.exp(-1.0 / (max(1e-3, swell_s) * sr))
+    # (round 7: and builds size ** sw_sz slower on a bigger body; the release as it was)
+    sc_on = 1.0 - np.exp(-1.0 / (max(1e-3, swell_s * size ** sw_sz) * sr))
     hp_state = 0.0; hp_prev = 0.0
     hp_a = np.exp(-2 * np.pi * hiss_hp / sr)
     phase = 0.0; vib_env = 0.0
@@ -148,7 +151,10 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
     # (hz / ob_knee) ** ob_slope below it), and comes back over ob_s
     # (Spitfire's upper partials build up after the fundamental, where the
     # twin's came in first). Block rate, glided with the ripple's gains.
-    obshape = ob_db * np.minimum(1.0, (hz0 / ob_knee) ** ob_slope)
+    # (Round 7: on a bigger body the darkening reaches lower, the knee at
+    # ob_knee / size ** ob_ksz: a cello's upper partials come in later. None
+    # on a violin.)
+    obshape = ob_db * np.minimum(1.0, (hz0 / (ob_knee * size ** -ob_ksz)) ** ob_slope)
     ob_now = obshape.copy()
     out = out0 * np.exp(-DB * ob_now)
     # The room (round 6): four delay lines (room_len samples) mixed by a
@@ -225,7 +231,7 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
         v = np.sum(shape * (nxt - qp)) * 0.5 * sr
         on = 1.0 if i < held else 0.0
         env += (on - env) * (ac if on > 0 else rc)
-        swell += (on - swell) * sc
+        swell += (on - swell) * (sc_on if on > 0 else sc)
         # The bow's speed: lift > 0 keeps it going as the bow leaves the
         # string (a lift, not a stop that brakes the string).
         fac = env * (1.0 - swell_amt + swell_amt * swell)
@@ -322,7 +328,9 @@ DEFAULT = dict(beta=0.11, loss0=0.8, loss1=3.947e-06, bright=2.144, b=1.0e-5, gr
                fl_knee=818.2, fl_fslope=1.285, rip_knee=963.9, rip_fslope=2.074, direct_hp=96.61, fl_damp=1.0, fl_clip=30.0,
                direct_lp=20000.0, rosin_hp=0.0, jit_hp=0.0,
                ob_db=15.04, ob_knee=1990.0, ob_slope=2.82, ob_s=0.1429,
-               room_db=-2.5, room_sz=-19.28, room_ms=18.44, room_lo=38.88, room_hi=159.5, rloss=23.94, rpow=3.2245)
+               ob_ksz=1.0, sw_sz=0.8,
+               room_db=-2.5, room_sz=-4.544, room_ms=18.44, room_lo=38.88, room_hi=159.5, rloss=23.94, rpow=3.2245,
+               room_lk=1.086, room_hk=0.351, rloss_k=5.146)
 
 
 ROOM_RATIOS = np.array([0.8013, 0.9137, 1.0798, 1.2052])  # (the lines' lengths against room_ms, near-even, coprime once rounded)
@@ -360,8 +368,14 @@ def play(inst, note, seconds=4.8, held=4.0, seed=1, **kw):
     # The register's brightness: the upper strings lose less up high.
     loss1 = p["loss1"] * (f0 / 440.0) ** -p["bright"]
     b0, a1, a2, g = body_coeffs(inst)
-    # (room_sz: the room's level in dB per doubling of the body's size against a violin)
-    rg, rl, rfb, rp = room_coeffs(dict(p, room_db=p["room_db"] + p["room_sz"] * np.log2(SIZES[inst])))
+    # (room_sz: the room's level in dB per doubling of the body's size against a
+    # violin; round 7: a bigger body's room also rings longer and darker, its
+    # decays room_lo and room_hi times size ^ room_lk and size ^ room_hk, and
+    # its released partials lose more up high, rloss times size ^ rloss_k: all
+    # 1 at a violin's size)
+    sz = SIZES[inst]
+    rg, rl, rfb, rp = room_coeffs(dict(p, room_db=p["room_db"] + p["room_sz"] * np.log2(sz),
+                                       room_lo=p["room_lo"] * sz ** p["room_lk"], room_hi=p["room_hi"] * sz ** p["room_hk"]))
     return kernel(f0, int(seconds * SR), int(held * SR), SR, modes, p["beta"], p["loss0"], loss1, p["b"], p["grip"],
                   0.05 + 0.3 * p["speed"], p["vel"], seed, p["vib_ct"], p["vib_rate"], p["vib_delay"], p["vib_rise"],
                   attack, p["swell_s"], p["swell_amt"], p["rosin"], p["jitter"], p["rel_s"], p["fade_db"],
@@ -373,4 +387,5 @@ def play(inst, note, seconds=4.8, held=4.0, seed=1, **kw):
                   p["fl_knee"], p["fl_fslope"], p["rip_knee"], p["rip_fslope"], p["direct_hp"], p["fl_damp"], p["fl_clip"],
                   p["direct_lp"], p["rosin_hp"], p["jit_hp"],
                   p["ob_db"], p["ob_knee"], p["ob_slope"], max(1e-3, p["ob_s"]),
-                  rg, rl, rfb, rp, p["rloss"], p["rpow"])
+                  rg, rl, rfb, rp, p["rloss"] * sz ** p["rloss_k"], p["rpow"],
+                  p["ob_ksz"], p["sw_sz"])

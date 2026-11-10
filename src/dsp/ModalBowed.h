@@ -82,7 +82,7 @@ public:
     {
         sampleRate = newSampleRate;
         bodyDirty = modesDirty = true;
-        updateRoom();
+        updateRoom (true);
         reset();
     }
 
@@ -243,7 +243,7 @@ public:
         {
             // The envelope: the bow sets on over attackSeconds, eases off on release.
             envelope += ((noteHeld ? 1.0f : 0.0f) - envelope) * (noteHeld ? attackCoefficient : releaseCoefficient);
-            swell += ((noteHeld ? 1.0f : 0.0f) - swell) * swellCoefficient;
+            swell += ((noteHeld ? 1.0f : 0.0f) - swell) * (noteHeld ? swellOnCoefficient : swellCoefficient);
             if (envelope > 1.0e-5f)
             {
                 seed = seed * 1664525u + 1013904223u;
@@ -549,9 +549,10 @@ private:
             turn[n] = (float) (2.0 * decay * std::cos (juce::MathConstants<double>::twoPi * hz * k));
             modeHz[n] = (float) hz;
             // (once let go, the mode loses releaseLossHz more a second at 1 kHz, by (hz / 1 kHz) ^ releaseLossSlope)
-            releaseLoss[n] = (float) ((double) releaseLossHz * std::pow (hz / 1000.0, (double) releaseLossSlope));
             flutterShape[n] = (float) juce::jmin (1.0, std::pow (hz / (double) flutterKnee, (double) flutterFreqSlope));
-            onsetDark[n] = (float) (onsetDarkDb * juce::jmin (1.0, std::pow (hz / (double) onsetDarkKnee, (double) onsetDarkSlope)));
+            // (once let go, the mode loses releaseLossHz more a second at 1 kHz, by (hz / 1 kHz) ^ releaseLossSlope)
+            releaseLoss[n] = (float) ((double) releaseLossHz * std::pow (fittedSize(), (double) releaseLossSizeSlope) * std::pow (hz / 1000.0, (double) releaseLossSlope));
+            onsetDark[n] = (float) (onsetDarkDb * juce::jmin (1.0, std::pow (hz * std::pow (fittedSize(), (double) onsetDarkKneeSize) / (double) onsetDarkKnee, (double) onsetDarkSlope)));
             fall[n] = (float) (decay * decay);
             shape[n] = (float) std::sin (index * juce::MathConstants<double>::pi * (double) bowAt);
             shapeSum += (double) shape[n] * shape[n];
@@ -580,6 +581,8 @@ private:
         attackCoefficient = (float) (1.0 - std::exp (-1.0 / (attackSeconds () * sampleRate)));
         releaseCoefficient = (float) (1.0 - std::exp (-1.0 / (releaseSeconds * sampleRate)));
         swellCoefficient = (float) (1.0 - std::exp (-1.0 / (swellSeconds * sampleRate)));
+        swellOnCoefficient = (float) (1.0 - std::exp (-1.0 / (swellSeconds * std::pow (fittedSize(), swellSize) * sampleRate)));
+        sizeTermsAt = bodySize;
         hissPole = (float) std::exp (-juce::MathConstants<double>::twoPi * 8000.0 / sampleRate);
         tiltPole = (float) std::exp (-juce::MathConstants<double>::twoPi * juce::jmin ((double) tiltHz, sampleRate * 0.45) / sampleRate);
         biteFall = (float) std::exp (-1.0 / (0.08 * sampleRate));
@@ -595,7 +598,31 @@ private:
     // line's gain for roomLowDecay dB a second at DC and its low-pass's pole
     // for roomHighDecay dB a second at 4 kHz, and the return for a wet level
     // of roomDb (energy, against the dry note, for a broad noise).
-    void updateRoom()
+    // SIZE for the round 7 terms: the default reads back a hair under 1
+    // (0.99999994), taken as 1 so the fitted violin plays as it did.
+    double fittedSize() const { return std::abs (bodySize - 1.0f) < 1.0e-4f ? 1.0 : (double) bodySize; }
+
+    // The terms SIZE scales that the modes also need (round 7: the cello's
+    // onset, swell and released partials): set with the modes, and redone
+    // here when SIZE moves on its own.
+    void updateSizeTerms()
+    {
+        const auto size = fittedSize();
+        const auto lossAtSize = (double) releaseLossHz * std::pow (size, (double) releaseLossSizeSlope);
+        const auto knee = (double) onsetDarkKnee / std::pow (size, (double) onsetDarkKneeSize);
+        for (int n = 0; n < modes; ++n)
+        {
+            const auto hz = (double) modeHz[n];
+            // (once let go, the mode loses releaseLossHz more a second at 1 kHz, by (hz / 1 kHz) ^ releaseLossSlope)
+            releaseLoss[n] = (float) (lossAtSize * std::pow (hz / 1000.0, (double) releaseLossSlope));
+            onsetDark[n] = (float) (onsetDarkDb * juce::jmin (1.0, std::pow (hz / knee, (double) onsetDarkSlope)));
+        }
+        swellOnCoefficient = (float) (1.0 - std::exp (-1.0 / (swellSeconds * std::pow (size, swellSize) * sampleRate)));
+        sizeTermsAt = bodySize;
+    }
+
+    // (allocate: prepare only; SIZE changes just the decays, not the lines.)
+    void updateRoom (bool allocate)
     {
         static constexpr double ratios[roomLines] { 0.8013, 0.9137, 1.0798, 1.2052 };
         const auto isPrime = [] (int n) { for (int k = 3; k * k <= n; k += 2) if (n % k == 0) return false; return true; };
@@ -610,21 +637,24 @@ private:
             roomStart[r] = total;
             total += length;
             const auto seconds = (double) length / sampleRate;
-            const auto feed = std::pow (10.0, -roomLowDecay * seconds / 20.0);
-            const auto extra = juce::jmax (0.0, roomHighDecay - roomLowDecay) * seconds; // (dB more per pass at 4 kHz)
+            const auto lowDecay = roomLowDecay * std::pow (fittedSize(), roomLowSizeSlope);
+            const auto highDecay = roomHighDecay * std::pow (fittedSize(), roomHighSizeSlope);
+            const auto feed = std::pow (10.0, -lowDecay * seconds / 20.0);
+            const auto extra = juce::jmax (0.0, highDecay - lowDecay) * seconds; // (dB more per pass at 4 kHz)
             const auto c = (std::pow (10.0, extra / 10.0) - 1.0) / (2.0 * (1.0 - std::cos (juce::MathConstants<double>::twoPi * 4000.0 / sampleRate)));
             const auto pole = c > 1.0e-12 ? ((2.0 * c + 1.0) - std::sqrt (4.0 * c + 1.0)) / (2.0 * c) : 0.0;
             roomPole[r] = (float) pole;
             roomFeed[r] = (float) (feed * (1.0 - pole));
             meanSquare += feed * feed / roomLines;
         }
-        roomBuffer.assign ((size_t) total, 0.0f);   // (prepare only: about 14 KB at 48 kHz)
+        if (allocate)
+            roomBuffer.assign ((size_t) total, 0.0f);   // (prepare only: about 14 KB at 48 kHz)
         roomScale = std::sqrt ((1.0 - meanSquare) / roomLines);
         updateRoomReturn();
     }
 
     // The room's return: roomDb for a violin, roomSizeDb more per doubling of the body's size.
-    void updateRoomReturn() { roomReturn = (float) (std::pow (10.0, (roomDb + roomSizeDb * std::log2 ((double) bodySize)) / 20.0) * roomScale); }
+    void updateRoomReturn() { roomReturn = (float) (std::pow (10.0, (roomDb + roomSizeDb * std::log2 ((double) bodySize) + roomSizeDbMore * std::log2 (fittedSize())) / 20.0) * roomScale); }
 
     // The bow's contact: a low string takes longer to speak (as on the Bow
     // exciter); the swell after it shapes the note's rise.
@@ -633,7 +663,9 @@ private:
     void updateBody()
     {
         bodyDirty = false;
-        updateRoomReturn();
+        updateRoom (false);
+        if (bodySize != sizeTermsAt)
+            updateSizeTerms();
         using B = ModalBowedBodies;
         // Which instruments' gains, and how far between them (log size).
         const auto size = (double) bodySize;
@@ -713,11 +745,11 @@ private:
     bool silent = true, modesDirty = true, bodyDirty = true, plucked = false, ecoOn = false;
     float loss0 = 0.8f, loss1 = 3.0e-5f, inharmonic = 1.0e-5f, bowAt = 0.11f;
     float grip = 0.5f, bowSpeed = 0.2f, damperAmount = 0.0f, velocityLevel = 0.5f;
-    float bodySize = 1.0f, stringScale = 1.0f;
+    float bodySize = 1.0f, stringScale = 1.0f, sizeTermsAt = 1.0f;
     float envelope = 0.0f, attackCoefficient = 0.001f, releaseCoefficient = 0.001f;
     float biteEnvelope = 1.0f, biteFall = 0.999f, level = 1.0f;
     float halfRate = 22050.0f, forceScale = 1.0f, pluckScale = 1.0f, peakBridge = 0.0f, peakBody = 0.0f;
-    float swell = 0.0f, swellCoefficient = 0.0001f, hairNoise = 0.0f, hissState = 0.0f, hissLast = 0.0f, hissPole = 0.35f, tilt = 0.0f, tiltPole = 0.6f;
+    float swell = 0.0f, swellCoefficient = 0.0001f, swellOnCoefficient = 0.0001f, hairNoise = 0.0f, hissState = 0.0f, hissLast = 0.0f, hissPole = 0.35f, tilt = 0.0f, tiltPole = 0.6f;
     float vibratoCents = 9.0f, vibratoPhase = 0.0f;
     float wanderPole = 0.01f, wanderGain = 0.0f, bowDriftGain = 0.0f, vibratoPole = 0.01f, rateDriftGain = 0.0f, depthDriftGain = 0.0f;
     float bowDrift = 0.0f, rateDrift = 0.0f, depthDrift = 0.0f, bowDriftIn = 0.0f, rateDriftIn = 0.0f, depthDriftIn = 0.0f;
@@ -732,8 +764,12 @@ private:
     // speed and swells over swellSeconds (a bow landing slower stuck to the
     // string for ~30 ms before it spoke); the upper partials come in darker
     // (onsetDarkDb at onsetDarkKnee and over, onsetDarkSlope below it) and
-    // brighten over onsetDarkSeconds.
-    static constexpr double swellSeconds = 0.3544;
+    // brighten over onsetDarkSeconds. Round 7, cello only (both do nothing
+    // at SIZE 1): on a bigger body the darkening reaches lower (the knee at
+    // onsetDarkKnee / size ^ onsetDarkKneeSize) and the bow's swell builds
+    // size ^ swellSize slower while the note is held.
+    static constexpr double swellSeconds = 0.3544, swellSize = 0.8;
+    static constexpr float onsetDarkKneeSize = 1.0f;
     static constexpr float onsetDarkDb = 15.04f, onsetDarkKnee = 1990.0f, onsetDarkSlope = 2.82f;
     static constexpr double onsetDarkSeconds = 0.1429;
     static constexpr float swellDepth = 0.8208f, rosinJitter = 0.08536f, hissLevel = 3.336e-04f, bodyNoise = 1.695e-06f;
@@ -764,9 +800,15 @@ private:
     // Once let go, each mode also loses releaseLossHz more a second at
     // 1 kHz, by (hz / 1 kHz) ^ releaseLossSlope (ramped in with the ring).
     static constexpr float releaseLossHz = 23.94f, releaseLossSlope = 3.224f;
+    // Round 7, cello only (nothing at SIZE 1): a bigger body's released
+    // partials lose more (releaseLossHz times size ^ releaseLossSizeSlope), and
+    // its room is louder (roomSizeDbMore more per doubling) but shorter, its decays
+    // times size ^ roomLowSizeSlope and size ^ roomHighSizeSlope.
+    static constexpr float releaseLossSizeSlope = 5.146f;
+    static constexpr double roomLowSizeSlope = 1.086, roomHighSizeSlope = 0.351;
     // The room (fitted to the tails of Spitfire's long notes).
     static constexpr int roomLines = 4;
-    static constexpr double roomDb = -2.5, roomSizeDb = -19.28, roomMs = 18.44, roomLowDecay = 38.88, roomHighDecay = 159.5;
+    static constexpr double roomDb = -2.5, roomSizeDb = -19.28, roomSizeDbMore = 14.736, roomMs = 18.44, roomLowDecay = 38.88, roomHighDecay = 159.5;
     static constexpr float decibel = 0.1151292546f, goldenRatio = 1.618034f;
     // The output's level: the string's units are tiny (metres of string,
     // narrow resonators); this brings a violin D4 near a plucked string's.
