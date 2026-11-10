@@ -98,4 +98,36 @@ size 1); `write_engine.py` knows both sets. Lessons:
   but is capped at 0.7 x f0, so a low cello fundamental stays under the
   corner of the direct path's own high-pass and keeps its level.
 
+Round 9 (2026-11-10): per-note tables, the violin's hall floor, the cello's release floor.
+`sim.py` plays both instruments' round 9 by default (`DEFAULT` the violin's, `CELLO` what each
+blended term is at the cello's size, so a cello keeps round 8's values for everything the
+violin retuned, and the violin round 8's for everything the cello retuned). New:
+- The per-note tables `notes_violin.json` (size 1, MIDI 55..96: 24 partial gains and nine
+  scalars per note) and `notes_cello.json` (size 2.1, MIDI 36..54, held below, faded out over 4
+  semitones above: 64 partial gains, onset darkening, released loss and let-go drop, and six
+  scalars). `write_engine.py` writes them to `src/dsp/ModalBowedNotes.h` (a `Row` array and a
+  `Table` entry per instrument: another instrument's table is one more of each). A table weighs
+  1 at its own size and nothing a quarter of the way (log size) to the other; its scalars replace
+  the value at that size before the size powers. `play(..., tables=[])` plays without them (a
+  fit of a table passes its own values in kw).
+- The violin's hall floor (`flr_*`): a pink noise about 40 dB under the note after the let-go's
+  gain, rising with the note and fading 24 dB a second once let go; the hiss grows with the
+  register (`hiss_k`). Faded out by 1 - t in level toward the cello.
+- The cello's release floor (`nfloor_db`): once let go, the bow's noise falls no lower than
+  11.7 dB under its level at the let-go, fading 20 dB a second (by t, none on a violin).
+- The cello's gains are 1.36 dB down (ModalBowedBodies.h): under its round 9 terms (mostly the
+  direct path, `dir_sz` -12 -> -7.7) it was that much louder than round 8.
+Twin, demo notes, 3 seeds: violin 16.6 -> 13.1, cello 17.1 -> 13.5. Lessons:
+- The tables carry most of the gain on the level-by-partial term (violin plevel 3.4 -> 1.5,
+  cello 3.1 -> 1.4) and they hold on held-out notes: Spitfire's partial levels are each
+  recording's own (the body, the player, the microphone), not a smooth function of pitch.
+- Interpolating a table between neighbouring notes scored worse than no table at all: a
+  note's row only fits its own recording (and its pitch-shifted pair). Pick the nearest note.
+- A table fitted with one body is wrong on another: keep it to the size it was fitted at.
+- The violin's release was too slow and too bright up high: a faster let-go (rel_s 1.19 ->
+  0.30 s) under the hall's own floor, which keeps the tail from falling into silence, halved
+  the release term (8.7 -> 5.2).
+- A global retune made for one instrument hurts the other: blend every retuned term back to the
+  other instrument's value by size (the cello twin scored worse under the violin's round 9).
+
 Needs numpy, scipy, soundfile, numba, mido, matplotlib.
