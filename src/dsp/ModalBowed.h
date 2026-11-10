@@ -30,6 +30,16 @@
 //                5.2 Hz, 9 cent vibrato fitted to Spitfire's long notes,
 //                starting a quarter second into the note
 //   PIZZ         (the SLAP switch) plucks the same modes instead of bowing
+//   WOLF         (the BUZZ knob) lets the body's strongest low resonance push
+//                back on the string: a second resonator at that resonance
+//                (from the fitted body, scaled by SIZE) is driven by the
+//                bridge force, and its motion moves the bridge, a force on
+//                each mode within an octave of it by the mode's slope there.
+//                A partial near the resonance and the body then trade energy
+//                back and forth, and the resonance sounds too: low, a little
+//                life; at the top (its damping halved) the note on it beats
+//                and howls, a cello's wolf (near G#3 at the cello's size, C4
+//                on the violin). At 0 the string plays exactly as fitted.
 //   DAMPER       how fast the string stops once the note is let go (at 0 a
 //                bowed note fades as Spitfire's do, a pluck rings on)
 // Velocity is the bite: a harder start, a faster bow at the attack.
@@ -97,6 +107,7 @@ public:
         hx1 = hx2 = hy1 = hy2 = 0.0f;
         lx1 = lx2 = ly1 = ly2 = 0.0f;
         tilt = hissState = hissLast = 0.0f;
+        wolfMove = wolfMoveLast = 0.0f;
         std::fill (roomBuffer.begin(), roomBuffer.end(), 0.0f);
         std::fill (std::begin (roomLow), std::end (roomLow), 0.0f);
         std::fill (std::begin (roomAt), std::end (roomAt), 0);
@@ -116,7 +127,7 @@ public:
     }
 
     void setParams (float decay, float damping, float stiffness, float position, float pressure, float speed,
-                    float damper, bool pizz, bool eco, float vibrato = 0.5f)
+                    float damper, bool pizz, bool eco, float vibrato = 0.5f, float wolf = 0.0f)
     {
         // At the Physical card's defaults (DECAY 0.75, DAMP 0.35, STIFF 0)
         // the losses and stretch of the sketch fitted to the Iowa violin.
@@ -144,6 +155,12 @@ public:
         // 0.5 plays the fitted 9 cents; the knob's top about 30.
         const auto v = juce::jlimit (0.0f, 1.0f, vibrato);
         vibratoCents = 30.0f * std::pow (v, 1.737f);
+        const auto w = juce::jlimit (0.0f, 1.0f, wolf);
+        if (w != wolfAmount)
+        {
+            wolfAmount = w;
+            updateWolf();
+        }
     }
 
     // SIZE and SCALE as factors (1: the violin as fitted).
@@ -195,6 +212,7 @@ public:
         }
         std::fill (std::begin (q), std::end (q), 0.0f);
         std::fill (std::begin (qp), std::end (qp), 0.0f);
+        wolfMove = wolfMoveLast = 0.0f;
         envelope = 0.0f;
         elapsed = 0;
         silent = false;
@@ -227,14 +245,29 @@ public:
             nextBlock (noteHeld);
         --untilBlock;
         ++elapsed;
+        // (WOLF's path only when it is up: set once a block, so at 0 the
+        // string runs exactly as it did, at no cost.)
+        return wolfActive ? step<true> (expression, noteHeld) : step<false> (expression, noteHeld);
+    }
 
-        // The modes' next state without the bow.
+private:
+    template <bool wolf>
+    float step (float expression, bool noteHeld)
+    {
+        // The modes' next state without the bow (with WOLF, the bridge's
+        // motion pushes each mode by its slope there).
         float next[maxModes];
         auto bowVelocity = 0.0f;
         for (int n = 0; n < modes; ++n)
         {
             next[n] = turn[n] * q[n] - fall[n] * qp[n];
             bowVelocity += shape[n] * (next[n] - qp[n]);
+        }
+        if constexpr (wolf)
+        {
+            for (int n = wolfFirst; n < wolfEnd; ++n)
+                next[n] += wolfPush[n] * wolfMove;
+            bowVelocity += wolfShape * wolfMove;
         }
         bowVelocity *= halfRate;
 
@@ -281,6 +314,15 @@ public:
             out[n] += outStep[n];
             bridge += out[n] * value;
         }
+        if constexpr (wolf)
+        {
+            // The body's main resonance, driven by the bridge force; its
+            // motion is the bridge's, which the modes feel next sample.
+            // (Bounded, as a safety.)
+            const auto moved = wolfTurn * wolfMove - wolfFall * wolfMoveLast + wolfDrive * bridge;
+            wolfMoveLast = wolfMove;
+            wolfMove = juce::jlimit (-wolfLimit, wolfLimit, moved);
+        }
         // The hair's scrape reaches the bridge too, coloured by the body.
         bridge = (bridge + bodyNoise * hairNoise) * level;
         peakBridge = juce::jmax (peakBridge, std::abs (bridge));
@@ -301,6 +343,8 @@ public:
         ly2 = ly1;
         ly1 = darker;
         auto sound = bodyDirect * (plucked ? bridge : darker);
+        if constexpr (wolf)
+            sound += wolfRadiate * level * (wolfMove - wolfMoveLast);   // (the resonance's own sound: its speed, so no DC)
         for (int j = 0; j < bodyCount; ++j)
         {
             const auto y = bodyB0[j] * (bridge - bx2[j]) - bodyA1[j] * by1[j] - bodyA2[j] * by2[j];
@@ -345,7 +389,6 @@ public:
         return std::isfinite (sound) ? juce::jlimit (-8.0f, 8.0f, sound) : 0.0f;
     }
 
-private:
     void nextBlock (bool noteHeld)
     {
         untilBlock = blockSize;
@@ -353,6 +396,9 @@ private:
             updateModes();
         if (bodyDirty)
             updateBody();
+        wolfActive = wolfOn;
+        if (wolfActive && ! std::isfinite (wolfMove + wolfMoveLast))
+            wolfMove = wolfMoveLast = 0.0f;
         // Let go (bowed): the upper partials' losses rise to releaseRing
         // times over releaseRingSeconds (the lifting hair stops feeding them).
         if (releasedAt >= 0 && ! plucked)
@@ -592,6 +638,7 @@ private:
         // bow at speed v moves the string about v / (2 pi f); the factor
         // sets a pizzicato level with an arco note, measured).
         pluckScale = (float) (5.0 * (double) bowSpeed / (juce::MathConstants<double>::twoPi * juce::jmax (20.0, frequency)));
+        updateWolf();
     }
 
     // The room's lines (prime lengths near roomMs times the ratios), each
@@ -690,6 +737,7 @@ private:
         for (int j = 0; j < B::count; ++j)
             loudest = juce::jmax (loudest, (double) lower[j] + blend * ((double) upper[j] - (double) lower[j]));
         bodyDirect = (float) std::pow (10.0, ((double) directDb + loudest) / 20.0);
+        wolfLoud = std::pow (10.0, (loudest + (double) wolfDb) / 20.0);
         {
             // (Two poles, Butterworth, at directHp for a violin, lower for a bigger box.)
             const auto w0 = juce::MathConstants<double>::twoPi * juce::jmin ((double) directHp / size, sampleRate * 0.45) / sampleRate;
@@ -736,7 +784,73 @@ private:
             const auto db = (double) lower[j] + blend * ((double) upper[j] - (double) lower[j]);
             bodyGain[i] = (float) std::pow (10.0, db / 20.0);
         }
+        // WOLF's resonance: the loudest of the body's fitted resonances below
+        // wolfTopHz (a violin's), at this SIZE.
+        auto wolfLoudest = -1000.0;
+        for (int j = 0; j < B::count && B::hz[j] <= wolfTopHz; ++j)
+        {
+            const auto db = (double) lower[j] + blend * ((double) upper[j] - (double) lower[j]);
+            if (db > wolfLoudest)
+            {
+                wolfLoudest = db;
+                wolfHz = (double) B::hz[j] / size;
+                wolfWidth = (double) B::bandwidth[j] / size;
+            }
+        }
         updateRipple();
+        updateWolf();
+    }
+
+    // WOLF's coupling. Two like oscillators joined by a stiffness kappa
+    // split into two, kappa / omega apart (wolfSplitHz at the top), so a
+    // partial on the resonance and the body trade their energy at about
+    // that rate. The modes' bridge force is their slope there, (n + 1) /
+    // modes (outBase); each mode's push is scaled by the same slope, against
+    // a partial's at the resonance, so whichever partial lands on it beats
+    // alike. Both ways have the same sign, as a spring between them: the
+    // coupling only moves energy about and the body's losses take some.
+    // Only the modes within an octave of the resonance feel the push
+    // (fading out by a raised cosine): far above it the bridge is as good
+    // as still, and all the upper modes together, each a stiff spring
+    // against the bridge, would add up to a negative stiffness that pulls
+    // the resonance down and, at the top, past zero (a runaway). So the loop
+    // stays a few weak springs, whatever the note, SIZE or mode count.
+    // WOLF also narrows the resonance (wolfNarrow).
+    void updateWolf()
+    {
+        wolfOn = wolfAmount > 0.0f && wolfHz > 0.0 && wolfHz < sampleRate * 0.45;
+        if (! wolfOn)
+            return;
+        const auto omega = juce::MathConstants<double>::twoPi * wolfHz;
+        const auto width = wolfWidth * (1.0 - (double) wolfNarrow * (double) wolfAmount);
+        const auto r = std::exp (-juce::MathConstants<double>::pi * width / sampleRate);
+        wolfTurn = (float) (2.0 * r * std::cos (omega / sampleRate));
+        wolfFall = (float) (r * r);
+        const auto split = juce::MathConstants<double>::twoPi * (double) wolfSplitHz * (double) wolfAmount;
+        const auto kappa = split * omega / (sampleRate * sampleRate);
+        // (a partial's slope at the resonance: wolfHz / (modes x the note))
+        const auto perSlope = (double) modes * frequency / wolfHz;
+        wolfDrive = (float) (kappa * perSlope);
+        wolfFirst = modes;
+        wolfEnd = 0;
+        auto atBow = 0.0;
+        for (int n = 0; n < modes; ++n)
+        {
+            const auto octaves = std::abs (std::log2 ((double) modeHz[n] / wolfHz));
+            const auto near = octaves < 1.0 ? 0.5 + 0.5 * std::cos (juce::MathConstants<double>::pi * octaves) : 0.0;
+            wolfPush[n] = (float) (kappa * perSlope * (double) outBase[n] * near);
+            if (near > 0.0)
+            {
+                wolfFirst = juce::jmin (wolfFirst, n);
+                wolfEnd = n + 1;
+            }
+            atBow += (double) shape[n] * (double) wolfPush[n];
+        }
+        wolfShape = (float) atBow;   // (the push as the bow sees it)
+        // Its sound (the howl): at its peak, on its own, wolfDb over the
+        // body's loudest resonance at the top, less as WOLF comes down.
+        wolfRadiate = (float) ((double) wolfAmount * wolfLoud * (1.0 - r * r) * std::sin (omega / sampleRate)
+                               / (2.0 * std::sin (0.5 * omega / sampleRate) * juce::jmax (1.0e-12, (double) wolfDrive)));
     }
 
     double sampleRate = 44100.0, frequency = 220.0;
@@ -758,6 +872,13 @@ private:
     float hpB0 = 1.0f, hpB1 = 0.0f, hpB2 = 0.0f, hpA1 = 0.0f, hpA2 = 0.0f, hx1 = 0.0f, hx2 = 0.0f, hy1 = 0.0f, hy2 = 0.0f;
     float lpB0 = 1.0f, lpB1 = 0.0f, lpB2 = 0.0f, lpA1 = 0.0f, lpA2 = 0.0f, lx1 = 0.0f, lx2 = 0.0f, ly1 = 0.0f, ly2 = 0.0f;
     double ringUpper = 1.0;   // (the release's loss factor the modes have now)
+    // WOLF: the knob, its resonance (Hz, bandwidth) at this SIZE, the
+    // resonator's coefficients and state (the bridge's motion).
+    float wolfAmount = 0.0f, wolfTurn = 0.0f, wolfFall = 0.0f, wolfDrive = 0.0f, wolfMove = 0.0f, wolfMoveLast = 0.0f;
+    double wolfHz = 0.0, wolfWidth = 1.0, wolfLoud = 0.0;
+    float wolfShape = 0.0f, wolfRadiate = 0.0f;
+    int wolfFirst = 0, wolfEnd = 0;
+    bool wolfOn = false, wolfActive = false;
     std::uint32_t seed = 1, driftSeed = 1, flutterSeed = 1;
     // Fitted to the Spitfire long notes (2026-11-08, see the top).
     // The bow's onset (round 6): the stroke starts at 1 - swellDepth of its
@@ -810,6 +931,11 @@ private:
     static constexpr int roomLines = 4;
     static constexpr double roomDb = -2.5, roomSizeDb = -19.28, roomSizeDbMore = 14.736, roomMs = 18.44, roomLowDecay = 38.88, roomHighDecay = 159.5;
     static constexpr float decibel = 0.1151292546f, goldenRatio = 1.618034f;
+    // WOLF at the top: the split (Hz) of a partial sitting on the
+    // resonance, how much narrower the resonance rings, the highest
+    // resonance (a violin's Hz) it picks from, the bridge's bound (far past
+    // any bowed swing) and the resonance's sound (dB, see updateWolf).
+    static constexpr float wolfSplitHz = 6.0f, wolfNarrow = 0.5f, wolfTopHz = 700.0f, wolfLimit = 0.05f, wolfDb = 3.0f;
     // The output's level: the string's units are tiny (metres of string,
     // narrow resonators); this brings a violin D4 near a plucked string's.
     static constexpr float outputGain = 30000.0f;
@@ -820,7 +946,7 @@ private:
     alignas (32) float wander[maxModes] {}, wanderIn[maxModes] {}, outStep[maxModes] {}, rippleSin[maxModes] {}, rippleCos[maxModes] {}, rippleSin2[maxModes] {}, rippleCos2[maxModes] {};
     alignas (32) float bodyB0[maxBody] {}, bodyA1[maxBody] {}, bodyA2[maxBody] {}, bodyGain[maxBody] {};
     alignas (32) float bx1[maxBody] {}, bx2[maxBody] {}, by1[maxBody] {}, by2[maxBody] {};
-    alignas (32) float releaseLoss[maxModes] {};
+    alignas (32) float releaseLoss[maxModes] {}, wolfPush[maxModes] {};
     std::vector<float> roomBuffer;   // (the four lines end to end)
     alignas (16) float roomLow[roomLines] {}, roomFeed[roomLines] {}, roomPole[roomLines] {};
     int roomLength[roomLines] {}, roomStart[roomLines] {}, roomAt[roomLines] {};

@@ -440,13 +440,13 @@ inline std::vector<std::pair<juce::String, std::vector<PhysicalSpec>>> physicalC
                                 { "_modal_scale", "SCALE" } } } };
 
     // The Modal Bowed string: the bow's knobs, the body's SIZE and the
-    // string's SCALE; SLAP plays it pizzicato.
+    // string's SCALE; SLAP plays it pizzicato and BUZZ is its WOLF.
     if (excite == 13)
         return { { "STRING", { { "_string_decay", "DECAY" }, { "_string_damp", "DAMP" }, { "_string_stiffness", "STIFF" },
                                { "_damper", "DAMPER" } } },
                  { "EXCITER", { { "_excite", "EXCITE" }, { "_string_slap", "PIZZ" }, { "_string_excite_pos", "POSITION" },
                                 { "_bow_pressure", "GRIP" }, { "_bow_speed", "SPEED" }, { "_hammer_hard", "VIBRATO" }, { "_modal_size", "SIZE" },
-                                { "_modal_scale", "SCALE" } } } };
+                                { "_modal_scale", "SCALE" }, { "_bridge_buzz", "WOLF" } } } };
 
     const auto piano = excite == 9;
     std::vector<PhysicalSpec> string { { "_string_decay", "DECAY" }, { "_string_damp", "DAMP" },

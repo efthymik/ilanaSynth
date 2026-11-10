@@ -817,7 +817,8 @@ inline const HelpRow helpRows[] {
     { starts ("sym_note"), "Manual tuning for this drone string, used when MANUAL is on." },
     { ends ("_bow_pressure"), "Bow grip on the string. MPE pressure and channel aftertouch add to it." },
     { ends ("_bow_speed"), "Bow travel speed; changes the sustained tone and scrape." },
-    { ends ("_bridge_buzz"), "Nonlinear bridge contact, from clean to sitar-like buzz." },
+    { ends ("_bridge_buzz"), "Nonlinear bridge contact, from clean to sitar-like buzz. On Modal Bowed it is WOLF: the body's main resonance pushes back on the string; "
+      "low adds a little life, high makes a note near that resonance beat and howl (a cello's wolf)." },
     { ends ("_string_split"), "A sideways string movement that beats. Zero is the plain string." },
     { ends ("_string_click"), "The sharp snap of the pluck. Zero is a clean pluck, full is a hard slap." },
     { ends ("_fret_rattle"), "Fret noise that follows the string. Faint buzz to loose fret; zero is clean." },

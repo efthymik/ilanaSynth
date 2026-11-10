@@ -1649,7 +1649,7 @@ private:
             modal.setParams (decay, damping, stiffness, hammerHardness, damper, eco);
         }
         else if (isBowedModal())
-            bowedModal.setParams (decay, damping, stiffness, excitationPosition, bowPressure, bowSpeed, damper, slap, eco, hammerHardness);
+            bowedModal.setParams (decay, damping, stiffness, excitationPosition, bowPressure, bowSpeed, damper, slap, eco, hammerHardness, buzz); // (BUZZ is its WOLF)
     }
 
 public:

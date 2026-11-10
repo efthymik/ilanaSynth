@@ -4647,9 +4647,10 @@ private:
             const juce::String prefix (OscillatorIds::prefixes[(size_t) index]);
             const auto exciteNow = juce::roundToInt (readFloat (prefix + "_excite"));
             osc.stringSustain.setLabelText (exciteNow == 10 ? "FEEDBACK" : "SUSTAIN");
-            // (The modal guitar's HAMMER is its pluck; the bowed string's its vibrato and SLAP its pizzicato.)
+            // (The modal guitar's HAMMER is its pluck; the bowed string's its vibrato, SLAP its pizzicato and BUZZ its wolf.)
             physical[(size_t) index]->hammer.setLabelText (exciteNow == 12 ? "PLUCK" : exciteNow == 13 ? "VIBRATO" : "HAMMER");
             physical[(size_t) index]->slap.setLabelText (exciteNow == 13 ? "PIZZ" : "SLAP");
+            physical[(size_t) index]->bridgeBuzz.setLabelText (exciteNow == 13 ? "WOLF" : "BUZZ");
 
             for (const auto& slot : slotsFor (index))
                 slot.item->setVisible (true);
