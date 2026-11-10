@@ -179,4 +179,46 @@ violin's size, nor on a pluck); the `CELLO` dict gains `vib_rate`, `vib_delay`, 
 The cello's vibrato in its table is played directly (`vib_ct`), the knob's 0.5.
 Twin, demo notes, 3 seeds: cello 13.5 -> 12.1 (about 0.85 dB louder); the violin as above.
 
+Round 11 (2026-11-10), the cello's: each partial's level over time. Nothing reaches a violin's size
+(the violin renders bit for bit as round 10's) nor a pluck. New:
+- The low partials ring on once let go (`lr_*`, by t): each partial's gain rises `lr_dbs` (9.8) dB a
+  second for `lr_cap` (0.59) s after the let-go, as 1 / (1 + (hz / `lr_knee`) ^ `lr_slope`) by partial
+  (260 Hz, 3.3), against the fade.
+- A gain envelope by octave and time knot in the cello's table: `kn_on` [8 octaves, centres 110 Hz x
+  2 ^ k][knots at 0, 0.05, 0.1, 0.2, 0.35, 0.6 s from the note-on; 0 at 0.9 s and after] and `kn_rl`
+  [8][knots at 0.05 to 0.6 s after the let-go; 0 at the let-go, the last held], dB on each partial's
+  gain, interpolated over the partials in log frequency (held past the end centres), in the exponent
+  the block's gain glide already takes. Fitted note by note with the bow frozen (each take's own
+  bow noise held, so the knots fit the level, not the take). The engine weighs the knots by the
+  cello table's weight (nothing at the viola's size) and the ring-on by t.
+Twin, demo notes: cello 12.22 -> 11.58 (+0.17 dB). Lessons:
+- What was left on the cello was the shape of each partial's level over the first second and the
+  release, not its sustain: a few knots per octave carry it, and a frozen bow keeps the fit from
+  chasing one take's noise.
+
+Round 11 (2026-11-10), the violin's: the noise between and under the partials as the note's own.
+Each violin note's table gains `rs0_db`, `rs1_db`, `rs2_db`: the band energy (dB, look.py's 45
+1/6-octave bands with STFT bins, as the score's STFT reads them, at an envelope of 1) of three
+residual layers, the sustain's, the onset's and the release's. Each layer plays two noise loops of
+coprime lengths (`RS_L1`, `RS_L2` = 16384 and 11 ^ 4 = 14641 samples), synthesised from those band
+levels with a random phase per bin (`_rs_noise`, calibrated per loop by `_rs_cal`); nothing but the
+table is stored. Envelopes (amplitude, per block, glided): the sustain 1 - exp(-t / 0.25), once let go
+10 dB down over 0.05 s and fading 60 dB a second; the onset (1 - exp(-t / 0.005)) exp(-t / 0.25); the
+release nothing while held, rising over 0.15 s once let go and fading 40 dB a second. With `rs_replace`
+the hall floor and its rumble, the air mode and the hair's noise into the 300-500 Hz modes go by keep
+= 1 - the layers' table weight (none on a violin note, all on a cello), and the layers by that weight
+and 1 - t. The engine (ModalBowedLayers.h) builds every note's loops once per process on a background
+thread (0.7 s, 15.6 MB as floats at 48 kHz) and plays a note without them, as round 10, until its
+loops are built; offline renders wait for them. Their level follows the bow's speed (SPEED) against the
+fitted one (the string's level does, about as much; GRIP moves it under 1 dB); velocity is the voice's.
+Twin, all 42 notes: 12.53 -> 10.40 (16384/14641; 65536/59049 scored 10.38, 8192/6561 10.43). Lessons:
+- What round 10's noise paths could not reach was each note's own noise spectrum: the bands between
+  and under the partials, which no smooth model of the bow's noise matched note for note. A table of
+  45 band levels per layer and note, played as shaped noise, carries it, as the partial gains did.
+- Replace, don't add: the round 10 floor, air mode and body noise under the layers scored worse
+  (11.57 -> 10.45 with them off and the layers refitted); a two-band sustain layer gained nothing.
+- The onset and release are layers of their own (their spectra differ from the sustain's); the
+  release's step down and fade (10 dB, 60 dB a second) and the release layer's 40 dB a second were
+  the biggest gains after the layers themselves.
+
 Needs numpy, scipy, soundfile, numba, mido, matplotlib.

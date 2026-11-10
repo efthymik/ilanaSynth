@@ -1,5 +1,5 @@
 """Python twin of src/dsp/ModalBowed.h (bowed notes) for fitting (DEFAULT: the engine as
-fitted, round 10). The release: lift=1 keeps the bow's speed as its pressure eases over rel_s
+fitted, round 11). The release: lift=1 keeps the bow's speed as its pressure eases over rel_s
 (lift=0, the bow slowing to a stop on the string, braked the note into a cliff about
 0.35 s after the note-off), the upper partials' losses rise to ring times over ring_s
 and fade_db fades the note (dB a second) once let go. Round 9: per-note tables (NOTES,
@@ -13,6 +13,12 @@ the low floor on the hall floor's path (cflr_*, per note cflr_add), the string's
 (hf_*, per note hf_add), the release floor and size powers retuned, CELLO's vibrato and flutter terms.
 vib_ct is the plugin's VIBRATO knob at its default 0.5; the knob v plays 30 v ^ log2(30 / vib_ct)
 cents (round 10; it was 30 v ^ 1.737, 9 cents at 0.5, and v = 0.662 gave the fitted 14.65).
+Round 11, the cello's (all by t): the low partials ring on after the let-go (lr_*), and the table's gain envelope by
+octave and time knot (kn_on over the first 0.9 s, kn_rl after the let-go), fitted with the bow frozen.
+Round 11, the violin's: the residual layers (rs*_, per-note rs0_db / rs1_db / rs2_db in the violin's table): the
+note's own noise between and under the partials as shaped noise loops (sustain, onset, release) synthesised from
+the table's band levels, in place of the hall floor, rumble, air mode and 300-500 Hz modes' noise (rs_replace)
+wherever the violin's table reaches.
 Bit-identical to the fits' twins at size 1 and (to float rounding) at 2.1."""
 import json
 import os
@@ -61,8 +67,22 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
            pl_db, obadd, rladd, rdk, rdk_s, nfloor, nfloor_dbs,
            rnb, a0_g, a0_b0, a0_a1, a0_a2, flr_ord, a0_fl, rb_g, rb_b0, rb_a1, rb_a2, b1_in, hs_depth, hs_s, hs_rn,
            hf_g, hf_hz, hf_src, hf_lp,
-           sn_amp, sn_hz, sn_spread, am_amp, am_ph, am_dly, fl_hpa, flr_o2):
+           sn_amp, sn_hz, sn_spread, am_amp, am_ph, am_dly, fl_hpa, flr_o2,
+           lr_w, lr_cap, kon, kon_t, krl, krl_t, rs_t1, rs_t2, rs_p):
     k = 1.0 / sr
+    # (round 11, the violin's) The residual layers: per-note shaped noise loops (rs_t1, rs_t2: two loops
+    # of coprime lengths per layer, each layer's spectrum the note's own), added at the output. rs_p[l]:
+    # (on, att_s, tau_s, rel_db, rel_s, fade_db, start). Layer envelopes (amplitude, block rate, glided):
+    # held: (1 - exp(-t / att)) * (exp(-t / tau) if tau > 0 else 1); let go: the held value then
+    # rel_db down over rel_s and fade_db dB a second (start = 1: a release layer, 0 while held, rising
+    # over rel_s after the let-go). One table read per layer a sample.
+    nrs = rs_t1.shape[0]
+    rs_g = np.zeros(nrs); rs_step = np.zeros(nrs); rs_held = np.zeros(nrs)
+    rs_i1 = (seed * 7919) % rs_t1.shape[1]; rs_i2 = (seed * 104729) % rs_t2.shape[1]
+    rs_on = False
+    for l in range(nrs):
+        if rs_p[l, 0] > 0:
+            rs_on = True
     n_ = np.arange(1, modes + 1).astype(np.float64)
     shape = np.sin(n_ * np.pi * beta)
     push = 2.0 * k * shape / max(1e-6, np.sum(shape * shape))
@@ -262,6 +282,16 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
     vx1 = 0.0; vx2 = 0.0; vy1 = 0.0; vy2 = 0.0; wx1 = 0.0; wx2 = 0.0; wy1 = 0.0; wy2 = 0.0
     hfo = 0.0
     hq = s ^ 0x3C6EF372
+    # (round 11, the cello's) The low partials ring on after the let-go: each partial's gain rises lr_w dB a second
+    # (by partial: lr_dbs under lr_knee, less above) for lr_cap seconds once let go, against the fade.
+    lr_now = 0.0
+    # (round 11, the cello's) The gain envelope by partial and time knot (the table's kn_on and kn_rl by octave,
+    # spread over the partials at note-on): kon [modes, knots] dB at the times kon_t from the note-on (0 at the last),
+    # krl [modes, knots] dB at krl_t after the let-go (0 at the first, held after the last). Per block: one segment,
+    # two multiply-adds a partial, in the exponent the block's gain glide already takes.
+    use_kon = kon.shape[1] > 0
+    use_krl = krl.shape[1] > 0
+    kn_now = np.zeros(modes)
     for i in range(total):
         if i % 32 == 0 and i >= held:
             # Let go: the upper partials' losses rise to ring times over
@@ -288,17 +318,59 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
             nboost = rtarget ** -ntail
             nfl_now = nfloor * nfac_held * np.exp(-DB * nfloor_dbs * tr)
             xdrop = 1.0 - np.exp(-tr / rdk_s)
+            lr_now = min(tr, lr_cap)
             if use_flr:
                 xr = min(1.0, tr / max(1e-3, flr_rs))
                 ftarget = (1.0 + (flr_rel - 1.0) * xr) * 10 ** (-flr_fade * tr / 20.0)
                 fe_step = (ftarget - fe) / 32.0
         elif i % 32 == 0 and use_flr:
             fe_step = ((fe + fatt * (1.0 - fe)) - fe) / 32.0
+        if i % 32 == 0 and rs_on:
+            tb = (i + 32) / sr
+            for l in range(nrs):
+                if rs_p[l, 0] <= 0:
+                    continue
+                if i + 32 <= held:
+                    if rs_p[l, 6] > 0:
+                        gt = 0.0
+                    else:
+                        gt = 1.0 - np.exp(-tb / max(1e-4, rs_p[l, 1]))
+                        if rs_p[l, 2] > 0:
+                            gt *= np.exp(-tb / rs_p[l, 2])
+                    rs_held[l] = gt
+                else:
+                    tr_ = (i + 32 - held) / sr
+                    xr_ = min(1.0, tr_ / max(1e-4, rs_p[l, 4]))
+                    if rs_p[l, 6] > 0:
+                        gt = xr_ * np.exp(-DB * rs_p[l, 5] * tr_)
+                    else:
+                        gt = rs_held[l] * np.exp(-DB * (rs_p[l, 3] * xr_ + rs_p[l, 5] * tr_))
+                        if rs_p[l, 2] > 0:
+                            gt *= np.exp(-tr_ / rs_p[l, 2])
+                rs_step[l] = (gt - rs_g[l]) / 32.0
         if i % 32 == 0:
             t = i / sr
             ob_now = obshape * np.exp(-t / ob_s)
             # (round 10) the hiss builds over hs_s from hs_depth down (the hair's top end comes in after the stroke starts)
             hs_env = 1.0 - hs_depth * np.exp(-t / hs_s)
+            if use_kon or use_krl:
+                kn_now = np.zeros(modes)
+                if use_kon and t < kon_t[-1]:
+                    j = 0
+                    while kon_t[j + 1] <= t:
+                        j += 1
+                    u = (t - kon_t[j]) / (kon_t[j + 1] - kon_t[j])
+                    kn_now = kon[:, j] * (1.0 - u) + kon[:, j + 1] * u
+                if use_krl and i >= held:
+                    tk = (i + 32 - held) / sr
+                    if tk >= krl_t[-1]:
+                        kn_now = kn_now + krl[:, -1]
+                    else:
+                        j = 0
+                        while krl_t[j + 1] <= tk:
+                            j += 1
+                        u = (tk - krl_t[j]) / (krl_t[j + 1] - krl_t[j])
+                        kn_now = kn_now + krl[:, j] * (1.0 - u) + krl[:, j + 1] * u
             if t > vib_delay:
                 vib_env = min(1.0, (t - vib_delay) / max(1e-3, vib_rise))
             for m in range(modes):
@@ -360,7 +432,7 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
                 lvib = (1.0 + vd) * min(1.0, max(0.0, (t - vib_delay - am_dly) / max(1e-3, vib_rise)))
                 ripple = ripple + am_amp * lvib * (np.sin(phase) * amc + np.cos(phase) * ams)
             # (glided to over the block: a step would zip)
-            out_step = (out0 * np.exp(DB * (ripple + wander + (0.0 if fl_damp > 0 else 1.0) * flut * fshape - ob_now - rdk * xdrop)) - out) / 32.0
+            out_step = (out0 * np.exp(DB * (ripple + wander + (0.0 if fl_damp > 0 else 1.0) * flut * fshape - ob_now - rdk * xdrop + lr_w * lr_now + kn_now)) - out) / 32.0
         nxt = turn * q - fall * qp
         v = np.sum(shape * (nxt - qp)) * 0.5 * sr
         on = 1.0 if i < held else 0.0
@@ -511,6 +583,16 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
                 raw += rb_g * fe * ry
         lp = raw + lp_a * (lp - raw)
         y[i] = lp
+        if rs_on:
+            for l in range(nrs):
+                rs_g[l] += rs_step[l]
+                y[i] += rs_g[l] * (rs_t1[l, rs_i1] + rs_t2[l, rs_i2])
+            rs_i1 += 1
+            if rs_i1 >= rs_t1.shape[1]:
+                rs_i1 = 0
+            rs_i2 += 1
+            if rs_i2 >= rs_t2.shape[1]:
+                rs_i2 = 0
     return y
 
 
@@ -553,7 +635,15 @@ DEFAULT = dict(beta=0.11, loss0=0.8, loss1=3.244e-06, bright=1.7841, b=1.0e-5, g
                sn_db=3.7854, sn_hz=0.74098, sn_spread=0.36811, sn_knee=392.17, sn_slope=0.19059, sn_lo=1.1794,
                fl_hpz=1.2142, am_db=1.8913, am_knee=428.76, am_slope=2.0, am_ph=1.1911, am_dly=0.0,
                cflr_db=-49.364, cflr_k=2.8205, cflr_lp=205.97, cflr_hp=30.0, cflr_att=0.02, cflr_rel_db=-8.7946,
-               cflr_rs=0.05, cflr_fade=23.1, cflr_w=0.0)
+               cflr_rs=0.05, cflr_fade=23.1, cflr_w=0.0,
+               # (round 11, the cello's: by t, nothing at a violin's size)
+               lr_dbs=9.7764, lr_knee=260.42, lr_slope=3.2865, lr_cap=0.59455,
+               kn_on_t=(0.0, 0.05, 0.1, 0.2, 0.35, 0.6, 0.9), kn_rl_t=(0.0, 0.05, 0.15, 0.3, 0.45, 0.6),
+               # (round 11, the violin's) the residual layers: 0 sustain, 1 onset, 2 release
+               rs_replace=1,
+               rs0_on=1, rs0_att=0.25, rs0_tau=0.0, rs0_rdb=10.0, rs0_rs=0.05, rs0_fade=60.0,
+               rs1_on=1, rs1_att=0.005, rs1_tau=0.25, rs1_rdb=0.0, rs1_rs=0.05, rs1_fade=0.0,
+               rs2_on=1, rs2_att=0.0, rs2_tau=0.0, rs2_rdb=0.0, rs2_rs=0.15, rs2_fade=40.0)
 
 # (Round 8) The two-stage let-go (rel_s, fade_db, ring, rloss, rdrop_db, tail_db, ntail) was fitted to the
 # violin's partial trajectories. On held-out notes (2 seeds) it brings the trajectory error after
@@ -591,6 +681,7 @@ NOTES = [json.load(open(os.path.join(_HERE, "notes_%s.json" % inst))) for inst i
 TABLE_SCALARS = ("flr_db", "tail_db", "rdrop_db", "fade_db", "ob_db", "swell_s", "vib_ct", "slow_db", "rip_db", "rel_s", "ring",
                  "hiss_db", "a0_db")   # (round 10: hiss_db, dB on the hiss; a0_db, the air mode's level)
 TABLE_ARRAYS = ("gain_db", "dark_db", "loss_add", "drop_db")
+# (round 11) and the cello's kn_on [8 octaves][6 knots] and kn_rl [8][5] (dB): the gain envelope by octave and time knot
 
 
 def note_rows(size, note, tables=None):
@@ -698,6 +789,10 @@ def play(inst, note, seconds=4.8, held=4.0, seed=1, tables=None, **kw):
     # (round 10, the cello's) The low floor: the violin's hall-floor noise, with the cello's own
     # level, band and fade blended in by t (the violin's floor fades out by 1 - t as before).
     flr_gv = (1.0 - t) * 10 ** (p["flr_db"] / 20) * (f0 / 440.0) ** (p["flr_k"] / 6.0206) if t < 1.0 and p["flr_db"] > -150 else 0.0
+    # (round 11, the violin's) The residual layers replace the hall floor, its rumble, the air mode and the
+    # 300-500 Hz modes' noise wherever a table with them reaches (keep = 1 - its weight; 1 on a cello).
+    keep = 1.0 - min(1.0, sum(w for w, row in rows if "rs0_db" in row)) if p["rs_replace"] > 0 else 1.0
+    flr_gv *= keep
     flr_gc = t * 10 ** ((p["cflr_db"] + cflr_add) / 20) * (f0 / 440.0) ** (p["cflr_k"] / 6.0206) if t > 0.0 and p["cflr_db"] > -150 else 0.0
     fp = {}
     for key in ("lp", "hp", "att", "rel_db", "rs", "fade", "w"):
@@ -710,6 +805,9 @@ def play(inst, note, seconds=4.8, held=4.0, seed=1, tables=None, **kw):
     sn_amp = t * p["sn_db"] * np.where(hzm < p["sn_knee"], p["sn_lo"], (hzm / p["sn_knee"]) ** -p["sn_slope"]) if p["sn_db"] != 0.0 else np.zeros(modes)
     am_amp = t * p["am_db"] / (1.0 + (hzm / p["am_knee"]) ** p["am_slope"]) if p["am_db"] != 0.0 else np.zeros(modes)
     flrg = _flrg(p, f0, t)
+    # (round 11, the cello's, by t) the low partials' ring-on after the let-go: lr_dbs dB a second, as
+    # 1 / (1 + (hz / lr_knee) ^ lr_slope) by partial
+    lr_w = t * p["lr_dbs"] / (1.0 + (hzm / p["lr_knee"]) ** p["lr_slope"]) if t > 0.0 and p["lr_dbs"] != 0.0 else np.zeros(modes)
     rg, rl, rfb, rp = room_coeffs(dict(p, room_db=p["room_db"] + p["room_sz"] * np.log2(sz),
                                        room_lo=p["room_lo"] * sz ** p["room_lk"], room_hi=p["room_hi"] * sz ** p["room_hk"]))
     return kernel(f0, int(seconds * SR), int(held * SR), SR, modes, p["beta"], p["loss0"], loss1, p["b"], p["grip"],
@@ -731,12 +829,120 @@ def play(inst, note, seconds=4.8, held=4.0, seed=1, tables=None, **kw):
                   _arr(rows, "gain_db") + np.resize(np.asarray(kw.get("gain_addk", 0.0), float), 64), _arr(rows, "dark_db"), _arr(rows, "loss_add"), _arr(rows, "drop_db"), p["rdk_s"],
                   t * 10 ** (p["nfloor_db"] / 20) if p["nfloor_db"] > -100 else 0.0, p["nfloor_dbs"],
                   (1.0 - t) * p["rnb"] * (f0 / 440.0) ** p["rnb_k"],
-                  (1.0 - t) * 10 ** (p["a0_db"] / 20) * (f0 / 440.0) ** (p["a0_k"] / 6.0206) if p["a0_db"] > -150 else 0.0, *_reso(p["a0_hz"], p["a0_bw"]), int(p["flr_ord"]),
-                  _a0fl(p, f0, t), flrg * 10 ** (p["rb_db"] / 20) if p["rb_db"] > -150 else 0.0, *_reso(p["rb_hz"], p["rb_bw"]),
-                  _b1(p, f0, t, inst), p["hs_depth"], max(1e-3, p["hs_s"]), p["hs_rn"],
+                  keep * (1.0 - t) * 10 ** (p["a0_db"] / 20) * (f0 / 440.0) ** (p["a0_k"] / 6.0206) if p["a0_db"] > -150 else 0.0, *_reso(p["a0_hz"], p["a0_bw"]), int(p["flr_ord"]),
+                  _a0fl(p, f0, t), keep * flrg * 10 ** (p["rb_db"] / 20) if p["rb_db"] > -150 else 0.0, *_reso(p["rb_hz"], p["rb_bw"]),
+                  keep * _b1(p, f0, t, inst), p["hs_depth"], max(1e-3, p["hs_s"]), p["hs_rn"],
                   hf_g, hf_hz, int(p["hf_src"]), p["hf_lp"],
                   sn_amp, p["sn_hz"], p["sn_spread"], am_amp, p["am_ph"], p["am_dly"],
-                  t * (1.0 - np.exp(-2 * np.pi * p["fl_hpz"] * 32.0 / SR)) if p["fl_hpz"] > 0 else 0.0, 1.0 - t)
+                  t * (1.0 - np.exp(-2 * np.pi * p["fl_hpz"] * 32.0 / SR)) if p["fl_hpz"] > 0 else 0.0, 1.0 - t,
+                  lr_w, max(0.0, p["lr_cap"]), *_knots(p, rows, kw, hzm, t),
+                  *_res_layers(p, rows, note, t, kw))
+
+
+# (round 11, the violin's) The residual layers. Each layer's spectrum is the note's table column
+# rs<l>_db (45 values: dB of the band energy in look.py's 1/6-octave bands as the score's STFT reads it,
+# for an envelope of 1), faded out toward the cello by (1 - t) in amplitude. The envelope's globals
+# rs<l>_att, _tau, _rdb, _rs, _fade (DEFAULT) or the row's own. Loops: L1 = 16384 and L2 = 14641 (11 ^ 4)
+# samples (coprime), random phase (fixed per note and layer), each carrying half the energy. Nothing is
+# stored but the table: the loops are synthesised from its 45 band levels (the engine once per process).
+# (65536/59049 scored 10.38, 16384/14641 10.40, 8192/6561 10.43 on seeds 4-6; the longer pair has more
+# bins in the lowest bands and repeats less audibly.)
+RS_L1, RS_L2 = 16384, 14641
+RS_LAYERS = 3
+_RSCAL = {}
+_RSTAB = {}
+
+
+def _rs_bins(L):
+    import look
+    f = np.fft.rfftfreq(L, 1.0 / SR)
+    fs = np.fft.rfftfreq(2048, 1.0 / SR)
+    E = look.EDGES
+    eds = [(a, b) for a, b in zip(E, E[1:]) if ((fs >= a) & (fs < b)).any()]
+    idx = np.full(len(f), -1)
+    for j, (a, b) in enumerate(eds):
+        idx[(f >= a) & (f < b)] = j
+    return idx
+
+
+def _rs_noise(amp_band, L, key):
+    idx = _rs_bins(L)
+    rng = np.random.default_rng(key)
+    ph = np.exp(2j * np.pi * rng.random(len(idx)))
+    a = np.where(idx >= 0, amp_band[np.maximum(idx, 0)], 0.0)
+    return np.fft.irfft(a * ph, L)
+
+
+def _rs_cal():
+    # band energy (look.bandgram's units) per unit band amplitude, each loop alone
+    if not _RSCAL:
+        import look
+        for L in (RS_L1, RS_L2):
+            x = _rs_noise(np.ones(45), L, 12345)
+            x = np.tile(x, int(np.ceil(4.8 * SR / L)) + 1)[:int(4.8 * SR)]
+            t, B = look.bandgram(x)
+            _RSCAL[L] = np.mean(10 ** (B[:, (t > 0.3) & (t < 4.5)] / 10), 1)
+    return _RSCAL
+
+
+def rs_tables(db, key):
+    k = (tuple(np.round(db, 6)), key)
+    if k not in _RSTAB:
+        cal = _rs_cal()
+        E = 10 ** (np.asarray(db, float) / 10) * 0.5
+        _RSTAB[k] = tuple(_rs_noise(np.sqrt(E / cal[L]), L, key * 7 + L) for L in (RS_L1, RS_L2))
+        if len(_RSTAB) > 400:
+            _RSTAB.clear()
+    return _RSTAB[k]
+
+
+def _res_layers(p, rows, note, t, kw):
+    t1 = np.zeros((RS_LAYERS, 1)); t2 = np.zeros((RS_LAYERS, 1)); P = np.zeros((RS_LAYERS, 7))
+    if t >= 1.0:
+        return t1, t2, P
+    cols = []
+    for l in range(RS_LAYERS):
+        key = "rs%d_db" % l
+        db = kw.get(key + "k")
+        if db is None:
+            for w, row in rows:
+                if key in row and w > 0:
+                    db = np.asarray(row[key], float) + 20 * np.log10(w * (1.0 - t))
+        cols.append(db)
+    if all(c is None for c in cols):
+        return t1, t2, P
+    t1 = np.zeros((RS_LAYERS, RS_L1)); t2 = np.zeros((RS_LAYERS, RS_L2))
+    for l, db in enumerate(cols):
+        if db is None or p["rs%d_on" % l] <= 0:
+            continue
+        a, b = rs_tables(db, int(round(note * 10)) * 3 + l)
+        t1[l] = a; t2[l] = b
+        P[l] = (1.0, p["rs%d_att" % l], p["rs%d_tau" % l], p["rs%d_rdb" % l], p["rs%d_rs" % l], p["rs%d_fade" % l], 1.0 if l == 2 else 0.0)
+    return t1, t2, P
+
+
+def _knots(p, rows, kw, hzm, t):
+    """(round 11, the cello's) the knots' gain envelope by partial: the table's kn_on [8 octaves][knots] and kn_rl, by t,
+    interpolated over the partials in log frequency (octave centres 110 Hz to 14 kHz, held past the ends); kn_on's last
+    knot (kn_on_t[-1]) and kn_rl's first (the let-go) are 0. kw kn_onk / kn_rlk (fitting) add."""
+    res = []
+    for key, tk, first in (("kn_on", p["kn_on_t"], False), ("kn_rl", p["kn_rl_t"], True)):
+        tk = np.asarray(tk, float)
+        V = np.zeros((8, len(tk) - 1))
+        hit = False
+        for w, row in rows:
+            if key in row:
+                V += w * np.asarray(row[key], float); hit = True
+        if key + "k" in kw:
+            V += np.asarray(kw[key + "k"], float); hit = True
+        if t <= 0.0 or not hit or not np.any(V != 0.0):
+            res += [np.zeros((len(hzm), 0)), tk]
+            continue
+        Vf = np.concatenate([np.zeros((8, 1)), V], 1) if first else np.concatenate([V, np.zeros((8, 1))], 1)
+        cen = np.log2(110.0) + np.arange(8)
+        W = np.array([np.interp(np.log2(hzm), cen, np.eye(8)[k]) for k in range(8)]).T   # [modes, 8]
+        res += [np.ascontiguousarray(t * W @ Vf), tk]
+    return res
 
 
 def _b1(p, f0, t, inst):

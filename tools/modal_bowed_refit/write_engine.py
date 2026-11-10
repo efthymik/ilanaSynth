@@ -126,6 +126,9 @@ for name, key in (("sineWanderDb", "sn_db"), ("sineWanderHz", "sn_hz"), ("sineWa
     put(name, p[key], "")
 # (the engine's string top is its own noise (hf_src 2), low-passed (hf_lp under 0.45 of the rate))
 assert p["hf_src"] == 2 and p["hf_lp"] < 48000 * 0.45
+# (round 11, the cello's: the low partials' ring-on once let go, by t; the knots' times are in ModalBowedNotes.h)
+for name, key in (("releaseRiseDb", "lr_dbs"), ("releaseRiseKnee", "lr_knee"), ("releaseRiseSlope", "lr_slope"), ("releaseRiseSeconds", "lr_cap")):
+    put(name, p[key], "")
 open(ENGINE, "w").write(s)
 
 # (round 9) The per-note tables (notes_<inst>.json) as ModalBowedNotes.h.
@@ -146,6 +149,15 @@ def floats(v, digits):
     return "{ " + ", ".join(number(x, digits) + "f" for x in v) + " }" if v else "{}"
 
 
+# (Round 11, the violin's) the residual layers' bands (look.py's with STFT bins, as sim._rs_bins) and each
+# loop's calibration (sim._rs_cal: band energy per unit bin amplitude, as the score's STFT reads it).
+import look  # noqa: E402
+import numpy as np  # noqa: E402
+_fs = np.fft.rfftfreq(2048, 1.0 / sim.SR)
+RS_EDGES = [(a, b) for a, b in zip(look.EDGES, look.EDGES[1:]) if ((_fs >= a) & (_fs < b)).any()]
+RS_CAL = sim._rs_cal()
+
+
 # (Round 10) The tables to 6 digits, so the header holds the json (round 9's 5 rounded a few).
 DIGITS = {"violin": 6, "cello": 6}
 
@@ -164,11 +176,38 @@ out = ["#pragma once", "",
        "struct ModalBowedNotes",
        "{",
        "    static constexpr int partials = 64;",
+       "    // (round 11, the cello's) The gain envelope by octave (centres 110 Hz x 2 ^ k) and time knot: knotOn dB at",
+       "    // knotOnSeconds[0..5] from the note-on (0 at the last and after), knotRelease at knotReleaseSeconds[1..5]",
+       "    // after the let-go (0 at the let-go, the last held), each partial's by its log frequency between the centres.",
+       "    static constexpr int knotOctaves = 8, knotOnCount = %d, knotReleaseCount = %d;" % (len(sim.DEFAULT["kn_on_t"]) - 1, len(sim.DEFAULT["kn_rl_t"]) - 1),
+       "    static constexpr double knotOnSeconds[knotOnCount + 1] { %s };" % ", ".join(number(x) for x in sim.DEFAULT["kn_on_t"]),
+       "    static constexpr double knotReleaseSeconds[knotReleaseCount + 1] { %s };" % ", ".join(number(x) for x in sim.DEFAULT["kn_rl_t"]),
+       "    // (round 11, the violin's) The residual layers (ModalBowedLayers.h): each note's noise between and under the",
+       "    // partials as three layers (0 the sustain's, 1 the onset's, 2 the release's), each two noise loops of",
+       "    // residualLengths samples synthesised once per process from residualDb: dB of the band energy in each of",
+       "    // residualBands bands (residualEdges, Hz) as the picture score's STFT (2048 Hann, 48 kHz) reads it, at an",
+       "    // envelope of 1 (-200: none). A loop bin in band b gets amplitude sqrt (10 ^ (dB / 10) / 2 / residualScale",
+       "    // [loop][b]) with a random phase. The layers' envelopes: held, (1 - exp (-t / attack)) (x exp (-t / tau)",
+       "    // when tau > 0); once let go, the held value letGoDb down over letGoSeconds and fadeDb a second (x exp",
+       "    // (-t / tau)); a release layer is 0 while held and rises over letGoSeconds once let go, fading fadeDb a second.",
+       "    static constexpr int residualLayers = 3, residualBands = %d;" % len(RS_EDGES),
+       "    static constexpr int residualLengths[2] { %d, %d };" % (sim.RS_L1, sim.RS_L2),
+       "    static constexpr double residualEdges[residualBands][2] { %s };" % ", ".join("{ %r, %r }" % (float(a), float(b)) for a, b in RS_EDGES),
+       "    static constexpr double residualScale[2][residualBands] { %s };" % ", ".join("{ %s }" % ", ".join("%r" % float(x) for x in RS_CAL[L]) for L in (sim.RS_L1, sim.RS_L2)),
+       "    static constexpr double residualAttack[residualLayers] { %s }, residualTau[residualLayers] { %s };" % tuple(", ".join(number(p["rs%d_%s" % (l, k)]) for l in range(3)) for k in ("att", "tau")),
+       "    static constexpr double residualLetGoDb[residualLayers] { %s }, residualLetGoSeconds[residualLayers] { %s };" % tuple(", ".join(number(p["rs%d_%s" % (l, k)]) for l in range(3)) for k in ("rdb", "rs")),
+       "    static constexpr double residualFadeDb[residualLayers] { %s };" % ", ".join(number(p["rs%d_fade" % l]) for l in range(3)),
+       "    static constexpr bool residualRelease[residualLayers] { false, false, true };",
+       "    // The layers replace the hall floor, its rumble, the air mode and the hair's noise into the 300-500 Hz",
+       "    // modes by the residual table's weight (residualReplace).",
+       "    static constexpr bool residualReplace = %s;" % ("true" if p["rs_replace"] > 0 else "false"),
        "    enum Scalar { " + ", ".join(n for n, _ in SCALARS) + ", scalarCount };",
        "    struct Row",
        "    {",
        "        float " + " {}, ".join("%s[partials]" % n for n, _ in ARRAYS) + " {};",
        "        float scalar[scalarCount] {};",
+       "        float knotOn[knotOctaves][knotOnCount] {}, knotRelease[knotOctaves][knotReleaseCount] {};",
+       "        float residualDb[residualLayers][residualBands] {};",
        "    };",
        "    struct Table",
        "    {",
@@ -178,6 +217,8 @@ out = ["#pragma once", "",
        "        int fadeAbove;        // semitones",
        "        unsigned scalars;     // 1 << Scalar for each one the table sets",
        "        const Row* rows;      // first..last",
+       "        bool knots;           // (round 11) any row has knotOn or knotRelease",
+       "        bool residual;        // (round 11) every row has residualDb",
        "    };"]
 tables = []
 for inst in ("violin", "cello"):
@@ -197,10 +238,21 @@ for inst in ("violin", "cello"):
     out.append("    static constexpr Row %sRows[%d] {" % (inst, len(rows)))
     for n, row in zip(range(tab["first"], tab["last"] + 1), rows):
         out.append("        { %s, // %d" % (", ".join(floats(row.get(key, []), DIGITS[inst]) for _, key in ARRAYS), n))
-        out.append("          %s }," % floats([row.get(key, 0.0) for _, key in SCALARS] if mask else [], DIGITS[inst]))
+        knots = ", {}, {}"   # (every member given: a default initializer can't be read before the struct is complete)
+        if "kn_on" in tab["notes"][str(tab["first"])]:
+            assert all(len(row[key]) == 8 and all(len(v) == len(sim.DEFAULT[key + "_t"]) - 1 for v in row[key]) for key in ("kn_on", "kn_rl"))
+            knots = ",\n          { %s },\n          { %s }" % tuple(", ".join(floats(v, DIGITS[inst]) for v in row[key]) for key in ("kn_on", "kn_rl"))
+        residual = ", {}"
+        if "rs0_db" in row:
+            assert all(len(row["rs%d_db" % l]) == len(RS_EDGES) for l in range(3))
+            residual = ",\n          { %s }" % ", ".join("{ %s }" % ", ".join(number(x, DIGITS[inst]) + "f" for x in row["rs%d_db" % l]) for l in range(3))
+        out.append("          %s%s%s }," % (floats([row.get(key, 0.0) for _, key in SCALARS] if mask else [], DIGITS[inst]), knots, residual))
     out.append("    };")
-    tables.append("{ %s, %d, %d, %s, %d, 0x%xu, %sRows }" % (number(tab["size"]), tab["first"], tab["last"],
-                                                             "true" if tab["hold_below"] else "false", tab["fade_above"], mask, inst))
+    assert all(("rs0_db" in row) == ("rs0_db" in rows[0]) for row in rows)
+    tables.append("{ %s, %d, %d, %s, %d, 0x%xu, %sRows, %s, %s }" % (number(tab["size"]), tab["first"], tab["last"],
+                                                                     "true" if tab["hold_below"] else "false", tab["fade_above"], mask, inst,
+                                                                     "true" if any("kn_on" in row for row in rows) else "false",
+                                                                     "true" if "rs0_db" in rows[0] else "false"))
 out += ["    static constexpr int tableCount = %d;" % len(tables),
         "    static constexpr Table tables[tableCount] { %s };" % (", ".join(tables)),
         "};", ""]

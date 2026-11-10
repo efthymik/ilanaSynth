@@ -3,6 +3,7 @@
 #include "dsp/MultiSample.h"
 #include "gui/SampleBrowserModel.h"
 #include "dsp/PitchDetect.h"
+#include "dsp/ModalBowedLayers.h"
 
 #ifdef ILANA_TEST_BUILD
 #include "dsp/Modulation.h"
@@ -1388,6 +1389,10 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
     juce::ScopedNoDenormals noDenormals;
     spectralCache->setSynchronous (isNonRealtime());
     stretchRenderer->setSynchronous (isNonRealtime());
+    // (Modal Bowed's residual layers: an offline render waits for their
+    // loops, so every render is the same; at once when they are built.)
+    if (isNonRealtime())
+        ModalBowedLayers::waitUntilBuilt();
 
     const auto totalNumInputChannels = getTotalNumInputChannels();
     const auto totalNumOutputChannels = getTotalNumOutputChannels();
