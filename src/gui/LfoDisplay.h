@@ -1278,7 +1278,10 @@ private:
         g.setColour (IlanaTheme::Ui::text3);
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny));
         // The whole hint at any width: the longest wording that fits (nothing cut).
-        const auto hintBox = wellArea().toNearestInt().reduced (10, 2).removeFromBottom (12);
+        // (The ruler inside the well, as in the EDIT pop-up, owns the foot: the hint then sits in the top
+        // margin, left of the GRID chip, instead of on top of the times. UI review 30.)
+        const auto hintBox = rulerInside ? wellArea().toNearestInt().reduced (10, 2).removeFromTop (12).withRight ((int) gridChipBounds().getX() - 8)
+                                         : wellArea().toNearestInt().reduced (10, 2).removeFromBottom (12);
         const auto hintFont = IlanaTheme::font (IlanaTheme::TextSize::tiny);
         juce::String hint;
         for (const auto* wording : { "click: add   drag: move   dot on a line: curve   double-click: delete   right-click: shapes",

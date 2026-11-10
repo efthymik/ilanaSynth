@@ -1326,7 +1326,9 @@ void IlanaSynthAudioProcessorEditor::updateChipVisibility()
         const auto source = juce::jlimit (0, (int) Mod::Source::Count - 1, chips[i]->getSourceIndex());
         const auto lfoKind = (int) IlanaSynthAudioProcessor::Module::Lfo;
         const auto shown = kind == -2   ? FmOperatorInfo::anyOperatorEnv (processorRef)
+                         // (A slider has no Y: its chip waits for a shape that does, unless a route uses it. UI review 30.)
                          : kind == -3   ? processorRef.apvts.getRawParameterValue ("vec_on")->load() > 0.5f
+                                              && ! (source == (int) Mod::Source::VectorY && processorRef.getVectorShape() == VectorShape::slider)
                          : kind == -4   ? msegModuleInUse (processorRef)
                          : kind == lfoKind ? processorRef.isLfoShown (index)
                          // AMP ENV leaves the bar while the voice plays the

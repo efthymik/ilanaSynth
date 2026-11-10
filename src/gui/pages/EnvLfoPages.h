@@ -1533,6 +1533,19 @@ public:
         return compactRowsTop (simulated ? 3 : 2) + compactRow * ((compactKnobs (selected).size() + 3) / 4);
     }
 
+    // The shapes drawn by hand (Draw, Steps, Curve) and the MSEG get a pop-up twice as wide: the extra
+    // width is all graph, so a step or a point is big enough to grab (UI review 30, S8). The other
+    // shapes keep ilana's compact card.
+    bool compactWantsWideGraph() const
+    {
+        if (selected == msegId)
+            return true;
+        if (selected < 0 || selected >= IlanaSynthAudioProcessor::numLfos)
+            return false;
+        const auto shape = shapeOf (selected);
+        return shape >= 6 && shape <= 8;
+    }
+
     // The compact layout's size changed (another shape, another source).
     std::function<void()> onCompactSizeChanged;
 
@@ -2467,9 +2480,10 @@ private:
         resized();
         repaint();
 
-        if (compact && compactHeight() != lastCompactHeight)
+        if (compact && (compactHeight() != lastCompactHeight || compactWantsWideGraph() != lastCompactWide))
         {
             lastCompactHeight = compactHeight();
+            lastCompactWide = compactWantsWideGraph();
             if (onCompactSizeChanged != nullptr)
                 onCompactSizeChanged();
         }
@@ -2518,6 +2532,7 @@ private:
     LfoThumbBar thumbs;
     bool compact = false;
     int lastCompactHeight = -1;
+    bool lastCompactWide = false;
     std::vector<std::array<std::unique_ptr<PillToggle>, 5>> pills; // the compact layout's SYNC RETRIG KEY LOOP KICK
     std::vector<std::unique_ptr<LfoDisplay>> displays;
     std::vector<std::unique_ptr<Controls>> controlsList;
