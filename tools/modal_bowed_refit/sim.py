@@ -1,5 +1,5 @@
 """Python twin of src/dsp/ModalBowed.h (bowed notes) for fitting (DEFAULT: the engine as
-fitted). The release: lift=1 keeps the bow's speed as its pressure eases over rel_s
+fitted, round 8). The release: lift=1 keeps the bow's speed as its pressure eases over rel_s
 (lift=0, the bow slowing to a stop on the string, braked the note into a cliff about
 0.35 s after the note-off), the upper partials' losses rise to ring times over ring_s
 and fade_db fades the note (dB a second) once let go."""
@@ -43,7 +43,8 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
            direct_lp, rosin_hp, jit_hp,
            ob_db, ob_knee, ob_slope, ob_s,
            room_g, room_len, room_fb, room_p, rloss, rpow,
-           ob_ksz, sw_sz):
+           ob_ksz, sw_sz,
+           rdrop_db, rdrop_s, tail_db, tail_s, tail_t0, sw2, nz_amt, ntail, hum_k, hum_all, rgp):
     k = 1.0 / sr
     n_ = np.arange(1, modes + 1).astype(np.float64)
     shape = np.sin(n_ * np.pi * beta)
@@ -79,18 +80,30 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
     sc = 1.0 - np.exp(-1.0 / (max(1e-3, swell_s) * sr))
     # (round 7: and builds size ** sw_sz slower on a bigger body; the release as it was)
     sc_on = 1.0 - np.exp(-1.0 / (max(1e-3, swell_s * size ** sw_sz) * sr))
+    # (round 8) The stroke builds as two such stages in a row (sw2 = 1: an S, the bow
+    # gathering speed from rest; 0: the one stage as it was).
+    swell_b = 0.0; jrat = 1.0
     hp_state = 0.0; hp_prev = 0.0
     hp_a = np.exp(-2 * np.pi * hiss_hp / sr)
     phase = 0.0; vib_env = 0.0
     lp_a = np.exp(-2 * np.pi * lp_hz / sr) if lp_hz < sr * 0.45 else 0.0
     lp = 0.0
     level = 1.0; fade = 10 ** (-fade_db / 20 / sr)
+    # (round 8) The let-go in two stages, as Spitfire's (a release sample: a quick drop,
+    # a short hold, a fall to a quiet tail of the hall): a gain after the room, at the
+    # block rate, glided. It drops rdrop_db at once (over rdrop_s: the bow off the
+    # string), then tail_db more as a smooth step from tail_t0 over tail_s; the room's
+    # own ring goes on under it, that much quieter.
+    rgain = 1.0; rgain_step = 0.0; nboost = 1.0
     # The box radiates little below its lowest resonance: the direct path is
     # high-passed (two poles, Butterworth) at direct_hp / size.
     use_hp = direct_hp > 0.0
     hb0 = 1.0; hb1 = 0.0; hb2 = 0.0; ha1 = 0.0; ha2 = 0.0
     if use_hp:
-        w0 = 2 * np.pi * min(direct_hp / size, sr * 0.45) / sr
+        # (round 8: and nothing of the string's is under its fundamental; what the twin has there is the
+        # rosin's jitter leaning on the modes, a hum: the corner no lower than hum_k times the note)
+        # (and, the whole bridge going through it, no higher than 0.7 times the note: a cello's low fundamentals stay)
+        w0 = 2 * np.pi * min(max(min(direct_hp / size, 0.7 * f0) if hum_all > 0 else direct_hp / size, hum_k * f0), sr * 0.45) / sr
         al = np.sin(w0) / (2 * 0.7071067811865476)
         cw = np.cos(w0); a0 = 1 + al
         hb0 = (1 + cw) / 2 / a0; hb1 = -(1 + cw) / a0; hb2 = hb0; ha1 = -2 * cw / a0; ha2 = (1 - al) / a0
@@ -172,9 +185,20 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
             # Let go: the upper partials' losses rise to ring times over
             # ring_s (the lifting bow's hair stops feeding them).
             gone = min(1.0, (i - held) / (max(1e-3, ring_s) * sr))
-            sigma = loss0 + loss1 * (1.0 + (ring - 1.0) * gone) * hz0 * hz0 + gone * rloss * (hz0 / 1000.0) ** rpow
+            # (round 8: the released partials' extra loss comes in as gone ** rgp, late
+            # on a big body, rgp = size ** rg_k; 1 on a violin)
+            gr = gone if rgp == 1.0 else gone ** rgp
+            sigma = loss0 + loss1 * (1.0 + (ring - 1.0) * gone) * hz0 * hz0 + gr * rloss * (hz0 / 1000.0) ** rpow
             decay = np.exp(-sigma * k)
             fall = decay * decay
+            tr = (i + 32 - held) / sr
+            xs = min(1.0, max(0.0, (tr - tail_t0) / max(1e-3, tail_s)))
+            rtarget = np.exp(-DB * (rdrop_db * (1.0 - np.exp(-tr / max(1e-4, rdrop_s))) + tail_db * xs * xs * (3.0 - 2.0 * xs)))
+            rgain_step = (rtarget - rgain) / 32.0
+            # (the hair's noise is not in that fall: the lifted bow's breath and the hall's
+            # hiss carry on under the tail, fading with the bow's pressure; ntail = 1 keeps
+            # all of it, 0 lets it fall with the note)
+            nboost = rtarget ** -ntail
         if i % 32 == 0:
             t = i / sr
             ob_now = obshape * np.exp(-t / ob_s)
@@ -232,9 +256,14 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
         on = 1.0 if i < held else 0.0
         env += (on - env) * (ac if on > 0 else rc)
         swell += (on - swell) * (sc_on if on > 0 else sc)
+        swell_b += (swell - swell_b) * (sc_on if on > 0 else sc)
         # The bow's speed: lift > 0 keeps it going as the bow leaves the
         # string (a lift, not a stop that brakes the string).
-        fac = env * (1.0 - swell_amt + swell_amt * swell)
+        fac = env * (1.0 - swell_amt + swell_amt * (swell + sw2 * (swell_b - swell)))
+        # (round 8) The hair's noise is there from the start (Spitfire's floor between the
+        # partials is up within 50 ms, the partials take half a second): its own, shallower
+        # swell, nz_amt deep (under 0: the stroke's, as it was).
+        nfac = fac if nz_amt < 0 else env * (1.0 - nz_amt + nz_amt * (swell + sw2 * (swell_b - swell)))
         if on > 0:
             senv = fac
         else:
@@ -251,26 +280,33 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
         noise_out = 0.0
         if env > 1e-5:
             speed = vbow * loud_f * senv
-            bow = speed * (1.0 + 0.6 * vel * bite) * (1.0 + w1 * jitter_amt)
+            bow = speed * (1.0 + 0.6 * vel * bite) * (1.0 + w1 * jitter_amt * jrat)
             dv = bow - v
             slope = 5.0 - 4.0 * grip
             table = min(1.0, (abs(dv * slope) + 0.75) ** -4.0)
             force = dv * table * env
-            noise_out = w2 * vbow * loud_f * fac
+            noise_out = w2 * vbow * loud_f * nfac
+            if on > 0 and i % 32 == 0:
+                jrat = nfac / max(1e-6, fac)   # (the rosin's jitter too: as strong against the full stroke from the start; held at its last on the let-go)
         bite *= bite_fall
         nxt = nxt + push * force
         qp = q; q = nxt
         out = out + out_step
         if i >= held:
             level *= fade
-        rn = rosin * noise_out * 1e-4
+        rn = rosin * noise_out * 1e-4 * nboost
         if use_rhp:
             rf = rb0 * rn + rb1 * rx1 + rb2 * rx2 - ra1 * ry1 - ra2 * ry2
             rx2 = rx1; rx1 = rn; ry2 = ry1; ry1 = rf
             rn = rf
         bridge = (np.sum(out * q) + rn) * level
         dr = bridge
-        if use_hp:
+        if use_hp and hum_all > 0:
+            # (hum_all: the whole bridge through it, the body's resonators too, not only the direct path)
+            dr = hb0 * bridge + hb1 * hx1 + hb2 * hx2 - ha1 * hy1 - ha2 * hy2
+            hx2 = hx1; hx1 = bridge; hy2 = hy1; hy1 = dr
+            bridge = dr
+        elif use_hp:
             dr = hb0 * bridge + hb1 * hx1 + hb2 * hx2 - ha1 * hy1 - ha2 * hy2
             hx2 = hx1; hx1 = bridge; hy2 = hy1; hy1 = dr
         if use_lp:
@@ -300,6 +336,8 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
                 if ridx[r] >= room_len[r]:
                     ridx[r] = 0
             raw = raw + room_g * wet
+        rgain += rgain_step
+        raw *= rgain
         lp = raw + lp_a * (lp - raw)
         y[i] = lp
     return y
@@ -319,18 +357,36 @@ def body_coeffs(inst, size=None):
 
 
 DEFAULT = dict(beta=0.11, loss0=0.8, loss1=3.947e-06, bright=2.144, b=1.0e-5, grip=0.5, speed=0.5, vel=80 / 127,
-               vib_ct=14.65, vib_rate=5.2, vib_delay=0.25, vib_rise=0.4, swell_s=0.3544, swell_amt=0.8208,
-               rosin=0.01695, jitter=0.08536, rel_s=1.0, fade_db=35.79, hiss=0.0003336, hiss_hp=8000.0, top=12000.0,
+               vib_ct=14.65, vib_rate=5.2, vib_delay=0.25, vib_rise=0.4, swell_s=0.2023, swell_amt=0.9163,
+               rosin=0.01695, jitter=0.08536, rel_s=1.19, fade_db=7.0, hiss=0.0003336, hiss_hp=8000.0, top=12000.0,
                attack_scale=0.05, lp_hz=5590.0,
                rip_db=3.326, rip_c=19.46, slow_db=2.052, slow_hz=0.6, loud_db=1.742,
-               vib_rate_dev=0.09024, vib_depth_dev=0.4561, vib_drift_hz=0.8, direct_db=-10.33, ring=17.84, lift=1.0, ring_s=0.4991,
+               vib_rate_dev=0.09024, vib_depth_dev=0.4561, vib_drift_hz=0.8, direct_db=-10.33, ring=8.6, lift=1.0, ring_s=0.4991,
                fl_db=21.35, fl_hz=16.51, fl_slope=0.0, fl_hzslope=0.7853, jit_ct=0.0, jit_hz=20.0, pdrift_ct=1.441, pdrift_hz=0.5,
                fl_knee=818.2, fl_fslope=1.285, rip_knee=963.9, rip_fslope=2.074, direct_hp=96.61, fl_damp=1.0, fl_clip=30.0,
                direct_lp=20000.0, rosin_hp=0.0, jit_hp=0.0,
-               ob_db=15.04, ob_knee=1990.0, ob_slope=2.82, ob_s=0.1429,
-               ob_ksz=1.0, sw_sz=0.8,
-               room_db=-2.5, room_sz=-4.544, room_ms=18.44, room_lo=38.88, room_hi=159.5, rloss=23.94, rpow=3.2245,
-               room_lk=1.086, room_hk=0.351, rloss_k=5.146)
+               ob_db=17.46, ob_knee=2200.0, ob_slope=2.903, ob_s=0.158,
+               ob_ksz=1.56, sw_sz=0.25,
+               room_db=-2.5, room_sz=-4.544, room_ms=18.44, room_lo=38.88, room_hi=159.5, rloss=2.27, rpow=3.2245,
+               room_lk=1.086, room_hk=0.351, rloss_k=11.925,
+               ring_k=-2.297, rpow_k=1.053, rg_k=1.957, fade_k=0.2405,
+               dir_sz=-12.0, dhp_k=0.87, vib_k=-0.5, obs_k=0.96,
+               rdrop_db=4.8, rdrop_s=0.02, tail_db=38.2, tail_s=0.54, tail_t0=0.093, sw2=0.674, nz_amt=0.265, ntail=0.8, hum_k=0.33, hum_all=1.0)
+
+# The two-stage let-go (rel_s, fade_db, ring, rloss, rdrop_db, tail_db, ntail) was fitted to the
+# violin's partial trajectories. On held-out notes (2 seeds) it brings the trajectory error after
+# the note-off from 9.5 to 6.3 dB and look.py's release term, counted over the cells within 40 dB
+# of the note's peak, from 9.6 to 7.4; the unmasked term goes from 7.8 to 9.25 (over half of it
+# is cells more than 40 dB down, where Spitfire's tail is a low, dark noise). RELEASE7 is the
+# release as it was (play(inst, note, **RELEASE7)).
+RELEASE7 = dict(rel_s=1.0, fade_db=35.79, ring=17.84, rloss=23.94, rdrop_db=0.0, tail_db=0.0, ntail=0.0)
+
+# Round 8's onset and let-go are the violin's: at the cello's size these terms keep their round 7
+# values (the new ones off), each blended in between by t = log(size) / log(2.1), held to 0..1
+# (play()); the cello's own round 8 terms are the size powers in play(), on top of these.
+# hum_k and hum_all are not blended: every size has them.
+CELLO = dict(swell_s=0.3544, swell_amt=0.8208, ob_db=15.04, ob_knee=1990.0, ob_slope=2.82, ob_s=0.1429,
+             sw2=0.0, nz_amt=0.8208, **RELEASE7)
 
 
 ROOM_RATIOS = np.array([0.8013, 0.9137, 1.0798, 1.2052])  # (the lines' lengths against room_ms, near-even, coprime once rounded)
@@ -362,6 +418,11 @@ def room_coeffs(p, sr=SR):
 
 def play(inst, note, seconds=4.8, held=4.0, seed=1, **kw):
     p = dict(DEFAULT); p.update(kw)
+    t = min(1.0, max(0.0, np.log(SIZES[inst]) / np.log(2.1)))
+    if t > 0.0:
+        cel = dict(CELLO); cel.update({k: v for k, v in kw.items() if k in CELLO})   # (a value given by hand holds at every size)
+        for key, v in cel.items():
+            p[key] = v if t >= 1.0 else p[key] + (v - p[key]) * t
     f0 = 440 * 2 ** ((note - 69) / 12)
     modes = int(max(1, min(64, min(p["top"], SR * 0.45) / f0)))
     attack = 0.05 * min(2.5, max(1.0, 220.0 / f0)) * p["attack_scale"]
@@ -374,6 +435,21 @@ def play(inst, note, seconds=4.8, held=4.0, seed=1, **kw):
     # its released partials lose more up high, rloss times size ^ rloss_k: all
     # 1 at a violin's size)
     sz = SIZES[inst]
+    # (round 8, cello only, all exactly 1 (or + 0) at a violin's size. The release by
+    # partial: the low partials ring on (ring's excess times size ^ ring_k) while the
+    # upper ones die steeply and late (rpow times size ^ rpow_k, the ramp's power
+    # size ^ rg_k, rloss_k retuned) and the fade is size ^ fade_k quicker. The wood:
+    # the direct path dir_sz dB down per doubling of size (the body's resonances carve
+    # the spectrum; the cello's gains refitted with it), its high-pass at
+    # direct_hp / size ^ (1 - dhp_k), the vibrato size ^ vib_k as deep. The onset: the
+    # upper partials' darkening lasts size ^ obs_k longer (ob_ksz, sw_sz retuned).)
+    p["ring"] = 1.0 + (p["ring"] - 1.0) * sz ** p["ring_k"]
+    p["rpow"] = p["rpow"] * sz ** p["rpow_k"]
+    p["fade_db"] = p["fade_db"] * sz ** p["fade_k"]
+    p["direct_hp"] = p["direct_hp"] * sz ** p["dhp_k"]
+    p["direct_db"] = p["direct_db"] + p["dir_sz"] * np.log2(sz)
+    p["vib_ct"] = p["vib_ct"] * sz ** p["vib_k"]
+    p["ob_s"] = p["ob_s"] * sz ** p["obs_k"]
     rg, rl, rfb, rp = room_coeffs(dict(p, room_db=p["room_db"] + p["room_sz"] * np.log2(sz),
                                        room_lo=p["room_lo"] * sz ** p["room_lk"], room_hi=p["room_hi"] * sz ** p["room_hk"]))
     return kernel(f0, int(seconds * SR), int(held * SR), SR, modes, p["beta"], p["loss0"], loss1, p["b"], p["grip"],
@@ -388,4 +464,5 @@ def play(inst, note, seconds=4.8, held=4.0, seed=1, **kw):
                   p["direct_lp"], p["rosin_hp"], p["jit_hp"],
                   p["ob_db"], p["ob_knee"], p["ob_slope"], max(1e-3, p["ob_s"]),
                   rg, rl, rfb, rp, p["rloss"] * sz ** p["rloss_k"], p["rpow"],
-                  p["ob_ksz"], p["sw_sz"])
+                  p["ob_ksz"], p["sw_sz"],
+                  p["rdrop_db"], p["rdrop_s"], p["tail_db"], p["tail_s"], p["tail_t0"], p["sw2"], p["nz_amt"], p["ntail"], p["hum_k"], p["hum_all"], sz ** p["rg_k"])

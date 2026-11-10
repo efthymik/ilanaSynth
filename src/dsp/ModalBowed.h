@@ -41,8 +41,8 @@
 //                a cello's wolf (near G#3 at the cello's size, C4 on the
 //                violin). Past halfway it howls: the resonance shakes the
 //                bow off the string a few times a second, so the whole note
-//                stutters and the box rings louder (the notes a semitone
-//                either side and an octave below join in). At 0 the string
+//                cuts in and out and the box rings louder; at the top the
+//                notes within a few semitones and an octave below join in. At 0 the string
 //                plays exactly as fitted.
 //   DAMPER       how fast the string stops once the note is let go (at 0 a
 //                bowed note fades as Spitfire's do, a pluck rings on)
@@ -73,6 +73,19 @@
 // delay lines per voice, darker as it decays, longer for a bigger box) holds
 // the note's tail after the bow lifts, as Spitfire's hall does. Hear the
 // room with an amp release of 2.5 s or more. The pizzicato stays dry.
+// Round 8 (2026-11-10), scored on whole held-out samples and on each
+// partial's level over time. The violin: nothing sounds under the note (the
+// whole bridge is high-passed a third of the way up to the fundamental: the
+// rosin's jitter hummed there); the stroke gathers speed from rest (two
+// stages, an S) while the hair's noise is there from the start; and the
+// let-go is Spitfire's two stages: a quick drop as the bow leaves, then a
+// fall to a quiet tail of the room. The cello (all of it by SIZE, nothing at
+// the violin's): more wood, less brass. Its spectrum was too smooth (too
+// much of the bridge straight through, too little of the body's
+// resonances), so the direct path drops 12 dB per doubling of SIZE under a
+// refitted body, and its vibrato is shallower; its low partials ring on
+// after the let-go while the upper ones die late and steeply. Between the
+// two (a viola) the terms blend by the log of SIZE.
 // Eco keeps half the modes and the body's lower half.
 
 #include <juce_core/juce_core.h>
@@ -189,7 +202,9 @@ public:
         velocityLevel = juce::jlimit (0.0f, 1.0f, velocity);
         seed = (std::uint32_t) (randomUnit * 4294967040.0f) | 1u;
         vibratoPhase = randomUnit * juce::MathConstants<float>::twoPi;
-        swell = liftSpeed = 0.0f;
+        swell = swellSecond = liftSpeed = 0.0f;
+        jitterRatio = letGo = tailNoiseGain = 1.0f;
+        letGoStep = 0.0f;
         hissState = hissLast = tilt = 0.0f;
         releasedAt = -1;   // (before updateModes: the release's losses are off)
         // The mode count is set by the note's pitch at the start (a bend
@@ -280,7 +295,11 @@ private:
         {
             // The envelope: the bow sets on over attackSeconds, eases off on release.
             envelope += ((noteHeld ? 1.0f : 0.0f) - envelope) * (noteHeld ? attackCoefficient : releaseCoefficient);
-            swell += ((noteHeld ? 1.0f : 0.0f) - swell) * (noteHeld ? swellOnCoefficient : swellCoefficient);
+            const auto swellStep = noteHeld ? swellOnCoefficient : swellCoefficient;
+            swell += ((noteHeld ? 1.0f : 0.0f) - swell) * swellStep;
+            // (Round 8: a second such stage after the first, part of the way:
+            // an S, the bow gathering speed from rest.)
+            swellSecond += (swell - swellSecond) * swellStep;
             if (envelope > 1.0e-5f)
             {
                 seed = seed * 1664525u + 1013904223u;
@@ -289,16 +308,24 @@ private:
                 // On release the bow lifts off: its pressure eases (the
                 // envelope) but it keeps the speed it had, so it doesn't
                 // brake the string to a stop.
-                const auto stroke = envelope * (1.0f - swellDepth + swellDepth * swell);
+                const auto built = swell + swellSecondAtSize * (swellSecond - swell);
+                const auto stroke = envelope * (1.0f - swellDepthAtSize + swellDepthAtSize * built);
                 if (noteHeld)
                     liftSpeed = stroke;
                 const auto speed = bowSpeed * bowWander * liftSpeed;
-                hairNoise = ((float) (seed >> 8) * (2.0f / 16777216.0f) - 1.0f) * bowSpeed * bowWander * stroke;
+                // (Round 8: the hair's noise is there from the start, on a
+                // shallower swell of its own: Spitfire's floor between the
+                // partials is up within 50 ms, the partials take half a
+                // second. The rosin's jitter too, by jitterRatio.)
+                const auto noiseStroke = envelope * (1.0f - noiseSwellAtSize + noiseSwellAtSize * built);
+                hairNoise = ((float) (seed >> 8) * (2.0f / 16777216.0f) - 1.0f) * bowSpeed * bowWander * noiseStroke;
                 const auto bite = 1.0f + 0.6f * velocityLevel * biteEnvelope;
-                auto bow = speed * bite * (1.0f + rosin * rosinJitter);
+                auto bow = speed * bite * (1.0f + rosin * rosinJitter * jitterRatio);
                 if constexpr (wolf)
                     bow *= wolfGrip;
-                const auto pressure = juce::jlimit (0.0f, 1.0f, grip + expression * 0.75f);
+                auto pressure = juce::jlimit (0.0f, 1.0f, grip + expression * 0.75f);
+                if constexpr (wolf)
+                    pressure = juce::jlimit (0.0f, 1.0f, pressure + wolfPress * (1.0f - wolfGrip));   // (the lost bow digs in)
                 const auto difference = bow - bowVelocity;
                 const auto slope = 5.0f - 4.0f * pressure;
                 const auto table = juce::jmin (1.0f, std::pow (std::abs (difference * slope) + 0.75f, -4.0f));
@@ -338,7 +365,7 @@ private:
                 if (--wolfClock == wolfRest)
                     wolfLost = false;
             }
-            else if (wolfFloor < 1.0f && wolfRing > wolfHowlRatio * wolfFed)
+            else if (wolfFloor < 1.0f && wolfRing > wolfTrip * wolfFed)
             {
                 wolfLost = true;
                 wolfClock = wolfHold + wolfRest;
@@ -346,7 +373,7 @@ private:
             wolfGrip += ((wolfLost ? wolfFloor : 1.0f) - wolfGrip) * wolfGripStep;
         }
         // The hair's scrape reaches the bridge too, coloured by the body.
-        bridge = (bridge + bodyNoise * hairNoise) * level;
+        bridge = (bridge + bodyNoise * tailNoiseGain * hairNoise) * level;
         peakBridge = juce::jmax (peakBridge, std::abs (bridge));
 
         // The body: every resonator driven by the bridge, summed (and a
@@ -358,6 +385,10 @@ private:
         hx1 = bridge;
         hy2 = hy1;
         hy1 = radiated;
+        // (Round 8: bowed, the whole bridge goes through it, the resonators
+        // too: no hum under the note.)
+        if (! plucked)
+            bridge = radiated;
         // (and falls away up high: a big box's broad radiation is darker)
         const auto darker = lpB0 * radiated + lpB1 * lx1 + lpB2 * lx2 - lpA1 * ly1 - lpA2 * ly2;
         lx2 = lx1;
@@ -404,6 +435,9 @@ private:
                     roomAt[r] = 0;
             }
             sound += roomReturn * (roomLow[0] - roomLow[1] + roomLow[2] - roomLow[3]);
+            // (Round 8: the let-go's gain, after the room; see nextBlock.)
+            letGo += letGoStep;
+            sound *= letGo;
         }
         // A gentle roll-off (tiltHz) sets the top of the spectrum.
         tilt = sound + tiltPole * (tilt - sound);
@@ -426,17 +460,47 @@ private:
         if (releasedAt >= 0 && ! plucked)
         {
             const auto gone = juce::jmin (1.0, (double) (elapsed - releasedAt) / (juce::jmax (1.0e-3, releaseRingSeconds) * sampleRate));
-            const auto upper = 1.0 + ((double) releaseRing - 1.0) * gone;
+            const auto upper = 1.0 + (releaseRingAtSize - 1.0) * gone;
+            // (Round 8: on a bigger body the released partials' extra loss
+            // comes in late, as gone ^ releaseRampPower; 1 on a violin.)
+            const auto late = releaseRampPower == 1.0 ? gone : std::pow (gone, releaseRampPower);
             if (upper != ringUpper || gone < 1.0)
             {
                 ringUpper = upper;
                 const auto low = (double) loss0 / (double) stringScale;
                 for (int n = 0; n < modes; ++n)
                 {
-                    lossOf[n] = (float) juce::jmin (low + (double) lossUpper[n] * upper + gone * (double) releaseLoss[n], sampleRate); // (fastExp's range)
+                    lossOf[n] = (float) juce::jmin (low + (double) lossUpper[n] * upper + late * (double) releaseLoss[n], sampleRate); // (fastExp's range)
                     const auto decay = std::exp (-(double) lossOf[n] / sampleRate);
                     fall[n] = (float) (decay * decay);
                 }
+            }
+        }
+        // The let-go in two stages (round 8), as Spitfire's release samples:
+        // a quick drop (letGoDropDb over letGoDropSeconds: the bow off the
+        // string), a short hold, then a fall of tailDb more (a smooth step
+        // from tailDelay over tailSeconds) to a quiet tail; the room's own
+        // ring goes on under it, that much quieter. A gain after the room,
+        // glided over the block. The hair's noise is kept out of most of
+        // that fall (tailNoise of it, in dB): the lifted bow's breath
+        // carries on under the tail, fading with the bow's pressure.
+        if (! plucked)
+        {
+            if (releasedAt >= 0)
+            {
+                const auto since = (double) (elapsed + blockSize - releasedAt) / sampleRate;
+                const auto x = juce::jlimit (0.0, 1.0, (since - tailDelay) / tailSeconds);
+                const auto down = letGoDropAtSize * (1.0 - std::exp (-since / letGoDropSeconds)) + tailDbAtSize * x * x * (3.0 - 2.0 * x);
+                const auto target = (float) std::exp (-(double) decibel * down);
+                letGoStep = (target - letGo) * (1.0f / (float) blockSize);
+                tailNoiseGain = (float) std::exp ((double) decibel * down * tailNoiseAtSize);
+            }
+            else if (noteHeld)
+            {
+                // (The rosin's jitter is as strong against the full stroke
+                // from the start; held at its last on the let-go.)
+                const auto built = swell + swellSecondAtSize * (swellSecond - swell);
+                jitterRatio = (1.0f - noiseSwellAtSize + noiseSwellAtSize * built) / (1.0f - swellDepthAtSize + swellDepthAtSize * built);
             }
         }
         updateVibrato();
@@ -445,7 +509,7 @@ private:
         if (releasedAt >= 0 && (damperAmount > 0.0f || ! plucked))
         {
             const auto seconds = (float) (blockSize / sampleRate);
-            level *= std::exp2 (-(damperAmount * 60.0f + (plucked ? 0.0f : releaseFadeDb / 6.0206f)) * seconds);
+            level *= std::exp2 (-(damperAmount * 60.0f + (plucked ? 0.0f : releaseFadeAtSize / 6.0206f)) * seconds);
         }
         // Silent once the bow is off and the string and body have died away.
         if (! noteHeld && (plucked || envelope < 1.0e-4f))
@@ -460,8 +524,9 @@ private:
             auto room = 0.0f;
             for (int r = 0; r < roomLines; ++r)
                 room += std::abs (roomLow[r]);
-            if (((energy * level < 3.0e-5f * peakBridge && body < 3.0e-5f * peakBody) || level < 1.0e-5f)
-                && room * roomReturn < 3.0e-5f * peakBody * outputGain)
+            // (letGo: the let-go's gain on all of it, 1 for a pluck)
+            if (((energy * level * letGo < 3.0e-5f * peakBridge && body * letGo < 3.0e-5f * peakBody) || level < 1.0e-5f)
+                && room * roomReturn * letGo < 3.0e-5f * peakBody * outputGain)
                 silent = true;
         }
     }
@@ -517,7 +582,7 @@ private:
         if (vibratoPhase > juce::MathConstants<float>::twoPi)
             vibratoPhase -= juce::MathConstants<float>::twoPi;
         const auto onset = juce::jlimit (0.0, 1.0, (seconds - vibratoDelay) / vibratoRise);
-        const auto cents = (double) vibratoCents * (1.0 + (double) depthDrift) * onset * std::sin ((double) vibratoPhase) + (double) pitchDrift;
+        const auto cents = (double) vibratoCents * vibratoAtSize * (1.0 + (double) depthDrift) * onset * std::sin ((double) vibratoPhase) + (double) pitchDrift;
         const auto ratio = std::exp2 (cents / 1200.0);
         const auto k = juce::MathConstants<double>::twoPi / sampleRate;
         // (The ripple's two sines at each mode's place plus the swing, by
@@ -531,7 +596,7 @@ private:
         // force starts onsetDarkDb down (onsetDark[n]) and comes back over
         // onsetDarkSeconds (Spitfire's upper partials build up after the
         // fundamental: a gentle stroke's rounded Helmholtz corner).
-        const auto dark = (float) std::exp (-seconds / onsetDarkSeconds);
+        const auto dark = (float) std::exp (-seconds / onsetDarkSecondsAtSize);
         for (int n = 0; n < modes; ++n)
         {
             // (with the hair on the string: the grip eases off as the bow
@@ -616,11 +681,7 @@ private:
             const auto decay = std::exp (-sigma * k);
             turn[n] = (float) (2.0 * decay * std::cos (juce::MathConstants<double>::twoPi * hz * k));
             modeHz[n] = (float) hz;
-            // (once let go, the mode loses releaseLossHz more a second at 1 kHz, by (hz / 1 kHz) ^ releaseLossSlope)
             flutterShape[n] = (float) juce::jmin (1.0, std::pow (hz / (double) flutterKnee, (double) flutterFreqSlope));
-            // (once let go, the mode loses releaseLossHz more a second at 1 kHz, by (hz / 1 kHz) ^ releaseLossSlope)
-            releaseLoss[n] = (float) ((double) releaseLossHz * std::pow (fittedSize(), (double) releaseLossSizeSlope) * std::pow (hz / 1000.0, (double) releaseLossSlope));
-            onsetDark[n] = (float) (onsetDarkDb * juce::jmin (1.0, std::pow (hz * std::pow (fittedSize(), (double) onsetDarkKneeSize) / (double) onsetDarkKnee, (double) onsetDarkSlope)));
             fall[n] = (float) (decay * decay);
             shape[n] = (float) std::sin (index * juce::MathConstants<double>::pi * (double) bowAt);
             shapeSum += (double) shape[n] * shape[n];
@@ -647,10 +708,8 @@ private:
         wanderFilter (pitchDriftHz, pitchDriftCents, pitchPole, pitchGain);
         updateRipple();
         attackCoefficient = (float) (1.0 - std::exp (-1.0 / (attackSeconds () * sampleRate)));
-        releaseCoefficient = (float) (1.0 - std::exp (-1.0 / (releaseSeconds * sampleRate)));
-        swellCoefficient = (float) (1.0 - std::exp (-1.0 / (swellSeconds * sampleRate)));
-        swellOnCoefficient = (float) (1.0 - std::exp (-1.0 / (swellSeconds * std::pow (fittedSize(), swellSize) * sampleRate)));
-        sizeTermsAt = bodySize;
+        updateSizeTerms();
+        updateHighPass();
         hissPole = (float) std::exp (-juce::MathConstants<double>::twoPi * 8000.0 / sampleRate);
         tiltPole = (float) std::exp (-juce::MathConstants<double>::twoPi * juce::jmin ((double) tiltHz, sampleRate * 0.45) / sampleRate);
         biteFall = (float) std::exp (-1.0 / (0.08 * sampleRate));
@@ -671,23 +730,72 @@ private:
     // (0.99999994), taken as 1 so the fitted violin plays as it did.
     double fittedSize() const { return std::abs (bodySize - 1.0f) < 1.0e-4f ? 1.0 : (double) bodySize; }
 
-    // The terms SIZE scales that the modes also need (round 7: the cello's
-    // onset, swell and released partials): set with the modes, and redone
-    // here when SIZE moves on its own.
+    // The terms SIZE scales that the modes also need: set with the modes,
+    // and redone here when SIZE moves on its own. Round 7: the cello's
+    // onset, swell and released partials. Round 8: the violin's new onset
+    // and let-go blend back to their round 7 values at the cello's size (by
+    // the log of SIZE, held between the two), and the cello's own terms are
+    // powers of SIZE on top: all 1 at the violin's, and held at the violin's
+    // or the cello's past either end (they were fitted between the two).
     void updateSizeTerms()
     {
         const auto size = fittedSize();
-        const auto lossAtSize = (double) releaseLossHz * std::pow (size, (double) releaseLossSizeSlope);
-        const auto knee = (double) onsetDarkKnee / std::pow (size, (double) onsetDarkKneeSize);
+        const auto span = juce::jlimit (1.0, ModalBowedBodies::cello, size);
+        const auto toCello = juce::jlimit (0.0, 1.0, std::log (size) / std::log (ModalBowedBodies::cello));
+        const auto at = [toCello] (double violin, double cello) { return toCello >= 1.0 ? cello : violin + (cello - violin) * toCello; };
+        const auto swellTime = at (swellSeconds, swellSecondsCello);
+        swellCoefficient = (float) (1.0 - std::exp (-1.0 / (swellTime * sampleRate)));
+        swellOnCoefficient = (float) (1.0 - std::exp (-1.0 / (swellTime * std::pow (size, swellSize) * sampleRate)));
+        swellDepthAtSize = (float) at (swellDepth, swellDepthCello);
+        swellSecondAtSize = (float) at (swellSecondStage, 0.0);
+        noiseSwellAtSize = (float) at (noiseSwellDepth, swellDepthCello);   // (the cello's: the stroke's own)
+        releaseCoefficient = (float) (1.0 - std::exp (-1.0 / (at (releaseSeconds, releaseSecondsCello) * sampleRate)));
+        releaseFadeAtSize = (float) (at (releaseFadeDb, releaseFadeDbCello) * std::pow (span, releaseFadeSizeSlope));
+        releaseRingAtSize = 1.0 + (at (releaseRing, releaseRingCello) - 1.0) * std::pow (span, releaseRingSizeSlope);
+        releaseRampPower = std::pow (span, releaseRampSizeSlope);
+        letGoDropAtSize = at (letGoDropDb, 0.0);
+        tailDbAtSize = at (tailDb, 0.0);
+        tailNoiseAtSize = at (tailNoise, 0.0);
+        onsetDarkSecondsAtSize = at (onsetDarkSeconds, onsetDarkSecondsCello) * std::pow (span, onsetDarkSecondsSizeSlope);
+        vibratoAtSize = std::pow (span, vibratoSizeSlope);
+        const auto lossAtSize = at (releaseLossHz, releaseLossHzCello) * std::pow (size, (double) releaseLossSizeSlope);
+        const auto lossSlope = (double) releaseLossSlope * std::pow (span, releaseLossSlopeSizeSlope);
+        const auto darkDb = at (onsetDarkDb, onsetDarkDbCello);
+        const auto darkSlope = at (onsetDarkSlope, onsetDarkSlopeCello);
+        const auto knee = at (onsetDarkKnee, onsetDarkKneeCello) / std::pow (size, (double) onsetDarkKneeSize);
         for (int n = 0; n < modes; ++n)
         {
             const auto hz = (double) modeHz[n];
             // (once let go, the mode loses releaseLossHz more a second at 1 kHz, by (hz / 1 kHz) ^ releaseLossSlope)
-            releaseLoss[n] = (float) (lossAtSize * std::pow (hz / 1000.0, (double) releaseLossSlope));
-            onsetDark[n] = (float) (onsetDarkDb * juce::jmin (1.0, std::pow (hz / knee, (double) onsetDarkSlope)));
+            // (bounded for the float only: ramped in before lossOf's own bound)
+            releaseLoss[n] = (float) juce::jmin (lossAtSize * std::pow (hz / 1000.0, lossSlope), 1.0e30);
+            onsetDark[n] = (float) (darkDb * juce::jmin (1.0, std::pow (hz / knee, darkSlope)));
         }
-        swellOnCoefficient = (float) (1.0 - std::exp (-1.0 / (swellSeconds * std::pow (size, swellSize) * sampleRate)));
         sizeTermsAt = bodySize;
+    }
+
+    // The bridge's high-pass (two poles, Butterworth): at directHp for a
+    // violin, lower for a bigger box (round 8: by size ^ directHpSizeSlope
+    // less than in step with it: the cello's direct path starts higher,
+    // its body carries the low end), and (round 8, bowed) no lower than
+    // humRatio times the note: a bowed string has nothing under its
+    // fundamental, and what the model had there (the rosin's jitter leaning
+    // on the modes, out through the direct path and the low resonances'
+    // skirts) was a hum Spitfire's notes don't have.
+    void updateHighPass()
+    {
+        const auto span = juce::jlimit (1.0, ModalBowedBodies::cello, fittedSize());
+        const auto box = (double) directHp * std::pow (span, directHpSizeSlope) / (double) bodySize;
+        // (bowed, the whole bridge goes through it, so it stays under the note: at most humTop times it)
+        const auto corner = plucked ? box : juce::jmax (juce::jmin (box, (double) humTop * frequency), (double) humRatio * frequency);
+        const auto w0 = juce::MathConstants<double>::twoPi * juce::jmin (corner, sampleRate * 0.45) / sampleRate;
+        const auto alpha = std::sin (w0) / juce::MathConstants<double>::sqrt2; // (Q = 1 / sqrt 2)
+        const auto cw = std::cos (w0);
+        const auto a0 = 1.0 + alpha;
+        hpB0 = hpB2 = (float) ((1.0 + cw) * 0.5 / a0);
+        hpB1 = (float) (-(1.0 + cw) / a0);
+        hpA1 = (float) (-2.0 * cw / a0);
+        hpA2 = (float) ((1.0 - alpha) / a0);
     }
 
     // (allocate: prepare only; SIZE changes just the decays, not the lines.)
@@ -758,19 +866,12 @@ private:
         auto loudest = -200.0;
         for (int j = 0; j < B::count; ++j)
             loudest = juce::jmax (loudest, (double) lower[j] + blend * ((double) upper[j] - (double) lower[j]));
-        bodyDirect = (float) std::pow (10.0, ((double) directDb + loudest) / 20.0);
+        // (Round 8: the direct path directSizeDb down per doubling of the
+        // body's size, so a cello's resonances carve its spectrum: wood, not brass.)
+        const auto span = juce::jlimit (1.0, B::cello, fittedSize());
+        bodyDirect = (float) std::pow (10.0, ((double) directDb + directSizeDb * std::log2 (span) + loudest) / 20.0);
         wolfLoud = std::pow (10.0, (loudest + (double) wolfDb) / 20.0);
-        {
-            // (Two poles, Butterworth, at directHp for a violin, lower for a bigger box.)
-            const auto w0 = juce::MathConstants<double>::twoPi * juce::jmin ((double) directHp / size, sampleRate * 0.45) / sampleRate;
-            const auto alpha = std::sin (w0) / juce::MathConstants<double>::sqrt2; // (Q = 1 / sqrt 2)
-            const auto cw = std::cos (w0);
-            const auto a0 = 1.0 + alpha;
-            hpB0 = hpB2 = (float) ((1.0 + cw) * 0.5 / a0);
-            hpB1 = (float) (-(1.0 + cw) / a0);
-            hpA1 = (float) (-2.0 * cw / a0);
-            hpA2 = (float) ((1.0 - alpha) / a0);
-        }
+        updateHighPass();
         {
             // (and low-passed, two poles, at directLp for a violin, lower for a bigger box)
             const auto hz = (double) directLp / size;
@@ -874,6 +975,8 @@ private:
         wolfHold = (int) (wolfHoldSeconds * sampleRate);
         wolfRest = (int) (wolfRestSeconds * sampleRate);
         wolfFloor = 1.0f - (float) howl;
+        wolfPress = (float) howl;
+        wolfTrip = wolfHowlRatio * (float) std::pow ((double) (wolfHowlRatioTop / wolfHowlRatio), howl);
         wolfGripStep = (float) (1.0 - std::exp (-1.0 / (wolfGripSeconds * sampleRate)));
         wolfRingStep = (float) (1.0 - std::exp (-1.0 / (wolfRingSeconds * sampleRate)));
         wolfShape = (float) atBow;   // (the push as the bow sees it)
@@ -898,6 +1001,13 @@ private:
     float wanderPole = 0.01f, wanderGain = 0.0f, bowDriftGain = 0.0f, vibratoPole = 0.01f, rateDriftGain = 0.0f, depthDriftGain = 0.0f;
     float bowDrift = 0.0f, rateDrift = 0.0f, depthDrift = 0.0f, bowDriftIn = 0.0f, rateDriftIn = 0.0f, depthDriftIn = 0.0f;
     float bowWander = 1.0f, bodyDirect = 0.0f, liftSpeed = 0.0f;
+    // Round 8: the stroke's second stage, the jitter's share against the
+    // stroke, the let-go's gain and its step, the noise kept under the tail.
+    float swellSecond = 0.0f, jitterRatio = 1.0f, letGo = 1.0f, letGoStep = 0.0f, tailNoiseGain = 1.0f;
+    // (the fitted terms at this SIZE: updateSizeTerms)
+    float swellDepthAtSize = 0.9163f, swellSecondAtSize = 0.0f, noiseSwellAtSize = 0.265f, releaseFadeAtSize = 7.0f;
+    double releaseRingAtSize = 8.6, releaseRampPower = 1.0, letGoDropAtSize = 0.0, tailDbAtSize = 0.0, tailNoiseAtSize = 0.0;
+    double onsetDarkSecondsAtSize = 0.158, vibratoAtSize = 1.0;
     float flutterPole = 0.1f, flutterGain = 0.0f, pitchPole = 0.01f, pitchGain = 0.0f, pitchDrift = 0.0f, pitchDriftIn = 0.0f;
     float hpB0 = 1.0f, hpB1 = 0.0f, hpB2 = 0.0f, hpA1 = 0.0f, hpA2 = 0.0f, hx1 = 0.0f, hx2 = 0.0f, hy1 = 0.0f, hy2 = 0.0f;
     float lpB0 = 1.0f, lpB1 = 0.0f, lpB2 = 0.0f, lpA1 = 0.0f, lpA2 = 0.0f, lx1 = 0.0f, lx2 = 0.0f, ly1 = 0.0f, ly2 = 0.0f;
@@ -908,6 +1018,7 @@ private:
     double wolfHz = 0.0, wolfWidth = 1.0, wolfLoud = 0.0;
     float wolfShape = 0.0f, wolfRadiate = 0.0f, wolfRing = 0.0f, wolfFed = 0.0f, wolfGrip = 1.0f, wolfFloor = 1.0f, wolfGripStep = 0.01f, wolfRingStep = 0.001f;
     bool wolfLost = false;
+    float wolfPress = 0.0f, wolfTrip = 5.0e7f;
     int wolfClock = 0, wolfHold = 0, wolfRest = 0;
     int wolfFirst = 0, wolfEnd = 0;
     bool wolfOn = false, wolfActive = false;
@@ -921,11 +1032,26 @@ private:
     // at SIZE 1): on a bigger body the darkening reaches lower (the knee at
     // onsetDarkKnee / size ^ onsetDarkKneeSize) and the bow's swell builds
     // size ^ swellSize slower while the note is held.
-    static constexpr double swellSeconds = 0.3544, swellSize = 0.8;
-    static constexpr float onsetDarkKneeSize = 1.0f;
-    static constexpr float onsetDarkDb = 15.04f, onsetDarkKnee = 1990.0f, onsetDarkSlope = 2.82f;
-    static constexpr double onsetDarkSeconds = 0.1429;
-    static constexpr float swellDepth = 0.8208f, rosinJitter = 0.08536f, hissLevel = 3.336e-04f, bodyNoise = 1.695e-06f;
+    // Round 8: the violin's onset refitted, with a second swell stage
+    // (swellSecondStage of the way from one stage to two) and the hair's
+    // noise and the rosin's jitter on a shallower swell (noiseSwellDepth).
+    // The ...Cello values are round 7's, which the cello keeps (no second
+    // stage, the noise on the stroke's own swell): SIZE blends between the
+    // two. On a bigger body the darkening also lasts longer (size ^
+    // onsetDarkSecondsSizeSlope).
+    static constexpr double swellSeconds = 0.2023, swellSecondsCello = 0.3544, swellSize = 0.25;
+    static constexpr double swellDepth = 0.9163, swellDepthCello = 0.8208, swellSecondStage = 0.674, noiseSwellDepth = 0.265;
+    static constexpr float onsetDarkKneeSize = 1.56f;
+    static constexpr double onsetDarkDb = 17.46, onsetDarkKnee = 2200.0, onsetDarkSlope = 2.903;
+    static constexpr double onsetDarkDbCello = 15.04, onsetDarkKneeCello = 1990.0, onsetDarkSlopeCello = 2.82;
+    static constexpr double onsetDarkSeconds = 0.158, onsetDarkSecondsCello = 0.1429, onsetDarkSecondsSizeSlope = 0.96;
+    // Round 8: the bowed bridge's high-pass is no lower than humRatio times
+    // the note. The cello's wood (by SIZE, nothing at 1): the direct path
+    // directSizeDb down per doubling, its high-pass size ^
+    // directHpSizeSlope higher, the vibrato size ^ vibratoSizeSlope as deep.
+    static constexpr float humRatio = 0.33f, humTop = 0.7f;
+    static constexpr double directSizeDb = -12.0, directHpSizeSlope = 0.87, vibratoSizeSlope = -0.5;
+    static constexpr float rosinJitter = 0.08536f, hissLevel = 3.336e-04f, bodyNoise = 1.695e-06f;
     static constexpr float brightness = 2.144f, topHz = 12000.0f, tiltHz = 5590.0f, directDb = -10.33f;
     // The body's fine ripple (dB, cycles per octave) the vibrato sweeps the
     // partials across.
@@ -946,18 +1072,30 @@ private:
     // The bow's release: its pressure eases off over releaseSeconds as it
     // lifts, the upper partials come to lose releaseRing times more over
     // releaseRingSeconds, and the note fades at releaseFadeDb a second
-    // (Spitfire's notes once let go).
-    static constexpr double releaseSeconds = 1.0;
-    static constexpr float releaseFadeDb = 35.79f, releaseRing = 17.84f;
+    // (Spitfire's notes once let go). Round 8: the violin's refitted to each
+    // partial's fall, with the let-go's two stages (nextBlock: letGoDropDb
+    // over letGoDropSeconds, then tailDb more from tailDelay over
+    // tailSeconds, tailNoise of it kept off the hair's noise); the
+    // ...Cello values are round 7's (no stages), SIZE blending between.
+    static constexpr double releaseSeconds = 1.19, releaseSecondsCello = 1.0;
+    static constexpr double releaseFadeDb = 7.0, releaseFadeDbCello = 35.79, releaseRing = 8.6, releaseRingCello = 17.84;
     static constexpr double releaseRingSeconds = 0.4991;
+    static constexpr double letGoDropDb = 4.8, letGoDropSeconds = 0.02, tailDb = 38.2, tailSeconds = 0.54, tailDelay = 0.093, tailNoise = 0.8;
     // Once let go, each mode also loses releaseLossHz more a second at
     // 1 kHz, by (hz / 1 kHz) ^ releaseLossSlope (ramped in with the ring).
-    static constexpr float releaseLossHz = 23.94f, releaseLossSlope = 3.224f;
+    static constexpr double releaseLossHz = 2.27, releaseLossHzCello = 23.94;
+    static constexpr float releaseLossSlope = 3.224f;
     // Round 7, cello only (nothing at SIZE 1): a bigger body's released
     // partials lose more (releaseLossHz times size ^ releaseLossSizeSlope), and
     // its room is louder (roomSizeDbMore more per doubling) but shorter, its decays
     // times size ^ roomLowSizeSlope and size ^ roomHighSizeSlope.
-    static constexpr float releaseLossSizeSlope = 5.146f;
+    // Round 8, cello only: its low partials ring on once let go (the ring's
+    // excess over 1 times size ^ releaseRingSizeSlope) while the upper ones
+    // die steeply (the loss's slope times size ^ releaseLossSlopeSizeSlope)
+    // and late (ramped in as time ^ (size ^ releaseRampSizeSlope)), and the
+    // fade is size ^ releaseFadeSizeSlope quicker.
+    static constexpr float releaseLossSizeSlope = 11.925f;
+    static constexpr double releaseRingSizeSlope = -2.297, releaseLossSlopeSizeSlope = 1.053, releaseRampSizeSlope = 1.957, releaseFadeSizeSlope = 0.2405;
     static constexpr double roomLowSizeSlope = 1.086, roomHighSizeSlope = 0.351;
     // The room (fitted to the tails of Spitfire's long notes).
     static constexpr int roomLines = 4;
@@ -969,12 +1107,13 @@ private:
     // any bowed swing) and the resonance's sound (dB, see updateWolf).
     static constexpr float wolfSplitHz = 6.0f, wolfNarrow = 0.5f, wolfTopHz = 700.0f, wolfLimit = 0.05f, wolfDb = 3.0f;
     // The howl (WOLF's upper half): the resonance ringing wolfHowlRatio
-    // over what the bridge feeds it makes the bow lose the string for
-    // wolfHoldSeconds (its speed eases to nothing over wolfGripSeconds, so
-    // it brakes the string), then it bites again and can't lose it for
-    // wolfRestSeconds; the resonance is wolfHowlDb louder at the top.
-    static constexpr float wolfHowlRatio = 5.0e7f, wolfHowlDb = 4.0f;
-    static constexpr double wolfHoldSeconds = 0.08, wolfRestSeconds = 0.12, wolfGripSeconds = 0.02, wolfRingSeconds = 0.03;
+    // over what the bridge feeds it (down to wolfHowlRatioTop at the top:
+    // more notes around the wolf trip it) makes the bow lose the string for
+    // wolfHoldSeconds (its speed drops to nothing within wolfGripSeconds and
+    // it digs in, braking the string), then it bites again and can't lose
+    // it for wolfRestSeconds; the resonance is wolfHowlDb louder at the top.
+    static constexpr float wolfHowlRatio = 5.0e7f, wolfHowlRatioTop = 5.0e6f, wolfHowlDb = 8.0f;
+    static constexpr double wolfHoldSeconds = 0.12, wolfRestSeconds = 0.08, wolfGripSeconds = 0.005, wolfRingSeconds = 0.03;
     // The output's level: the string's units are tiny (metres of string,
     // narrow resonators); this brings a violin D4 near a plucked string's.
     static constexpr float outputGain = 30000.0f;

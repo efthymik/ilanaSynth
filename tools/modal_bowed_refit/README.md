@@ -66,4 +66,36 @@ swept by the vibrato filled the space under a low cello note: thin it out
 low down. The box's direct path needs a high-pass at its lowest resonance
 or a low note booms.
 
+Round 8 (2026-11-10): the violin's hum high-pass, S-shaped stroke and
+two-stage let-go, the cello's wood (direct path down, refitted body,
+shallower vibrato) and release by partial. In `sim.py` the violin's new terms
+blend to their round 7 values at the cello's size (`CELLO`, by
+log(size) / log(2.1)) and the cello's are powers of size on top (all 1 at
+size 1); `write_engine.py` knows both sets. Lessons:
+- Spitfire is sampled every whole tone: each odd MIDI note and the note
+  above it are one recording, pitch-shifted. Hold out whole pairs, or the
+  "held-out" notes are the fit notes again.
+- Two takes of the twin (seeds) already score about 9.5 apart on the picture
+  score, so a single note or seed says little: judge on all the notes with 2
+  or 3 seeds, and compare an engine render with the twin term by term.
+- Match each partial's level over time (a heterodyne track per harmonic,
+  against its own sustain level; attack and release errors apart): the band
+  terms cannot tell a partial from the noise around it. Over half of the
+  band release term is cells more than 40 dB under the note's peak; mask
+  them before judging a release (the two-stage let-go reads worse unmasked
+  and better masked and by partial).
+- "Brassy, not woody" was a too-smooth spectrum: too much of the bridge
+  straight through (the direct path) against the body's resonances, and a
+  too-deep vibrato. Measure the spectrum's jaggedness and formant contrast
+  against the recording's, not only the level profile.
+- Refitting a body under a quieter direct path drops the instrument's
+  loudness (the picture score is blind to level): check it. The cello's
+  gains carry + 4 dB to keep its mean loudness at round 7's.
+- A size power on a loss must be bounded after any ramp on it, not before
+  (bounding the cello's released loss first delayed its upper partials'
+  fall).
+- The hum high-pass on the whole bowed bridge follows the note (0.33 x f0)
+  but is capped at 0.7 x f0, so a low cello fundamental stays under the
+  corner of the direct path's own high-pass and keeps its level.
+
 Needs numpy, scipy, soundfile, numba, mido, matplotlib.
