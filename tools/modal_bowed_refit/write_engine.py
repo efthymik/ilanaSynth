@@ -57,7 +57,7 @@ put("directLp", p["direct_lp"])
 put("releaseLossHz", p["rloss"], "")
 put("releaseLossSlope", p["rpow"])
 # (the engine has room_sz in two parts, roomSizeDb + roomSizeDbMore: the second stays)
-put("roomSizeDb", p["room_sz"] - float(re.search(r"roomSizeDbMore = ([-0-9.e+]+)", s).group(1)), "")
+put("roomSizeDb", p["room_sz"] - float(re.search(r"roomSizeDbMore = ([-0-9.e+]+)", s).group(1)), "", digits=6)
 for name, key in (("roomDb", "room_db"), ("roomMs", "room_ms"), ("roomLowDecay", "room_lo"), ("roomHighDecay", "room_hi")):
     put(name, p[key], "")
 # (round 7: the cello's size powers; roomSizeDb and roomSizeDbMore together are room_sz)
@@ -101,22 +101,53 @@ for name, key, scale in (("brightnessCello", "bright", 1.0), ("stringLossHighCel
     put(name, sim.CELLO[key] * scale, "", digits=5)
 assert sim.CELLO["hiss_k"] == 0
 put("vibratoFitted", p["vib_ct"], "")
+# (round 10, the violin's: the air mode, the hair's noise into the 300-500 Hz modes, the floor's rumble,
+# the hiss's cap and onset, the wander's corner; rnb and lp_k are the fit's only, not in the engine)
+for name, key in (("airDb", "a0_db"), ("airSlope", "a0_k"), ("airHz", "a0_hz"), ("airBandwidth", "a0_bw"), ("airFloor", "a0_fl"),
+                  ("hairBodyDb", "b1_db"), ("hairBodySlope", "b1_k"), ("hairBodyLowHz", "b1_lo"), ("hairBodyHighHz", "b1_hi"),
+                  ("rumbleDb", "rb_db"), ("rumbleHz", "rb_hz"), ("rumbleBandwidth", "rb_bw"), ("hissCap", "hiss_cap"),
+                  ("hairOnsetDepth", "hs_depth"), ("hairOnsetSeconds", "hs_s"), ("wanderHz", "slow_hz")):
+    put(name, p[key], "")
+put("wanderHzCello", sim.CELLO["slow_hz"], "")
+assert p["rnb"] == 0 and p["lp_k"] == 0 and p["flr_ord"] == 2 and p["hs_rn"] == 1 and p["hiss_db"] == 0
+assert sim.CELLO["hs_depth"] == 0 and sim.CELLO["lp_k"] == 0
+# (round 10, the cello's: the vibrato's and flutter's values at the cello's size, the sine wander, the
+# flutter's high-pass, the level vibrato, the low floor and the string's top, all by t)
+for name, key in (("vibratoRateCello", "vib_rate"), ("vibratoDelayCello", "vib_delay"), ("vibratoRiseCello", "vib_rise"),
+                  ("flutterHzCello", "fl_hz"), ("depthWanderCello", "vib_depth_dev")):
+    put(name, sim.CELLO[key], "")
+for name, key in (("sineWanderDb", "sn_db"), ("sineWanderHz", "sn_hz"), ("sineWanderSpread", "sn_spread"), ("sineWanderKnee", "sn_knee"),
+                  ("sineWanderSlope", "sn_slope"), ("sineWanderLow", "sn_lo"), ("flutterHighPassHz", "fl_hpz"),
+                  ("levelVibratoDb", "am_db"), ("levelVibratoKnee", "am_knee"), ("levelVibratoSlope", "am_slope"), ("levelVibratoLead", "am_ph"),
+                  ("levelVibratoDelay", "am_dly"), ("lowFloorDb", "cflr_db"), ("lowFloorSlope", "cflr_k"), ("lowFloorLowHz", "cflr_lp"),
+                  ("lowFloorHighHz", "cflr_hp"), ("lowFloorRise", "cflr_att"), ("lowFloorLetGoDb", "cflr_rel_db"),
+                  ("lowFloorLetGoSeconds", "cflr_rs"), ("lowFloorFade", "cflr_fade"), ("lowFloorWhite", "cflr_w"),
+                  ("stringTopDb", "hf_db"), ("stringTopSlope", "hf_k"), ("stringTopAt", "hf_f"), ("stringTopLowPassHz", "hf_lp")):
+    put(name, p[key], "")
+# (the engine's string top is its own noise (hf_src 2), low-passed (hf_lp under 0.45 of the rate))
+assert p["hf_src"] == 2 and p["hf_lp"] < 48000 * 0.45
 open(ENGINE, "w").write(s)
 
 # (round 9) The per-note tables (notes_<inst>.json) as ModalBowedNotes.h.
 NOTES_H = os.path.join(os.path.dirname(ENGINE), "ModalBowedNotes.h")
 SCALARS = (("floorDb", "flr_db"), ("tailDb", "tail_db"), ("letGoDropDb", "rdrop_db"), ("fadeDb", "fade_db"), ("onsetDarkDb", "ob_db"),
            ("swellSeconds", "swell_s"), ("vibratoCents", "vib_ct"), ("wanderDb", "slow_db"), ("rippleDb", "rip_db"),
-           ("releaseSeconds", "rel_s"), ("releaseRing", "ring"))
+           ("releaseSeconds", "rel_s"), ("releaseRing", "ring"), ("hissDb", "hiss_db"), ("airDb", "a0_db"))
 assert tuple(k for _, k in SCALARS) == sim.TABLE_SCALARS
+# (round 10, the cello's: columns added to a value by the table's weight, not replacing it)
+SCALARS += (("stringTopAddDb", "hf_add"), ("lowFloorAddDb", "cflr_add"))
 ARRAYS = (("gainDb", "gain_db"), ("darkDb", "dark_db"), ("lossAdd", "loss_add"), ("dropDb", "drop_db"))
 
 
-def floats(v):
+def floats(v, digits):
     v = list(v)
     while v and v[-1] == 0:
         v.pop()
-    return "{ " + ", ".join(number(x, 5) + "f" for x in v) + " }" if v else "{}"
+    return "{ " + ", ".join(number(x, digits) + "f" for x in v) + " }" if v else "{}"
+
+
+# (Round 10) The tables to 6 digits, so the header holds the json (round 9's 5 rounded a few).
+DIGITS = {"violin": 6, "cello": 6}
 
 
 out = ["#pragma once", "",
@@ -165,8 +196,8 @@ for inst in ("violin", "cello"):
         assert all(len(row.get(key, [])) <= 64 for _, key in ARRAYS)
     out.append("    static constexpr Row %sRows[%d] {" % (inst, len(rows)))
     for n, row in zip(range(tab["first"], tab["last"] + 1), rows):
-        out.append("        { %s, // %d" % (", ".join(floats(row.get(key, [])) for _, key in ARRAYS), n))
-        out.append("          %s }," % floats([row.get(key, 0.0) for _, key in SCALARS] if mask else []))
+        out.append("        { %s, // %d" % (", ".join(floats(row.get(key, []), DIGITS[inst]) for _, key in ARRAYS), n))
+        out.append("          %s }," % floats([row.get(key, 0.0) for _, key in SCALARS] if mask else [], DIGITS[inst]))
     out.append("    };")
     tables.append("{ %s, %d, %d, %s, %d, 0x%xu, %sRows }" % (number(tab["size"]), tab["first"], tab["last"],
                                                              "true" if tab["hold_below"] else "false", tab["fade_above"], mask, inst))

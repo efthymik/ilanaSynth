@@ -130,4 +130,53 @@ Twin, demo notes, 3 seeds: violin 16.6 -> 13.1, cello 17.1 -> 13.5. Lessons:
 - A global retune made for one instrument hurts the other: blend every retuned term back to the
   other instrument's value by size (the cello twin scored worse under the violin's round 9).
 
+Round 10 (2026-11-10), the violin's: the noise and the body between the partials. Every new
+term fades out toward the cello by size (`CELLO` gains `slow_hz` 0.6, `hs_depth` 0, `lp_k` 0),
+so none of it reaches a cello (rendered alone, the cello played bit for bit as round 9's), and
+the pizzicato is as before. New:
+- The body's air mode (`a0_*`, about 277 Hz, 9.6 Hz wide) rung by the hair's noise and a share
+  of the hall floor, by note (`a0_db` in the table), and the body's own 300-500 Hz modes rung
+  by the hair's noise too (`b1_*`).
+- The hall floor high-passed twice (`flr_ord` 2) with a low rumble resonance of its own
+  (`rb_*`, about 70 Hz).
+- The hiss about 38 dB louder at A4 (`hiss`, with a lower high-pass), rising with the note up to
+  `hiss_cap` (about B5) and per note (`hiss_db`), and with the rosin's noise building over the
+  first `hs_s` (0.3 s) of a bowed note from `1 - hs_depth` (`hs_rn` 1).
+- A faster wander (`slow_hz` 0.6 -> 3 Hz), a little more hair noise (`nz_amt`), a higher hum
+  corner (`hum_k`), and the table's onset darkening by partial (`dark_db`, 48 partials).
+- `rnb*` and `lp_k` stay in the twin for fitting, at 0: the engine has neither.
+- The VIBRATO knob plays 30 v ^ log2(30 / 14.65) cents, so its default 0.5 is the fitted
+  14.65 (it was 30 v ^ 1.737, 9 cents at 0.5): `vib_ct` is the knob at 0.5.
+- The tables are written to 6 digits (round 9's 5 rounded a few of the json's values).
+Twin, 42 notes: 14.0 -> 12.5 (better on 41 of 42, held-out notes as much as fitted ones);
+demo notes 13.5 -> 12.0. Lessons:
+- Most of it is the sustain and attack terms, the noise between and under the partials: the
+  body's lowest modes rung by the bow's noise and a hiss that builds as the bow bites in.
+- The wander is faster than round 6's 0.6 Hz: 1.2, 2, 3 and 4.5 Hz scored 0.13, 0.22, 0.23 and
+  0.20 better (alone, all 42 notes), so 3. Its depth (`slow_db`), the pitch drift and the
+  loudness wander didn't help.
+
+Round 10, the cello's: its movement, floor and top. Every new term comes in by t (nothing at a
+violin's size, nor on a pluck); the `CELLO` dict gains `vib_rate`, `vib_delay`, `vib_rise`,
+`vib_depth_dev` and `fl_hz` (the violin keeps its own) and retunes `slow_db`, `loud_db`,
+`rip_db` and `fl_db`. New:
+- A sine wander per partial (`sn_*`, about 0.74 Hz, the rate spread +-37 % across the partials
+  by the golden ratio, the phase from the seed) in place of most of the noise wander (`slow_db`
+  1.50 -> 0.09): it moves each partial as much in every take and sums to nothing over a second
+  or two, where the noise left a random tilt on a note's partials.
+- The flutter less its slow part (`fl_hpz`, a one-pole at 1.2 Hz on the block rate).
+- The low partials' level vibrato (`am_*`, 1.9 dB under about 430 Hz, 1.19 rad ahead of the
+  pitch's).
+- The low floor (`cflr_*`): the violin's hall-floor path with the cello's own level, band (30 to
+  206 Hz, one high-pass: the violin's second, `flr_ord`, goes by 1 - t), let-go step and fade,
+  per note `cflr_add`; the release floor under the bow's noise higher and quicker (`nfloor_db`
+  -11.7 -> -5, `nfloor_dbs` 20 -> 47).
+- The string's top past its last mode (`hf_*`): its own noise, as loud as the stroke, four
+  poles high-passed at the last mode and four low-passed at 6.5 kHz, on notes 36-40 and 45-46
+  only (per note `hf_add`; -100 is off, and the engine skips the filters).
+- The release and room size powers retuned (`fade_k`, `ring_k`, `rloss_k`, `rpow_k`, `rg_k`,
+  `room_lk`, `room_hk`, `room_sz`) and the table's `gain_db` refitted.
+The cello's vibrato in its table is played directly (`vib_ct`), the knob's 0.5.
+Twin, demo notes, 3 seeds: cello 13.5 -> 12.1 (about 0.85 dB louder); the violin as above.
+
 Needs numpy, scipy, soundfile, numba, mido, matplotlib.

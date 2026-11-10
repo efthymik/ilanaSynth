@@ -27,8 +27,8 @@
 //   SIZE, SCALE  the body's size and the string's length (longer: lower
 //                losses, a softer stretch)
 //   VIBRATO      (the HAMMER knob) the player's vibrato: at its default the
-//                5.2 Hz, 9 cent vibrato fitted to Spitfire's long notes,
-//                starting a quarter second into the note
+//                5.2 Hz, 14.65 cent vibrato fitted to Spitfire's long notes,
+//                starting a quarter second into the note (0 none, 1 30 cents)
 //   PIZZ         (the SLAP switch) plucks the same modes instead of bowing
 //   WOLF         (the BUZZ knob) lets the body's strongest low resonance push
 //                back on the string: a second resonator at that resonance
@@ -98,6 +98,20 @@
 // terms blend back to round 8's at the cello's size and the cello's in from
 // round 8's at the violin's, by the log of SIZE. The pizzicato keeps round
 // 8's box (only the cello's body gains, 1.36 dB down, reach it).
+// Round 10 (2026-11-10). The violin's (all of it faded out toward the
+// cello's size): the body's air mode (about 280 Hz) and its 300-500 Hz
+// modes rung by the hair's noise, the hall floor high-passed twice with a
+// low rumble of its own, a louder hiss that rises with the note up to about
+// B5 and builds with the rosin's noise over the first third of a second, a
+// faster wander, and per-note onset darkening by partial, hiss and air.
+// The cello's (all of it faded in by SIZE, nothing at the violin's): each
+// partial's slow wander is mostly a sine of its own (about 0.74 Hz), the
+// flutter loses its slow part, the low partials' level moves with the
+// vibrato, a low floor (the hall-floor path under 200 Hz) holds the tail,
+// the bow's noise stays nearer its level once let go, a few low notes get
+// the string's top past the last mode (a band of noise), an earlier,
+// slightly slower vibrato, and the release and room retuned. Bowed only: the
+// pizzicato is as it was.
 // Eco keeps half the modes and the body's lower half.
 
 #include <juce_core/juce_core.h>
@@ -106,6 +120,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <type_traits>
 #include <vector>
 
 #include "ModalBowedBodies.h"
@@ -138,6 +153,7 @@ public:
         lx1 = lx2 = ly1 = ly2 = 0.0f;
         tilt = hissState = hissLast = 0.0f;
         pink0 = pink1 = pink2 = floorLow = floorHigh = floorLast = floorEnvelope = floorStep = 0.0f;
+        clearRound10();
         wolfMove = wolfMoveLast = wolfRing = wolfFed = 0.0f; wolfGrip = 1.0f; wolfLost = false; wolfClock = 0;
         std::fill (roomBuffer.begin(), roomBuffer.end(), 0.0f);
         std::fill (std::begin (roomLow), std::end (roomLow), 0.0f);
@@ -183,9 +199,11 @@ public:
         bowSpeed = 0.05f + 0.3f * juce::jlimit (0.0f, 1.0f, speed);
         damperAmount = juce::jlimit (0.0f, 1.0f, damper);
         plucked = pizz;
-        // 0.5 plays the fitted 9 cents; the knob's top about 30.
+        // 0.5 plays the fitted vibratoFitted (14.65) cents; the knob's top 30.
+        // (Round 10: the curve was 30 v ^ 1.737, 9 cents at 0.5, since before
+        // the round 6 refit.)
         const auto v = juce::jlimit (0.0f, 1.0f, vibrato);
-        vibratoCents = 30.0f * std::pow (v, 1.737f);
+        vibratoCents = (float) (vibratoTop * std::pow ((double) v, vibratoCurve));
         const auto w = juce::jlimit (0.0f, 1.0f, wolf);
         if (w != wolfAmount)
         {
@@ -245,6 +263,7 @@ public:
         }
         floorSeed = seed ^ 0x27D4EB2Fu;
         pink0 = pink1 = pink2 = floorLow = floorHigh = floorLast = floorEnvelope = floorStep = 0.0f;
+        clearRound10();
         noiseHeld = noiseFloorNow = dropNow = 0.0f;
         releasedAt = -1;   // (before updateModes: the release's losses are off)
         // The mode count is set by the note's pitch at the start (a bend
@@ -255,6 +274,25 @@ public:
         flutterSeed = seed ^ 0x85EBCA6Bu;
         std::fill (std::begin (flutter), std::end (flutter), 0.0f);
         std::fill (std::begin (flutterIn), std::end (flutterIn), 0.0f);
+        std::fill (std::begin (flutterSlow), std::end (flutterSlow), 0.0f);
+        // (Round 10, the cello's) The sine wander's phases from the seed and
+        // each partial's turn a block (its rate spread by the golden ratio).
+        topSeed = seed ^ 0x3C6EF372u;
+        if (! plucked)
+        {
+            auto phaseSeed = seed ^ 0x165667B1u;
+            for (int n = 0; n < modes; ++n)
+            {
+                phaseSeed = phaseSeed * 1664525u + 1013904223u;
+                const auto angle = juce::MathConstants<double>::twoPi * ((double) (phaseSeed >> 8) / 16777216.0);
+                sineCos[n] = (float) std::cos (angle);
+                sineSin[n] = (float) std::sin (angle);
+                const auto spread = std::fmod ((double) (n + 1) * 0.6180339887, 1.0);
+                const auto turnBy = juce::MathConstants<double>::twoPi * sineWanderHz * (1.0 + sineWanderSpread * (2.0 * spread - 1.0)) * blockSize / sampleRate;
+                sineTurnCos[n] = (float) std::cos (turnBy);
+                sineTurnSin[n] = (float) std::sin (turnBy);
+            }
+        }
         pitchDrift = pitchDriftIn = 0.0f;
         std::fill (std::begin (wander), std::end (wander), 0.0f);
         std::fill (std::begin (wanderIn), std::end (wanderIn), 0.0f);
@@ -419,7 +457,7 @@ private:
             wolfGrip += ((wolfLost ? wolfFloor : 1.0f) - wolfGrip) * wolfGripStep;
         }
         // The hair's scrape reaches the bridge too, coloured by the body.
-        bridge = (bridge + bodyNoiseNow * tailNoiseGain * hairNoise) * level;
+        bridge = (bridge + bodyNoiseNow * tailNoiseGain * hairOnset * hairNoise) * level;
         peakBridge = juce::jmax (peakBridge, std::abs (bridge));
 
         // The body: every resonator driven by the bridge, summed (and a
@@ -453,13 +491,64 @@ private:
             by1[j] = y;
             sound += bodyGain[j] * y;
         }
+        if (hairBodyGain > 0.0f)
+        {
+            // (Round 10, the violin's) The hair's noise straight into the
+            // body's few modes between hairBodyLowHz and hairBodyHighHz: their
+            // own resonators again, fed only by it (the sum is the same).
+            const auto in = hairBodyGain * hairNoise;
+            for (int k = 0; k < hairBodyCount; ++k)
+            {
+                const auto j = hairBodyIndex[k];
+                const auto y = bodyB0[j] * (in - hairBodyX2[k]) - bodyA1[j] * hairBodyY1[k] - bodyA2[j] * hairBodyY2[k];
+                hairBodyX2[k] = hairBodyX1[k];
+                hairBodyX1[k] = in;
+                hairBodyY2[k] = hairBodyY1[k];
+                hairBodyY1[k] = y;
+                sound += bodyGain[j] * y;
+            }
+        }
+        if (airGain > 0.0f)
+        {
+            // (Round 10, the violin's) The body's air mode rings on its own:
+            // the hair's noise and airFloor of the hall's floor (its last
+            // pink sample) through one resonator at airHz.
+            const auto in = hairNoise + airFloorShare * floorEnvelope * floorPinkLast;
+            const auto y = airB0 * (in - airX2) - airA1 * airY1 - airA2 * airY2;
+            airX2 = airX1;
+            airX1 = in;
+            airY2 = airY1;
+            airY1 = y;
+            sound += airGain * y;
+        }
+        if (stringTopGain > 0.0f)
+        {
+            // (Round 10, the cello's) The string's top past its last mode: a
+            // noise of its own, as loud as the bow's stroke, high-passed at
+            // the last mode and low-passed at stringTopLowPassHz (two
+            // Butterworth biquads each).
+            topSeed = topSeed * 1664525u + 1013904223u;
+            const auto built = swell + swellSecondAtSize * (swellSecond - swell);
+            auto x = ((float) (topSeed >> 8) * (2.0f / 16777216.0f) - 1.0f) * envelope * (1.0f - swellDepthAtSize + swellDepthAtSize * built);
+            for (int k = 0; k < 4; ++k)
+            {
+                const auto b0 = k < 2 ? topHpB0 : topLpB0, b1 = k < 2 ? topHpB1 : topLpB1, a1 = k < 2 ? topHpA1 : topLpA1, a2 = k < 2 ? topHpA2 : topLpA2;
+                const auto y = b0 * (x + topX[k][1]) + b1 * topX[k][0] - a1 * topY[k][0] - a2 * topY[k][1];
+                topX[k][1] = topX[k][0];
+                topX[k][0] = x;
+                topY[k][1] = topY[k][0];
+                topY[k][0] = y;
+                x = y;
+            }
+            sound += stringTopGain * x * level;
+        }
         peakBody = juce::jmax (peakBody, std::abs (sound));
         sound *= outputGain;
         // The hair's hiss, high-passed, straight out (past the body's top).
         const auto hiss = hissPole * (hissState + hairNoise - hissLast);
         hissLast = hairNoise;
         hissState = hiss;
-        sound += hissNow * hiss;
+        sound += hissNow * hairOnset * hiss;   // (round 10: building over hairOnsetSeconds)
         // The room: four delay lines mixed by a Householder matrix, each
         // through a one-pole low-pass (the low end rings longer than the
         // top). It hears the whole note and rings on once it is let go.
@@ -498,8 +587,26 @@ private:
                 floorLow = pink + floorLowPole * (floorLow - pink);
                 floorHigh = floorHighPole * (floorHigh + floorLow - floorLast);
                 floorLast = floorLow;
+                // (Round 10: a second one-pole high-pass, Spitfire's floor is
+                // low under 200 Hz; and the hall's rumble, the pink noise
+                // through a low resonator at rumbleHz.)
+                // (Round 10, the cello's: the violin's share of it, floorSecond;
+                // the cello's own low floor has the one.)
+                floorHigh2 = floorHighPole * (floorHigh2 + floorHigh - floorHighLast);
+                floorHighLast = floorHigh;
+                const auto shaped = floorSecond >= 1.0f ? floorHigh2 : floorSecond > 0.0f ? floorHigh + (floorHigh2 - floorHigh) * floorSecond : floorHigh;
                 floorEnvelope += floorStep;
-                sound += floorGain * floorEnvelope * (floorHigh + (float) hallFloorWhite * white);
+                sound += floorGain * floorEnvelope * (shaped + floorWhiteNow * white);
+                floorPinkLast = pink;
+                if (rumbleGain > 0.0f)
+                {
+                    const auto rumble = rumbleB0 * (pink - rumbleX2) - rumbleA1 * rumbleY1 - rumbleA2 * rumbleY2;
+                    rumbleX2 = rumbleX1;
+                    rumbleX1 = pink;
+                    rumbleY2 = rumbleY1;
+                    rumbleY1 = rumble;
+                    sound += rumbleGain * floorEnvelope * rumble;
+                }
             }
         }
         // A gentle roll-off (tiltHz) sets the top of the spectrum.
@@ -568,8 +675,8 @@ private:
                 // leaves and fades hallFloorFade dB a second.)
                 if (floorGain > 0.0f)
                 {
-                    const auto stepUp = 1.0 + (std::pow (10.0, hallFloorLetGoDb / 20.0) - 1.0) * juce::jmin (1.0, since / hallFloorLetGoSeconds);
-                    floorStep = ((float) (stepUp * std::pow (10.0, -hallFloorFade * since / 20.0)) - floorEnvelope) * (1.0f / (float) blockSize);
+                    const auto stepUp = 1.0 + (std::pow (10.0, floorLetGoDbNow / 20.0) - 1.0) * juce::jmin (1.0, since / floorLetGoSecondsNow);
+                    floorStep = ((float) (stepUp * std::pow (10.0, -floorFadeNow * since / 20.0)) - floorEnvelope) * (1.0f / (float) blockSize);
                 }
             }
             else
@@ -585,6 +692,10 @@ private:
                 floorStep = floorRise * (1.0f - floorEnvelope) * (1.0f / (float) blockSize);
             }
         }
+        // (Round 10, the violin's) The hiss and the rosin's noise build from
+        // hairOnsetDepth down over hairOnsetSeconds from the note-on.
+        if (! plucked)
+            hairOnset = hairOnsetDepthAtSize > 0.0f ? (float) (1.0 - (double) hairOnsetDepthAtSize * std::exp (-(double) elapsed / sampleRate / hairOnsetSeconds)) : 1.0f;
         updateVibrato();
         // Released: the bowed note fades as Spitfire's do, and DAMPER takes
         // the string's level down faster (a pluck at 0 rings on).
@@ -662,10 +773,10 @@ private:
         pitchDrift += pitchPole * (pitchDriftIn - pitchDrift);
 
         const auto seconds = (double) elapsed / sampleRate;
-        vibratoPhase += (float) (juce::MathConstants<double>::twoPi * vibratoRate * (1.0 + (double) rateDrift) * blockSize / sampleRate);
+        vibratoPhase += (float) (juce::MathConstants<double>::twoPi * vibratoRateNow * (1.0 + (double) rateDrift) * blockSize / sampleRate);
         if (vibratoPhase > juce::MathConstants<float>::twoPi)
             vibratoPhase -= juce::MathConstants<float>::twoPi;
-        const auto onset = juce::jlimit (0.0, 1.0, (seconds - vibratoDelay) / vibratoRise);
+        const auto onset = juce::jlimit (0.0, 1.0, (seconds - vibratoDelayNow) / vibratoRiseNow);
         const auto cents = (double) vibratoCents * vibratoAtSize * vibratoNote * (1.0 + (double) depthDrift) * onset * std::sin ((double) vibratoPhase) + (double) pitchDrift;
         const auto ratio = std::exp2 (cents / 1200.0);
         const auto k = juce::MathConstants<double>::twoPi / sampleRate;
@@ -681,12 +792,23 @@ private:
         // onsetDarkSeconds (Spitfire's upper partials build up after the
         // fundamental: a gentle stroke's rounded Helmholtz corner).
         const auto dark = (float) std::exp (-seconds / onsetDarkSecondsAtSize);
+        // (Round 10, the cello's: the flutter less its slow part.)
+        const float* swaying = flutter;
+        if (flutterHighPole > 0.0f)
+        {
+            for (int n = 0; n < modes; ++n)
+            {
+                flutterSlow[n] += flutterHighPole * (flutter[n] - flutterSlow[n]);
+                flutterFast[n] = flutter[n] - flutterSlow[n];
+            }
+            swaying = flutterFast;
+        }
         for (int n = 0; n < modes; ++n)
         {
             // (with the hair on the string: the grip eases off as the bow
             // lifts; held within about flutterClip dB either way, as an
             // unbounded swing would choke a partial for a moment)
-            const auto grip = flutterClip * (1.0f - 2.0f / (fastExp (2.0f * envelope * flutter[n] * (1.0f / flutterClip)) + 1.0f)); // (tanh)
+            const auto grip = flutterClip * (1.0f - 2.0f / (fastExp (2.0f * envelope * swaying[n] * (1.0f / flutterClip)) + 1.0f)); // (tanh)
             decayNow[n] = fastExp (-lossOf[n] * fastExp (-decibel * grip) * inverseRate);
             fall[n] = decayNow[n] * decayNow[n];
         }
@@ -694,11 +816,37 @@ private:
         {
             const auto decay = decayNow[n];
             turn[n] = (float) (2.0 * (double) decay * std::cos (juce::jmin ((double) modeHz[n] * ratio, sampleRate * 0.49) * k));
-            const auto ripple = half * (rippleSin[n] * c1 + rippleCos[n] * s1 + rippleSin2[n] * c2 + rippleCos2[n] * s2);
-            // (glided to over the block: a step would zip)
-            // (round 9: less each partial's own drop at the let-go, the cello's table's)
-            outStep[n] = (outBase[n] * std::exp (decibel * (ripple + wander[n] - dark * onsetDark[n] - releaseDrop[n] * dropNow)) - out[n]) * (1.0f / (float) blockSize);
         }
+        const auto levels = [&] (auto withCello)
+        {
+            // (Round 10, the cello's: each partial's sine wander, its phasor
+            // turned a block, and the level vibrato, levelVibratoLead ahead
+            // of the pitch's and coming in with it.)
+            auto sway = 0.0f;
+            if constexpr (decltype (withCello)::value)
+            {
+                const auto lead = (1.0 + (double) depthDrift) * juce::jlimit (0.0, 1.0, (seconds - vibratoDelayNow - levelVibratoDelay) / juce::jmax (1.0e-3, vibratoRiseNow));
+                sway = (float) (lead * std::sin ((double) vibratoPhase + levelVibratoLead));
+            }
+            for (int n = 0; n < modes; ++n)
+            {
+                auto ripple = half * (rippleSin[n] * c1 + rippleCos[n] * s1 + rippleSin2[n] * c2 + rippleCos2[n] * s2);
+                if constexpr (decltype (withCello)::value)
+                {
+                    const auto c = sineCos[n] * sineTurnCos[n] - sineSin[n] * sineTurnSin[n];
+                    sineSin[n] = sineSin[n] * sineTurnCos[n] + sineCos[n] * sineTurnSin[n];
+                    sineCos[n] = c;
+                    ripple += sineAmp[n] * sineSin[n] * envelope + levelVibratoAmp[n] * sway;
+                }
+                // (glided to over the block: a step would zip)
+                // (round 9: less each partial's own drop at the let-go, the cello's table's)
+                outStep[n] = (outBase[n] * std::exp (decibel * (ripple + wander[n] - dark * onsetDark[n] - releaseDrop[n] * dropNow)) - out[n]) * (1.0f / (float) blockSize);
+            }
+        };
+        if (celloTerms)
+            levels (std::true_type {});
+        else
+            levels (std::false_type {});
     }
 
     // The body's fine ripple: two constant-Q sines in log frequency, scaled
@@ -788,13 +936,13 @@ private:
         forceScale = 1.0f;
         ringUpper = 1.0;
         float unused = 0.0f;
-        wanderFilter (wanderHz, wanderDbNow, wanderPole, wanderGain);
-        wanderFilter (wanderHz, bowDriftDbNow, unused, bowDriftGain);
+        wanderFilter (wanderHzNow, wanderDbNow, wanderPole, wanderGain);
+        wanderFilter (wanderHzNow, bowDriftDbNow, unused, bowDriftGain);
         wanderFilter (vibratoWanderHz, rateWander, vibratoPole, rateDriftGain);
-        wanderFilter (vibratoWanderHz, depthWander, unused, depthDriftGain);
+        wanderFilter (vibratoWanderHz, (float) depthWanderNow, unused, depthDriftGain);
         // (The flutter is deeper and quicker up high: the violin's against the cello's.)
         const auto pitchRatio = frequency / 440.0;
-        wanderFilter (juce::jmin (100.0, flutterHz * std::pow (pitchRatio, (double) flutterHzSlope)), flutterDbNow * (float) std::pow (pitchRatio, (double) flutterSlope),
+        wanderFilter (juce::jmin (100.0, flutterHzNow * std::pow (pitchRatio, (double) flutterHzSlope)), flutterDbNow * (float) std::pow (pitchRatio, (double) flutterSlope),
                       flutterPole, flutterGain);
         wanderFilter (pitchDriftHz, pitchDriftCents, pitchPole, pitchGain);
         updateRipple();
@@ -803,9 +951,12 @@ private:
         updateHighPass();
         hissPole = (float) std::exp (-juce::MathConstants<double>::twoPi * juce::jmin (hissHpNow, sampleRate * 0.45) / sampleRate);
         tiltPole = (float) std::exp (-juce::MathConstants<double>::twoPi * juce::jmin (tiltHzNow, sampleRate * 0.45) / sampleRate);
-        floorLowPole = (float) std::exp (-juce::MathConstants<double>::twoPi * juce::jmin (hallFloorLowHz, sampleRate * 0.45) / sampleRate);
-        floorHighPole = (float) std::exp (-juce::MathConstants<double>::twoPi * hallFloorHighHz / sampleRate);
-        floorRise = (float) (1.0 - std::exp (-(double) blockSize / (juce::jmax (1.0e-3, hallFloorRise) * sampleRate)));
+        resonator (airHz, airBandwidth, airB0, airA1, airA2);
+        resonator (rumbleHz, rumbleBandwidth, rumbleB0, rumbleA1, rumbleA2);
+        floorLowPole = (float) std::exp (-juce::MathConstants<double>::twoPi * juce::jmin (floorLowHzNow, sampleRate * 0.45) / sampleRate);
+        floorHighPole = (float) std::exp (-juce::MathConstants<double>::twoPi * floorHighHzNow / sampleRate);
+        floorRise = (float) (1.0 - std::exp (-(double) blockSize / (juce::jmax (1.0e-3, floorRiseNow) * sampleRate)));
+        updateStringTop();
         biteFall = (float) std::exp (-1.0 / (0.08 * sampleRate));
         if (elapsed == 0)
             biteEnvelope = 1.0f;
@@ -851,6 +1002,15 @@ private:
         for (int i = 0; i < ModalBowedNotes::tableCount; ++i)
             tableWeight[i] = noteRow[i] == nullptr ? 0.0
                                                    : noteWeight[i] * juce::jlimit (0.0, 1.0, 1.0 - 4.0 * std::abs (u - std::log (ModalBowedNotes::tables[i].size) / std::log (ModalBowedBodies::cello)));
+        // (round 10: and the columns a table adds to a value, by its weight)
+        const auto noteSum = [this] (int which)
+        {
+            auto sum = 0.0;
+            for (int i = 0; i < ModalBowedNotes::tableCount; ++i)
+                if (tableWeight[i] > 0.0 && (ModalBowedNotes::tables[i].scalars >> which & 1u) != 0)
+                    sum += tableWeight[i] * (double) noteRow[i]->scalar[which];
+            return sum;
+        };
         const auto note = [this] (int which, double value)
         {
             for (int i = 0; i < ModalBowedNotes::tableCount; ++i)
@@ -889,7 +1049,9 @@ private:
         stringLossNow = at (stringLossHigh, stringLossHighCello);
         attackScaleNow = at (attackScale, attackScaleCello);
         hissHpNow = at (hissHp, hissHpCello);
-        hissNow = (float) (at (hissLevel, hissLevelCello) * std::pow (noteHz / 440.0, at (hissSlope, 0.0)));
+        // (round 10: up to hissCap only, and the note's table's hissDb on it)
+        hissNow = (float) (at (hissLevel, hissLevelCello) * std::pow (10.0, note (S::hissDb, 0.0) / 20.0)
+                           * std::pow (juce::jmin (noteHz, hissCap) / 440.0, at (hissSlope, 0.0)));
         bodyNoiseNow = (float) at (bodyNoise, bodyNoiseCello);
         humRatioNow = (float) at (humRatio, humRatioCello);
         flutterDbNow = (float) at (flutterDb, flutterDbCello);
@@ -899,10 +1061,99 @@ private:
         directDbNow = plucked ? directDbCello + directSizeDbPizz * std::log2 (span) : at (directDb, directDbCello) + directSizeDb * std::log2 (span);
         directHpNow = plucked ? directHpCello : at (directHp, directHpCello);
         tiltHzNow = plucked ? tiltHzCello : at (tiltHz, tiltHzCello);
-        floorGain = plucked || toCello >= 1.0 ? 0.0f
-                                              : (float) ((1.0 - toCello) * std::pow (10.0, note (S::floorDb, hallFloorDb) / 20.0)
-                                                         * std::pow (noteHz / 440.0, hallFloorSlope / 6.0206));
+        const auto violinFloor = plucked || toCello >= 1.0 ? 0.0
+                                                           : (1.0 - toCello) * std::pow (10.0, note (S::floorDb, hallFloorDb) / 20.0)
+                                                                 * std::pow (noteHz / 440.0, hallFloorSlope / 6.0206);
+        // (Round 10, the cello's: its low floor in by toCello on the same
+        // path, its band, rise, let-go and fade blended in with it.)
+        const auto lowFloor = plucked || toCello <= 0.0 || lowFloorDb <= -150.0 ? 0.0
+                                                                              : toCello * std::pow (10.0, (lowFloorDb + noteSum (S::lowFloorAddDb)) / 20.0)
+                                                                                    * std::pow (noteHz / 440.0, lowFloorSlope / 6.0206);
+        floorGain = (float) (violinFloor + lowFloor);
+        violinFloorGain = (float) violinFloor;
+        const auto floorAt = [lowFloor, toCello] (double violin, double cello) { return lowFloor == 0.0 ? violin : violin + (cello - violin) * toCello; };
+        floorLowHzNow = floorAt (hallFloorLowHz, lowFloorLowHz);
+        floorHighHzNow = floorAt (hallFloorHighHz, lowFloorHighHz);
+        floorRiseNow = floorAt (hallFloorRise, lowFloorRise);
+        floorLetGoDbNow = floorAt (hallFloorLetGoDb, lowFloorLetGoDb);
+        floorLetGoSecondsNow = floorAt (hallFloorLetGoSeconds, lowFloorLetGoSeconds);
+        floorFadeNow = floorAt (hallFloorFade, lowFloorFade);
+        floorWhiteNow = (float) floorAt (hallFloorWhite, lowFloorWhite);
+        floorSecond = (float) (1.0 - toCello);
         noiseFloorAtSize = plucked ? 0.0f : (float) (toCello * std::pow (10.0, noiseFloorDb / 20.0));
+        // (Round 10, the violin's, faded out by 1 - toCello like its floor:
+        // the air mode, the hair's noise into the body's 300-500 Hz modes,
+        // the rumble, the hair's onset, the quicker wander.)
+        const auto fade = plucked ? 0.0 : 1.0 - toCello;
+        const auto airDbNow = note (S::airDb, airDb);
+        airGain = fade > 0.0 && airDbNow > -150.0 ? (float) (fade * std::pow (10.0, airDbNow / 20.0) * std::pow (noteHz / 440.0, airSlope / 6.0206)) : 0.0f;
+        airFloorShare = airGain > 0.0f ? (float) (airFloor * (double) violinFloorGain / ((double) airGain * (double) outputGain)) : 0.0f;
+        rumbleGain = (float) ((double) violinFloorGain * std::pow (10.0, rumbleDb / 20.0));
+        hairBodyGain = fade > 0.0 ? (float) (fade * std::pow (10.0, hairBodyDb / 20.0) * std::pow (noteHz / 440.0, hairBodySlope / 6.0206)) : 0.0f;
+        hairOnsetDepthAtSize = plucked ? 0.0f : (float) at (hairOnsetDepth, 0.0);
+        wanderHzNow = at (wanderHz, wanderHzCello);
+        // (Round 10, the cello's, by toCello: the vibrato's and flutter's
+        // values; the sine wander, the flutter's high-pass and the level
+        // vibrato, each partial's depth; the string's top.)
+        vibratoRateNow = at (vibratoRate, vibratoRateCello);
+        vibratoDelayNow = at (vibratoDelay, vibratoDelayCello);
+        vibratoRiseNow = at (vibratoRise, vibratoRiseCello);
+        depthWanderNow = at ((double) depthWander, depthWanderCello);
+        flutterHzNow = at (flutterHz, flutterHzCello);
+        const auto cello = plucked ? 0.0 : toCello;
+        celloTerms = cello > 0.0;
+        for (int n = 0; n < modes; ++n)
+        {
+            const auto hz = juce::jmin ((double) (n + 1) * noteHz, sampleRate * 0.49);
+            sineAmp[n] = (float) (cello * sineWanderDb * (hz < sineWanderKnee ? sineWanderLow : std::pow (hz / sineWanderKnee, -sineWanderSlope)));
+            levelVibratoAmp[n] = (float) (cello * levelVibratoDb / (1.0 + std::pow (hz / levelVibratoKnee, levelVibratoSlope)));
+        }
+        flutterHighPole = celloTerms ? (float) (cello * (1.0 - std::exp (-juce::MathConstants<double>::twoPi * flutterHighPassHz * blockSize / sampleRate))) : 0.0f;
+        const auto topDb = stringTopDb + noteSum (S::stringTopAddDb);
+        stringTopGain = celloTerms && topDb > -150.0 && stringTopDb > -150.0
+                            ? (float) (cello * std::pow (10.0, topDb / 20.0) * std::pow (noteHz / 65.406, stringTopSlope / 6.0206)) : 0.0f;
+    }
+
+    // (Round 10, the cello's) The string's top's filters: two high-pass
+    // biquads at the last mode (stringTopAt times it), two low-pass at
+    // stringTopLowPassHz (Butterworth: Q 0.7071 each).
+    void updateStringTop()
+    {
+        if (stringTopGain <= 0.0f || modes < 1)
+            return;
+        const auto biquad = [this] (double hz, bool high, float& b0, float& b1, float& a1, float& a2)
+        {
+            const auto w = juce::MathConstants<double>::twoPi * juce::jmin (hz, sampleRate * 0.45) / sampleRate;
+            const auto alpha = std::sin (w) / (2.0 * 0.7071067811865476), cw = std::cos (w), a0 = 1.0 + alpha;
+            b0 = (float) ((high ? 1.0 + cw : 1.0 - cw) / 2.0 / a0);
+            b1 = (float) ((high ? -(1.0 + cw) : 1.0 - cw) / a0);
+            a1 = (float) (-2.0 * cw / a0);
+            a2 = (float) ((1.0 - alpha) / a0);
+        };
+        biquad (stringTopAt * (double) modeHz[modes - 1], true, topHpB0, topHpB1, topHpA1, topHpA2);
+        biquad (stringTopLowPassHz, false, topLpB0, topLpB1, topLpA1, topLpA2);
+    }
+
+    // A two-pole resonator's coefficients (b0 (x - x2) - a1 y1 - a2 y2): Hz and bandwidth.
+    void resonator (double hz, double bandwidth, float& b0, float& a1, float& a2) const
+    {
+        const auto r = std::exp (-juce::MathConstants<double>::pi * bandwidth / sampleRate);
+        b0 = (float) ((1.0 - r * r) * 0.5);
+        a1 = (float) (-2.0 * r * std::cos (juce::MathConstants<double>::twoPi * juce::jmin (hz, sampleRate * 0.45) / sampleRate));
+        a2 = (float) (r * r);
+    }
+
+    void clearRound10()
+    {
+        hairOnset = 1.0f - hairOnsetDepthAtSize;
+        floorHigh2 = floorHighLast = floorPinkLast = 0.0f;
+        airX1 = airX2 = airY1 = airY2 = rumbleX1 = rumbleX2 = rumbleY1 = rumbleY2 = 0.0f;
+        std::memset (topX, 0, sizeof (topX));
+        std::memset (topY, 0, sizeof (topY));
+        std::fill (std::begin (hairBodyX1), std::end (hairBodyX1), 0.0f);
+        std::fill (std::begin (hairBodyX2), std::end (hairBodyX2), 0.0f);
+        std::fill (std::begin (hairBodyY1), std::end (hairBodyY1), 0.0f);
+        std::fill (std::begin (hairBodyY2), std::end (hairBodyY2), 0.0f);
     }
 
     // The per-mode terms SIZE (and the note's tables) set: with the modes,
@@ -1051,6 +1302,7 @@ private:
             }
         }
         bodyCount = 0;
+        hairBodyCount = 0;
         for (int j = 0; j < count; ++j)
         {
             const auto hz = (double) B::hz[j] / size;
@@ -1064,6 +1316,8 @@ private:
             bodyA2[i] = (float) (r * r);
             const auto db = (double) lower[j] + blend * ((double) upper[j] - (double) lower[j]);
             bodyGain[i] = (float) std::pow (10.0, db / 20.0);
+            if (hz >= hairBodyLowHz && hz <= hairBodyHighHz && hairBodyCount < maxHairBody)
+                hairBodyIndex[hairBodyCount++] = i;
         }
         // WOLF's resonance: the loudest of the body's fitted resonances below
         // wolfTopHz (a violin's), at this SIZE.
@@ -1183,6 +1437,30 @@ private:
     float floorGain = 0.0f, floorLowPole = 0.0f, floorHighPole = 0.0f, floorRise = 0.0f;
     float pink0 = 0.0f, pink1 = 0.0f, pink2 = 0.0f, floorLow = 0.0f, floorHigh = 0.0f, floorLast = 0.0f, floorEnvelope = 0.0f, floorStep = 0.0f;
     float noiseFloorAtSize = 0.0f, noiseHeld = 0.0f, noiseFloorNow = 0.0f, dropNow = 0.0f;
+    // Round 10 (the violin's): the air mode, the hair's noise into the
+    // body's 300-500 Hz modes, the floor's second high-pass and rumble, the
+    // hair's onset, the wander's corner at this SIZE.
+    static constexpr int maxHairBody = 4;
+    float airGain = 0.0f, airFloorShare = 0.0f, airB0 = 0.0f, airA1 = 0.0f, airA2 = 0.0f, airX1 = 0.0f, airX2 = 0.0f, airY1 = 0.0f, airY2 = 0.0f;
+    float rumbleGain = 0.0f, rumbleB0 = 0.0f, rumbleA1 = 0.0f, rumbleA2 = 0.0f, rumbleX1 = 0.0f, rumbleX2 = 0.0f, rumbleY1 = 0.0f, rumbleY2 = 0.0f;
+    float floorHigh2 = 0.0f, floorHighLast = 0.0f, floorPinkLast = 0.0f;
+    float hairBodyGain = 0.0f, hairOnset = 1.0f, hairOnsetDepthAtSize = 0.0f;
+    int hairBodyCount = 0, hairBodyIndex[maxHairBody] {};
+    float hairBodyX1[maxHairBody] {}, hairBodyX2[maxHairBody] {}, hairBodyY1[maxHairBody] {}, hairBodyY2[maxHairBody] {};
+    double wanderHzNow = 0.6;
+    // Round 10 (the cello's, at this SIZE: celloTerms when any of it is on):
+    // the vibrato's and flutter's blended values, the sine wander (each
+    // partial's depth, phasor and its turn a block), the flutter's slow
+    // part, the level vibrato's depth by partial, the floor's blended band
+    // and envelope (floorSecond: how much of the second high-pass, the
+    // violin's; violinFloorGain its share of floorGain), the string's top.
+    bool celloTerms = false;
+    double vibratoRateNow = 5.2, vibratoDelayNow = 0.25, vibratoRiseNow = 0.4, flutterHzNow = 16.51, depthWanderNow = 0.4561;
+    double floorLowHzNow = 1000.0, floorHighHzNow = 200.0, floorRiseNow = 0.01, floorLetGoDbNow = 0.0, floorLetGoSecondsNow = 0.05, floorFadeNow = 20.0;
+    float floorWhiteNow = 0.0f, floorSecond = 1.0f, violinFloorGain = 0.0f, flutterHighPole = 0.0f;
+    float stringTopGain = 0.0f, topHpB0 = 0.0f, topHpB1 = 0.0f, topHpA1 = 0.0f, topHpA2 = 0.0f, topLpB0 = 0.0f, topLpB1 = 0.0f, topLpA1 = 0.0f, topLpA2 = 0.0f;
+    float topX[4][2] {}, topY[4][2] {};
+    std::uint32_t topSeed = 1;
     float flutterPole = 0.1f, flutterGain = 0.0f, pitchPole = 0.01f, pitchGain = 0.0f, pitchDrift = 0.0f, pitchDriftIn = 0.0f;
     float hpB0 = 1.0f, hpB1 = 0.0f, hpB2 = 0.0f, hpA1 = 0.0f, hpA2 = 0.0f, hx1 = 0.0f, hx2 = 0.0f, hy1 = 0.0f, hy2 = 0.0f;
     float lpB0 = 1.0f, lpB1 = 0.0f, lpB2 = 0.0f, lpA1 = 0.0f, lpA2 = 0.0f, lx1 = 0.0f, lx2 = 0.0f, ly1 = 0.0f, ly2 = 0.0f;
@@ -1215,7 +1493,7 @@ private:
     // two. On a bigger body the darkening also lasts longer (size ^
     // onsetDarkSecondsSizeSlope).
     static constexpr double swellSeconds = 0.20311, swellSecondsCello = 0.3544, swellSize = 0.25;
-    static constexpr double swellDepth = 0.91629, swellDepthCello = 0.8208, swellSecondStage = 0.67352, noiseSwellDepth = 0.26398;
+    static constexpr double swellDepth = 0.91629, swellDepthCello = 0.8208, swellSecondStage = 0.67352, noiseSwellDepth = 0.30009;
     static constexpr float onsetDarkKneeSize = 1.56f;
     static constexpr double onsetDarkDb = 17.49, onsetDarkKnee = 2689.6, onsetDarkSlope = 2.9034;
     static constexpr double onsetDarkDbCello = 15.04, onsetDarkKneeCello = 1990.0, onsetDarkSlopeCello = 2.82;
@@ -1224,9 +1502,9 @@ private:
     // the note. The cello's wood (by SIZE, nothing at 1): the direct path
     // directSizeDb down per doubling, its high-pass size ^
     // directHpSizeSlope higher, the vibrato size ^ vibratoSizeSlope as deep.
-    static constexpr float humRatio = 0.37266f, humTop = 0.7f;
+    static constexpr float humRatio = 0.51353f, humTop = 0.7f;
     static constexpr double directSizeDb = -7.6977, directHpSizeSlope = 0.87, vibratoSizeSlope = -0.098769;
-    static constexpr float rosinJitter = 0.08536f, hissLevel = 1.7936e-04f, bodyNoise = 1.7985e-06f;
+    static constexpr float rosinJitter = 0.08536f, hissLevel = 0.014072f, bodyNoise = 1.7985e-06f;
     static constexpr float brightness = 1.7841f, topHz = 12000.0f, tiltHz = 5701.8f, directDb = -12.074f;
     // The body's fine ripple (dB, cycles per octave) the vibrato sweeps the
     // partials across.
@@ -1235,7 +1513,7 @@ private:
     // level on its own, the bow's speed; the vibrato's rate and depth
     // (fractions; Spitfire's vibrato is never quite even).
     static constexpr float wanderDb = 2.052f, bowDriftDb = 1.742f, rateWander = 0.09024f, depthWander = 0.4561f;
-    static constexpr double wanderHz = 0.6, vibratoWanderHz = 0.8;
+    static constexpr double wanderHz = 3.0, vibratoWanderHz = 0.8;
     // The bow's fast randomness: each partial's flutter (dB standard
     // deviation and corner at A4, and how both grow with the register), the
     // pitch's slow drift (cents).
@@ -1271,8 +1549,8 @@ private:
     static constexpr float stringLossHigh = 3.2440e-06f;
     static constexpr double brightnessCello = 2.144, stringLossHighCello = 3.9470e-06, directDbCello = -10.33, directHpCello = 96.61, tiltHzCello = 5590.0;
     static constexpr double bodyNoiseCello = 1.6950e-06, humRatioCello = 0.33, attackScale = 0.050102, attackScaleCello = 0.05;
-    static constexpr double hissHp = 9836.2, hissHpCello = 8000.0, hissSlope = 0.77496, hissLevelCello = 0.0022;
-    static constexpr double flutterDbCello = 14.316, wanderDbCello = 1.5021, bowDriftDbCello = 0.87783, rippleDbCello = 2.9949;
+    static constexpr double hissHp = 8571.2, hissHpCello = 8000.0, hissSlope = 3.8134, hissLevelCello = 0.0022;
+    static constexpr double flutterDbCello = 13.929, wanderDbCello = 0.093356, bowDriftDbCello = 0.77633, rippleDbCello = 2.1124;
     static constexpr double directSizeDbPizz = -12.0;
     // The violin's hall floor: a pink noise hallFloorDb against the note at
     // A4 (hallFloorSlope dB more per doubling of the note), low-passed
@@ -1280,15 +1558,57 @@ private:
     // hallFloorWhite of its white noise; it rises over hallFloorRise from
     // the note-on, steps up hallFloorLetGoDb over hallFloorLetGoSeconds as
     // the bow leaves and fades hallFloorFade dB a second. Bowed only.
-    static constexpr double hallFloorDb = -55.793, hallFloorSlope = 4.9665, hallFloorLowHz = 1874.2, hallFloorHighHz = 226.92, hallFloorRise = 0.0035533;
-    static constexpr double hallFloorLetGoDb = 2.2157, hallFloorLetGoSeconds = 0.05, hallFloorFade = 23.941, hallFloorWhite = 0.30072;
+    static constexpr double hallFloorDb = -55.793, hallFloorSlope = 4.9665, hallFloorLowHz = 1090.5, hallFloorHighHz = 186.75, hallFloorRise = 0.0035533;
+    static constexpr double hallFloorLetGoDb = 4.3191, hallFloorLetGoSeconds = 0.05, hallFloorFade = 23.941, hallFloorWhite = 0.30072;
     // The cello's: once let go the bow's noise stays at least noiseFloorDb
     // under its level at the let-go, that floor fading noiseFloorFade dB a
     // second; its table's partial drops take partialDropSeconds.
-    static constexpr double noiseFloorDb = -11.7, noiseFloorFade = 20.0, partialDropSeconds = 0.03;
+    static constexpr double noiseFloorDb = -5.0, noiseFloorFade = 47.443, partialDropSeconds = 0.03;
     // The vibrato (cents) the per-note tables' vibratoCents are against: the
     // knob's vibrato scales by their ratio.
     static constexpr double vibratoFitted = 14.65;
+    // The VIBRATO knob: vibratoTop v ^ vibratoCurve cents, vibratoFitted at 0.5.
+    static constexpr double vibratoTop = 30.0;
+    static inline const double vibratoCurve = std::log2 (vibratoTop / vibratoFitted);
+    // Round 10, the violin's (all faded out by SIZE toward the cello, as its
+    // hall floor): the body's air mode (airHz, airBandwidth) rung by the
+    // hair's noise and airFloor of the hall's floor, airDb at A4
+    // (airSlope dB per doubling of the note; per note in the table); the
+    // hair's noise into the body's modes between hairBodyLowHz and
+    // hairBodyHighHz (hairBodyDb, hairBodySlope); the hall's rumble
+    // (rumbleDb against its floor, at rumbleHz); the hiss grows only up to
+    // hissCap and, with the rosin's noise, builds from hairOnsetDepth down
+    // over hairOnsetSeconds; the slow wander's corner wanderHz (wanderHzCello
+    // at the cello's size).
+    static constexpr double airDb = -90.79, airSlope = -0.11, airHz = 277.3, airBandwidth = 9.59, airFloor = 3.4784;
+    static constexpr double hairBodyDb = -96.808, hairBodySlope = 2.5579, hairBodyLowHz = 300.0, hairBodyHighHz = 500.0;
+    static constexpr double rumbleDb = 0.55926, rumbleHz = 69.667, rumbleBandwidth = 52.777;
+    static constexpr double hissCap = 990.38, hairOnsetDepth = 0.7625, hairOnsetSeconds = 0.30139, wanderHzCello = 0.6;
+    // Round 10, the cello's (all by toCello, nothing at a violin's size or
+    // on a pluck): the vibrato's rate, delay, rise and depth wander and the
+    // flutter's corner blend to these; each partial's slow wander is mostly
+    // a sine of its own (sineWanderDb at and under sineWanderKnee, times
+    // sineWanderLow below it, falling sineWanderSlope per octave over it; at
+    // sineWanderHz, spread sineWanderSpread either way across the partials,
+    // its phase from the note's seed); the flutter less its own slow part
+    // (a one-pole at flutterHighPassHz); the low partials' level moves with
+    // the vibrato (levelVibratoDb under levelVibratoKnee, falling as
+    // levelVibratoSlope powers over it, levelVibratoLead radians ahead of
+    // the pitch); the low floor, the violin's hall-floor path with its own
+    // values (lowFloorDb at A4 and lowFloorSlope dB per doubling of the note,
+    // plus the table's lowFloorAddDb; its band, rise, let-go step and fade);
+    // and the string's top past its last mode: a noise of its own as loud as
+    // the bow's stroke, high-passed (four poles) at stringTopAt times the
+    // last mode and low-passed (four poles) at stringTopLowPassHz, at
+    // stringTopDb plus the table's stringTopAddDb (on a few low notes only).
+    static constexpr double vibratoRateCello = 5.0418, vibratoDelayCello = 0.12956, vibratoRiseCello = 0.46505, flutterHzCello = 22.958;
+    static constexpr double depthWanderCello = 0.31309;
+    static constexpr double sineWanderDb = 3.7854, sineWanderHz = 0.74098, sineWanderSpread = 0.36811, sineWanderKnee = 392.17, sineWanderSlope = 0.19059, sineWanderLow = 1.1794;
+    static constexpr double flutterHighPassHz = 1.2142;
+    static constexpr double levelVibratoDb = 1.8913, levelVibratoKnee = 428.76, levelVibratoSlope = 2.0, levelVibratoLead = 1.1911, levelVibratoDelay = 0.0;
+    static constexpr double lowFloorDb = -49.364, lowFloorSlope = 2.8205, lowFloorLowHz = 205.97, lowFloorHighHz = 30.0, lowFloorRise = 0.02;
+    static constexpr double lowFloorLetGoDb = -8.7946, lowFloorLetGoSeconds = 0.05, lowFloorFade = 23.1, lowFloorWhite = 0.0;
+    static constexpr double stringTopDb = -140.0, stringTopSlope = 0.0, stringTopAt = 1.0, stringTopLowPassHz = 6500.0;
     // Round 7, cello only (nothing at SIZE 1): a bigger body's released
     // partials lose more (releaseLossHz times size ^ releaseLossSizeSlope), and
     // its room is louder (roomSizeDbMore more per doubling) but shorter, its decays
@@ -1298,12 +1618,12 @@ private:
     // die steeply (the loss's slope times size ^ releaseLossSlopeSizeSlope)
     // and late (ramped in as time ^ (size ^ releaseRampSizeSlope)), and the
     // fade is size ^ releaseFadeSizeSlope quicker.
-    static constexpr float releaseLossSizeSlope = 11.925f;
-    static constexpr double releaseRingSizeSlope = -2.297, releaseLossSlopeSizeSlope = 1.053, releaseRampSizeSlope = 1.957, releaseFadeSizeSlope = 0.2405;
-    static constexpr double roomLowSizeSlope = 1.086, roomHighSizeSlope = 0.19131;
+    static constexpr float releaseLossSizeSlope = 10.877f;
+    static constexpr double releaseRingSizeSlope = -3.0806, releaseLossSlopeSizeSlope = 1.1345, releaseRampSizeSlope = 1.9217, releaseFadeSizeSlope = 0.39364;
+    static constexpr double roomLowSizeSlope = 1.5661, roomHighSizeSlope = 0.13181;
     // The room (fitted to the tails of Spitfire's long notes).
     static constexpr int roomLines = 4;
-    static constexpr double roomDb = -2.5, roomSizeDb = -18.864, roomSizeDbMore = 14.736, roomMs = 18.44, roomLowDecay = 38.88, roomHighDecay = 159.5;
+    static constexpr double roomDb = -2.5, roomSizeDb = -18.8971, roomSizeDbMore = 14.736, roomMs = 18.44, roomLowDecay = 38.88, roomHighDecay = 159.5;
     static constexpr float decibel = 0.1151292546f, goldenRatio = 1.618034f;
     // WOLF at the top: the split (Hz) of a partial sitting on the
     // resonance, how much narrower the resonance rings, the highest
@@ -1329,6 +1649,8 @@ private:
     alignas (32) float bodyB0[maxBody] {}, bodyA1[maxBody] {}, bodyA2[maxBody] {}, bodyGain[maxBody] {};
     alignas (32) float bx1[maxBody] {}, bx2[maxBody] {}, by1[maxBody] {}, by2[maxBody] {};
     alignas (32) float releaseLoss[maxModes] {}, wolfPush[maxModes] {}, releaseDrop[maxModes] {};
+    alignas (32) float sineAmp[maxModes] {}, sineCos[maxModes] {}, sineSin[maxModes] {}, sineTurnCos[maxModes] {}, sineTurnSin[maxModes] {};
+    alignas (32) float levelVibratoAmp[maxModes] {}, flutterSlow[maxModes] {}, flutterFast[maxModes] {};
     std::vector<float> roomBuffer;   // (the four lines end to end)
     alignas (16) float roomLow[roomLines] {}, roomFeed[roomLines] {}, roomPole[roomLines] {};
     int roomLength[roomLines] {}, roomStart[roomLines] {}, roomAt[roomLines] {};
