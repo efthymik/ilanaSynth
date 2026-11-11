@@ -61,9 +61,9 @@ public:
           arpLanes (p, arpColour()),
           arpMode (p.apvts, "arp_mode", "MODE"),
           arpDiv (p.apvts, "arp_div", "RATE"),
-          arpOctaves (p.apvts, "arp_octaves", "OCTAVES", arpColour(), true),
-          arpGate (p.apvts, "arp_gate", "GATE", arpColour(), true),
-          arpChance (p.apvts, "arp_chance", "CHANCE", arpColour(), true),
+          arpOctaves (p.apvts, "arp_octaves", "OCTAVES", arpColour(), false),
+          arpGate (p.apvts, "arp_gate", "GATE", SeqColours::stepLength(), false),
+          arpChance (p.apvts, "arp_chance", "CHANCE", arpColour(), false),
           // GENERATE's scale is SNAP TO KEY's KEY (review 6, I6-30): not the
           // tuning's Scala scale.
           genScale (p.apvts, "gen_scale", "KEY"),
@@ -78,33 +78,38 @@ public:
           euclidDisplay (p, euclidColour()),
           eucTarget (p.apvts, "euc_target", "TARGET"),
           eucDiv (p.apvts, "euc_div", "RATE"),
-          eucSteps (p.apvts, "euc_steps", "STEPS", euclidColour(), true),
-          eucHits (p.apvts, "euc_hits", "HITS", euclidColour(), true),
-          eucRotate (p.apvts, "euc_rotate", "ROTATE", euclidColour(), true),
-          eucGate (p.apvts, "euc_gate", "GATE", euclidColour(), true),
+          eucSteps (p.apvts, "euc_steps", "STEPS", euclidColour(), false),
+          eucHits (p.apvts, "euc_hits", "HITS", euclidColour(), false),
+          eucRotate (p.apvts, "euc_rotate", "ROTATE", euclidColour(), false),
+          eucGate (p.apvts, "euc_gate", "GATE", euclidColour(), false),
           pseqEditor (p, pseqColour()),
           pseqDiv (p.apvts, "pseq_div", "RATE"),
           // STEPS, as the arp's (review 7, I7-29).
-          pseqLength (p.apvts, "pseq_length", "STEPS", pseqColour(), true),
-          pseqGate (p.apvts, "pseq_gate", "GATE", pseqColour(), true),
+          pseqLength (p.apvts, "pseq_length", "STEPS", pseqColour(), false),
+          pseqGate (p.apvts, "pseq_gate", "GATE", pseqColour(), false),
           clipEditor (p, clipColour()),
           clipIndex (p.apvts, "clip_index", "SLOT"),
           clipMode (p.apvts, "clip_mode", "MODE"),
           clipBars (p, "LENGTH"),
           clipGrid (clipEditor, "GRID"),
-          arpSteps (p.apvts, "arp_steps", "STEPS", arpColour(), true),
+          arpSteps (p.apvts, "arp_steps", "STEPS", arpColour(), false),
           noteChain (p, IlanaTheme::accent()),
           scaleSwitch (p, "gen_scale", 1, "SNAP TO KEY"),
           strumSwitch (p, "spray_strum", 1, "STRUM"),
           clipZoom (clipEditor, "ZOOM")
     {
-        sprayCount = std::make_unique<KnobControl> (p.apvts, "spray_count", "NOTES", generateColour(), true);
-        sprayRange = std::make_unique<KnobControl> (p.apvts, "spray_range", "RANGE", generateColour(), true);
-        spraySpread = std::make_unique<KnobControl> (p.apvts, "spray_spread", "SPREAD", generateColour(), true);
-        strumTime = std::make_unique<KnobControl> (p.apvts, "spray_strum_time", "TIME", generateColour(), true);
+        // (Each GENERATE box in its own colour: STRUM's and SPRAY's rings, UI review 31, item 40.)
+        sprayCount = std::make_unique<KnobControl> (p.apvts, "spray_count", "NOTES", SeqColours::spray(), false);
+        sprayRange = std::make_unique<KnobControl> (p.apvts, "spray_range", "RANGE", SeqColours::spray(), false);
+        spraySpread = std::make_unique<KnobControl> (p.apvts, "spray_spread", "SPREAD", SeqColours::spray(), false);
+        strumTime = std::make_unique<KnobControl> (p.apvts, "spray_strum_time", "TIME", SeqColours::strum(), false);
         // Not a second bare CHANCE on the page (the arp has one).
-        sprayChance = std::make_unique<KnobControl> (p.apvts, "spray_chance", "CHANCE", generateColour(), true);
-        sprayVelocity = std::make_unique<KnobControl> (p.apvts, "spray_velocity", "VELOCITY", generateColour(), true);
+        sprayChance = std::make_unique<KnobControl> (p.apvts, "spray_chance", "CHANCE", SeqColours::spray(), false);
+        sprayVelocity = std::make_unique<KnobControl> (p.apvts, "spray_velocity", "VELOCITY", SeqColours::spray(), false);
+        // The boxes' switches lit in their colours, as an FX row's.
+        scaleSwitch.getButton().getProperties().set ("switchColour", (int) SeqColours::snap().getARGB());
+        strumSwitch.getButton().getProperties().set ("switchColour", (int) SeqColours::strum().getARGB());
+        sprayOn.setSwitchColour (SeqColours::spray());
         // (NOTES and RANGE take no ring: they keep the ring knobs' spacing, so the SPRAY row shares one line.)
         for (auto* knob : { sprayCount.get(), sprayRange.get(), spraySpread.get(), sprayChance.get(), sprayVelocity.get(), strumTime.get() })
             knob->setMatchRingSpacing (true);
@@ -271,12 +276,12 @@ public:
         startTimerHz (8);
     }
 
-    // Not modulation sources: the accent (a source's colour always means
-    // that source).
-    static juce::Colour arpColour() { return IlanaTheme::accent(); }
+    // Not modulation sources. Each pattern engine its own fixed colour (its lead lane's: UI review 31, item 40);
+    // the card's own chrome and the clip roll keep the accent.
+    static juce::Colour arpColour() { return SeqColours::velocity(); }
     static juce::Colour generateColour() { return IlanaTheme::accent(); }
-    static juce::Colour euclidColour() { return IlanaTheme::accent(); }
-    static juce::Colour pseqColour() { return IlanaTheme::accent(); }
+    static juce::Colour euclidColour() { return SeqColours::euclid(); }
+    static juce::Colour pseqColour() { return SeqColours::chance(); }
     static juce::Colour clipColour() { return IlanaTheme::accent(); }
 
     void paint (juce::Graphics& g) override
@@ -349,12 +354,17 @@ public:
         // Three boxes, each a part with its own switch: its title, a quiet
         // note on what it does now, the switch at the right.
         const auto tuningOn = readOn ("tuning_on");
-        const struct { juce::Rectangle<int> box; const char* title; bool on; juce::String note; } boxes[] {
+        const auto engineColour = tab == 1 ? euclidColour() : tab == 2 ? pseqColour() : arpColour();
+        const struct { juce::Rectangle<int> box; const char* title; bool on; juce::String note; juce::Colour colour; } boxes[] {
             { snapBox, "SNAP TO KEY", scaleSwitch.isOn(),
-              ! scaleSwitch.isOn() ? "off" : tuningOn ? "snaps in 12-TET steps" : readOn ("gen_snap") ? "snaps every note" : "snaps generated notes" },
-            { strumBox, "STRUM", strumSwitch.isOn(), strumSwitch.isOn() ? "spreads chords" : "off" },
-            { sprayBox, "SPRAY", readOn ("spray_on"), readOn ("spray_on") ? "throws extra notes" : "off" },
-            { engineBox, engineTabs.getSelected() == 1 ? "EUCLID" : engineTabs.getSelected() == 2 ? "PROB SEQ" : "ARP", true, "the pattern" }
+              ! scaleSwitch.isOn() ? "off" : tuningOn ? "snaps in 12-TET steps" : readOn ("gen_snap") ? "snaps every note" : "snaps generated notes",
+              SeqColours::snap() },
+            // (No note while on: the switch says so, and "spreads chords" never fitted the box: UI review 31, item 2.)
+            { strumBox, "STRUM", strumSwitch.isOn(), strumSwitch.isOn() ? juce::String() : juce::String ("off"),
+              SeqColours::strum() },
+            { sprayBox, "SPRAY", readOn ("spray_on"), readOn ("spray_on") ? "throws extra notes" : "off", SeqColours::spray() },
+            { engineBox, engineTabs.getSelected() == 1 ? "EUCLID" : engineTabs.getSelected() == 2 ? "PROB SEQ" : "ARP", true, "the pattern",
+              engineColour }
         };
 
         for (const auto& part : boxes)
@@ -363,6 +373,9 @@ public:
                 continue;
 
             IlanaTheme::paintRecessedPanel (g, part.box.toFloat(), 5.0f);
+            // The box's colour as a 2 px edge along its top, as the osc cards wear theirs (dim while it is off).
+            g.setColour (part.colour.withAlpha (part.on ? 0.9f : 0.35f));
+            g.fillRoundedRectangle (part.box.toFloat().reduced (5.0f, 0.0f).withHeight (2.0f), 1.0f);
             auto header = part.box.reduced (10, 0).removeFromTop (boxHeaderHeight);
             paintSubBoxTitle (g, header, part.title, part.note, part.on, 44); // (44: the switch)
         }
@@ -578,11 +591,16 @@ public:
         area.removeFromBottom (8);
 
         struct Item { juce::Component* control; float weight; };
+        // EUCLID's TARGET needs the width of "Trance Gate" (it read "Not..."): EUCLID's own rings take the ARP's
+        // ring pitch and SPRAY's rings a little less, so the boxes keep their sizes (UI review 31, item 2; SNAP TO
+        // KEY, STRUM and the DIRECTION menus have no slack: their names and values fill them).
+        const auto euclidShown = engineTabs.getSelected() == 1;
+        const auto sprayKnob = euclidShown ? 0.82f : 0.85f;
         std::vector<std::vector<Item>> groups {
             { { &genRoot, 0.8f }, { &genScale, 1.2f }, { &genSnap, 1.35f } },
             { { &sprayStrum, 1.05f }, { strumTime.get(), 0.9f } },
-            { { &sprayDirection, 1.05f }, { sprayCount.get(), 0.85f }, { sprayRange.get(), 0.85f },
-              { spraySpread.get(), 0.85f }, { sprayChance.get(), 0.85f }, { sprayVelocity.get(), 0.85f } }
+            { { &sprayDirection, 1.05f }, { sprayCount.get(), sprayKnob }, { sprayRange.get(), sprayKnob },
+              { spraySpread.get(), sprayKnob }, { sprayChance.get(), sprayKnob }, { sprayVelocity.get(), sprayKnob } }
         };
         engineBox = {};
         if (engineTabs.getSelected() != 3)
@@ -594,7 +612,7 @@ public:
                 // back: UI review 29, B1.)
                 items = { { &arpDiv, 0.9f }, { &arpMode, 1.95f }, { &arpSteps, 0.75f }, { &arpGate, 0.75f }, { &arpOctaves, 0.75f }, { &arpChance, 0.75f } };
             else if (engine == 1)
-                items = { { &eucDiv, 1.0f }, { &eucTarget, 1.0f }, { &eucSteps, 0.8f }, { &eucGate, 0.8f }, { &eucHits, 0.8f }, { &eucRotate, 0.8f } };
+                items = { { &eucDiv, 1.0f }, { &eucTarget, 1.55f }, { &eucSteps, 0.7f }, { &eucGate, 0.7f }, { &eucHits, 0.7f }, { &eucRotate, 0.7f } };
             else
                 items = { { &pseqDiv, 1.0f }, { &pseqLength, 0.8f }, { &pseqGate, 0.8f } };
             groups.insert (groups.begin(), items);
