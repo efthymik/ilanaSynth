@@ -400,6 +400,8 @@ private:
     std::array<std::unique_ptr<ModSourceGroupChip>, 3> groupChips;
     static constexpr int chipPickerWidth = 34;
     static std::array<juce::Rectangle<float>, 3> chipRegions (juce::Rectangle<int> row);
+    // The one gap between the chip row's groups (their rule in its middle).
+    static constexpr float chipGroupGap = 14.0f;
     ModSourceTray chipTray;
     std::unique_ptr<ModSourceChip> makeSourceChip (int source);
     void showSourceMenu (juce::Component& target, int source);

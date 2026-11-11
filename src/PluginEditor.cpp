@@ -387,6 +387,50 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
         showPage ("MATRIX");
         matrixPage->focusSlot (slot);
     };
+    // A matrix row's "Show destination": its knob's page, and the knob
+    // flashes (UI review 31, item 33). A knob shown on its page wins over one
+    // on a hidden card; PLAY before the pages behind it.
+    matrixPage->onShowDestination = [this] (int destination)
+    {
+        KnobControl* best = nullptr;
+        juce::String bestPage;
+        auto bestRank = std::numeric_limits<int>::max();
+        for (size_t s = 0; s < sections.size(); ++s)
+            for (int page = 0; page < sections[s]->getNumPages(); ++page)
+            {
+                auto* holder = sections[s]->getPage (page);
+                if (holder == nullptr)
+                    continue;
+                std::function<void (juce::Component&)> visit = [&] (juce::Component& parent)
+                {
+                    for (auto* child : parent.getChildren())
+                    {
+                        if (auto* knob = dynamic_cast<KnobControl*> (child);
+                            knob != nullptr && knob->getRingDestination() == destination && ! knob->getProperties().contains ("matrixDock"))
+                        {
+                            auto shown = true;
+                            for (auto* up = knob->getParentComponent(); up != nullptr && up != holder; up = up->getParentComponent())
+                                shown = shown && up->isVisible();
+                            const auto rank = (shown && knob->isVisible() ? 0 : 1000) + (int) s * 10 + page;
+                            if (rank < bestRank)
+                            {
+                                bestRank = rank;
+                                best = knob;
+                                bestPage = sections[s]->getPageId (page);
+                            }
+                        }
+                        visit (*child);
+                    }
+                };
+                visit (*holder);
+            }
+
+        if (best == nullptr)
+            return;
+        showPage (bestPage);
+        for (const auto delay : { 250, 700 })
+            juce::Timer::callAfterDelay (delay, [knob = juce::Component::SafePointer<KnobControl> (best)] { if (knob != nullptr) knob->flashChanged(); });
+    };
     // A slot's matrix destination names the effect now in it (S4-13).
     ModNames::fxSlotEffectName() = [&p] (int slot)
     {
@@ -559,27 +603,10 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
         auto knob = std::make_unique<StripKnob> (p, "macro" + juce::String (macro + 1),
                                                  "Macro " + juce::String (macro + 1), macro,
                                                  modSourceColour ((int) Mod::macroSourceFor (macro)), false);
-        // + ASSIGN: a new matrix row from this macro, then the matrix.
-        knob->onAssign = [this] (int index)
-        {
-            for (int slot = 0; slot < Mod::maxSlots; ++slot)
-            {
-                const auto routing = processorRef.readModSlot (slot);
-
-                if (routing.source == Mod::Source::None && routing.destination == 0)
-                {
-                    processorRef.performEdit ("Assign macro", [this, slot, index]
-                    {
-                        processorRef.clearModSlot (slot);
-                        processorRef.setModSlotValue (slot, "src", (float) Mod::macroSourceFor (index));
-                        processorRef.setModSlotValue (slot, "amt", 0.5f);
-                    });
-                    break;
-                }
-            }
-
-            showPage ("MATRIX");
-        };
+        // + ASSIGN arms the macro: the next knob clicked gets the route, on
+        // the page that is showing (UI review 31, item 26; it used to add a
+        // row with no destination and switch to MATRIX).
+        knob->onAssign = [] (int index) { setArmedModSource ((int) Mod::macroSourceFor (index)); };
         macroKnobs.push_back (std::move (knob));
     }
     {
@@ -852,6 +879,22 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
         updateHeaderButtons();
     };
     undoToastKey = undoToastKeyNow();
+    // Click to assign (UI review 31, item 26): while a source is armed the
+    // note above the dock says what the next knob click does, with CANCEL.
+    armedModSourceChanged() = [this]
+    {
+        static const juce::String prefix ("Click a knob to assign ");
+        if (const auto source = armedModSource(); source != 0)
+        {
+            undoToast.showSticky (prefix + ModNames::source (source, &processorRef).toUpperCase() + juce::String::fromUTF8 ("  \xc2\xb7  Esc to cancel"),
+                                  "CANCEL", [] { setArmedModSource (0); });
+            layoutUndoToast();
+        }
+        else if (undoToast.isVisible() && undoToast.getText().startsWith (prefix))
+            undoToast.hide();
+        for (auto& macro : macroKnobs)
+            macro->repaint();
+    };
     processorRef.getUndoManager().addChangeListener (this);
     content.addChildComponent (confirmOverlay);
     content.addChildComponent (saveOverlay);
@@ -1122,6 +1165,8 @@ void IlanaSynthAudioProcessorEditor::closeSampleBrowser()
 IlanaSynthAudioProcessorEditor::~IlanaSynthAudioProcessorEditor()
 {
     routeBadgeWatch.stopTimer();
+    setArmedModSource (0);
+    armedModSourceChanged() = nullptr;
     sampleBrowser.reset();
     zoneEditor.reset();
     setGpuRendering (false); // before any child goes: the render thread paints them
@@ -1403,6 +1448,9 @@ void IlanaSynthAudioProcessorEditor::showSourceMenu (juce::Component& target, in
     const auto slots = modSlotsUsing (processorRef, { (Mod::Source) source });
     juce::PopupMenu menu, matrixRows;
     menu.addSectionHeader (ModNames::source (source, &processorRef));
+    // (UI review 31, item 26: no drag from the dock up to the knob.)
+    menu.addItem (3000, "Assign by clicking a knob");
+    menu.addSeparator();
 
     if (slots.empty())
         menu.addItem (-1, "Drives nothing yet: drag it onto a knob", false);
@@ -1434,6 +1482,12 @@ void IlanaSynthAudioProcessorEditor::showSourceMenu (juce::Component& target, in
                         {
                             if (safeThis == nullptr || result <= 0)
                                 return;
+
+                            if (result == 3000)
+                            {
+                                setArmedModSource (source);
+                                return;
+                            }
 
                             auto& processor = safeThis->processorRef;
                             const auto name = ModNames::source (source, &processor);
@@ -1491,13 +1545,55 @@ void IlanaSynthAudioProcessorEditor::layoutChips (juce::Rectangle<int> row)
     for (size_t i = 0; i < chips.size(); ++i)
         chipFolded[i] = false;
 
-    const auto regions = chipRegions (row);
-    chipSeparatorX = { juce::roundToInt (regions[0].getRight() + (regions[1].getX() - regions[0].getRight()) * 0.5f),
-                       juce::roundToInt (regions[1].getRight() + (regions[2].getX() - regions[1].getRight()) * 0.5f) };
+    // The three groups are packed left to right with one fixed gap, its rule
+    // in the middle (UI review 31, item 10: each group had a fixed region, so
+    // the rules floated in 76 and 154 px holes on patches without FM while FM
+    // E-Piano folded seven envelopes). A group folds only when the row is
+    // full: one that fits its planned share (chipRegions) keeps its chips,
+    // the others share the rest of the row in proportion to their plans.
+    const auto planned = chipRegions (row);
+    std::array<float, 3> natural {}, budget {};
+    auto naturalSum = 0.0f;
+    for (size_t g = 0; g < 3; ++g)
+    {
+        for (const auto index : members[g])
+            natural[g] += chips[index]->getLayoutWidth();
+        naturalSum += natural[g];
+    }
+    auto groups = 0;
+    for (size_t g = 0; g < 3; ++g)
+        groups += members[g].empty() ? 0 : 1;
+    const auto usable = (float) row.getWidth() - (float) chipPickerWidth - chipGroupGap * (float) juce::jmax (0, groups - 1) - chipGroupGap;
+    if (naturalSum <= usable)
+        budget = natural;
+    else
+    {
+        auto left = usable, plannedOver = 0.0f;
+        for (size_t g = 0; g < 3; ++g)
+        {
+            if (natural[g] <= planned[g].getWidth())
+                left -= natural[g];
+            else
+                plannedOver += planned[g].getWidth();
+        }
+        for (size_t g = 0; g < 3; ++g)
+            budget[g] = natural[g] <= planned[g].getWidth() ? natural[g] : left * planned[g].getWidth() / juce::jmax (1.0f, plannedOver);
+    }
+    chipSeparatorX = { 0, 0 };
+    auto groupX = (float) row.getX();
+    auto groupsPlaced = 0;
 
     for (size_t g = 0; g < 3; ++g)
     {
         const auto& list = members[g];
+        if (list.empty())
+        {
+            groupChips[g]->setVisible (false);
+            continue;
+        }
+        if (groupsPlaced > 0 && groupsPlaced <= 2)
+            chipSeparatorX[(size_t) groupsPlaced - 1] = juce::roundToInt (groupX - chipGroupGap * 0.5f);
+        ++groupsPlaced;
         const auto played = [&] (size_t index)
         {
             const auto kind = chipReveal[index].first;
@@ -1518,8 +1614,8 @@ void IlanaSynthAudioProcessorEditor::layoutChips (juce::Rectangle<int> row)
         };
 
         // From the end: the sources the patch doesn't play first.
-        for (auto pass = 0; pass < 2 && widthOf() > regions[g].getWidth(); ++pass)
-            for (auto k = (int) list.size() - 1; k >= 0 && widthOf() > regions[g].getWidth(); --k)
+        for (auto pass = 0; pass < 2 && widthOf() > budget[g] + 0.5f; ++pass)
+            for (auto k = (int) list.size() - 1; k >= 0 && widthOf() > budget[g] + 0.5f; --k)
                 if (pass == 1 || ! played (list[(size_t) k]))
                     chipFolded[list[(size_t) k]] = true;
 
@@ -1535,8 +1631,8 @@ void IlanaSynthAudioProcessorEditor::layoutChips (juce::Rectangle<int> row)
 
         const auto used = widthOf();
         const auto spare = 0.0f; // the dock's chips keep their natural width, left-aligned
-        const auto squeeze = juce::jmin (1.0f, regions[g].getWidth() / juce::jmax (1.0f, used));
-        auto x = regions[g].getX();
+        const auto squeeze = juce::jmin (1.0f, budget[g] / juce::jmax (1.0f, used));
+        auto x = groupX;
         const auto place = [&] (juce::Component& component, float natural)
         {
             const auto width = (natural + spare) * squeeze;
@@ -1553,6 +1649,8 @@ void IlanaSynthAudioProcessorEditor::layoutChips (juce::Rectangle<int> row)
 
         if (! folded.empty())
             place (*groupChips[g], groupChips[g]->getLayoutWidth());
+
+        groupX = x + chipGroupGap;
     }
 
     for (size_t i = 0; i < chips.size(); ++i)
@@ -1571,7 +1669,7 @@ std::array<juce::Rectangle<float>, 3> IlanaSynthAudioProcessorEditor::chipRegion
         { "OP PITCH", "AMP ENV", "FILT ENV", "FILT 2 ENV" },
         { "VELOCITY", "KEY TRACK", "MOD WHEEL", "PRESSURE", "RANDOM" },
     } };
-    constexpr float groupGap = 14.0f; // room for the thin rule between groups
+    constexpr float groupGap = chipGroupGap; // room for the thin rule between groups
 
     std::array<float, 3> wanted {};
     auto total = 0.0f;
@@ -1705,8 +1803,17 @@ void IlanaSynthAudioProcessorEditor::updateMacroStrip()
     for (int page = 0; page < MacroPager::pages; ++page)
         macroPageSwitch.setUsed (page, used[(size_t) page]);
 
+    // (UI review 31, item 7: the first idle macro of each page shows + ASSIGN,
+    // the other idle ones on hover; the tiles read the flag since then.)
+    juce::ignoreUnused (anyAssigned);
+    std::array<bool, MacroPager::pages> shown {};
     for (int macro = 0; macro < (int) macroKnobs.size(); ++macro)
-        macroKnobs[(size_t) macro]->setQuietAssign (! anyAssigned && macro % MacroPager::perPage > 0);
+    {
+        const auto page = (size_t) MacroPager::pageOf (macro);
+        const auto idle = ! macroKnobs[(size_t) macro]->isAssigned();
+        macroKnobs[(size_t) macro]->setQuietAssign (idle && shown[page]);
+        shown[page] = shown[page] || idle;
+    }
 }
 
 void IlanaSynthAudioProcessorEditor::syncSectionColours (bool force)
@@ -4260,6 +4367,12 @@ bool IlanaSynthAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
 
     if (saveOverlay.isShowing())
         return saveOverlay.keyPressed (key);
+
+    if (key.getKeyCode() == juce::KeyPress::escapeKey && armedModSource() != 0)
+    {
+        setArmedModSource (0);
+        return true;
+    }
 
     if (key.getKeyCode() == juce::KeyPress::escapeKey)
         return closeTopPopup();
