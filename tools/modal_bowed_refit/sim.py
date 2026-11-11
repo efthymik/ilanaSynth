@@ -35,6 +35,13 @@ the rate wander three times quicker (vib_drift_hz 0.8 -> 2.4 Hz: the vibrato sti
 longer drifts a whole note's partial levels), the cello's loudness wander half as deep (CELLO loud_db); the tables' gains moved
 back to round 13's partial levels, then round 13's joint frozen-bow refit run again on top. Fitting hooks only: kw _sd (each
 random stream's own seed) and _mul (a factor on any value after the tables).
+Round 15 (both instruments): each partial's own movement. Spitfire's partials move at the vibrato's rates (3-10 Hz) by
+partial in a way the twin's body ripple did not place (their per-partial depth correlated 0.09 with the violin's, 0.34 with
+the cello's), and little of it is locked to the vibrato (10-30 % of its variance): per note and partial, fa_k (each
+partial's flutter band-passed at fa_hz, fa_bw wide, into its level, signed; in from fa_t0 over fa_tr, gone over fa_rel
+once let go) and sl_db (dB on its slow wander, the cello's sine wander too), fitted in closed form from four calibration renders (12 seeds);
+no loudness wander (loud_db 0 at both sizes: the partials' own movement carries it); the violin's hum corner per note
+(hum_k in the table: 63-73 had the rosin's jitter 4-9 dB too loud at 140-190 Hz); the joint frozen-bow refit run again.
 Bit-identical to the fits' twins at size 1 and (to float rounding) at 2.1."""
 import json
 import os
@@ -85,7 +92,7 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
            hf_g, hf_hz, hf_src, hf_lp,
            sn_amp, sn_hz, sn_spread, am_amp, am_ph, am_dly, fl_hpa, flr_o2,
            lr_w, lr_cap, kon, kon_t, krl, krl_t, rs_t1, rs_t2, rs_p,
-           rs_kon, rs_kon_t, rs_krl, rs_krl_t, ksu, ksu_t, rs_ksu, mmask, ymask, rsmask, sd):
+           rs_kon, rs_kon_t, rs_krl, rs_krl_t, ksu, ksu_t, rs_ksu, mmask, ymask, rsmask, sd, fa_k, sl_x, fa_hz, fa_bw, fa_rel, fa_t0, fa_tr):
     k = 1.0 / sr
     # (round 14, fitting) sd: each random stream's own seed (-1: the note's seed): 0 the bow's audio noise, 1 the slow
     # wander, 2 the flutter, 3 the floor, 4 the sine wander's phases, 5 the string top's noise, 6 the layers' start, 7 their jumps
@@ -333,6 +340,18 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
     # krl [modes, knots] dB at krl_t after the let-go (0 at the first, held after the last). Per block: one segment,
     # two multiply-adds a partial, in the exponent the block's gain glide already takes.
     use_kon = kon.shape[1] > 0
+    # (round 15) Each partial's level movement at the vibrato's rates, from its own flutter: the flutter (its fast part,
+    # flhp) through a two-pole band-pass at fa_hz (fa_bw Hz wide; updated every fourth block, 375 Hz, plenty under 10 Hz,
+    # and glided over the four), fa_k [modes] dB of level per dB of it, signed (with or against the flutter's own pull
+    # on the partial's ring: a negative fa_k calms it; it comes in over fa_tr s from fa_t0 s (-1: the vibrato's delay and rise), and goes over fa_rel s once
+    # let go); and each partial's slow wander, sl_x [modes] times as deep (the
+    # table's sl_db).
+    use_fa = len(fa_k) == modes and np.any(fa_k != 0.0)
+    use_slx = len(sl_x) == modes
+    fa_t = np.zeros(modes); fa_d = np.zeros(modes); fa_g = 1.0
+    fx1 = np.zeros(modes); fx2 = np.zeros(modes); fy1 = np.zeros(modes); fy2 = np.zeros(modes)
+    fr_ = np.exp(-np.pi * fa_bw * 128.0 / sr)
+    fq0 = (1 - fr_ * fr_) * 0.5; fq1 = -2 * fr_ * np.cos(2 * np.pi * fa_hz * 128.0 / sr); fq2 = fr_ * fr_
     use_ksu = ksu.shape[1] > 0
     use_krl = krl.shape[1] > 0
     kn_now = np.zeros(modes)
@@ -363,6 +382,7 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
             nfl_now = nfloor * nfac_held * np.exp(-DB * nfloor_dbs * tr)
             xdrop = 1.0 - np.exp(-tr / rdk_s)
             lr_now = min(tr, lr_cap)
+            fa_g = np.exp(-tr / fa_rel)   # (round 15: the partials' fast movement goes with the bow, fa_rel s)
             if use_flr:
                 xr = min(1.0, tr / max(1e-3, flr_rs))
                 ftarget = (1.0 + (flr_rel - 1.0) * xr) * 10 ** (-flr_fade * tr / 20.0)
@@ -465,7 +485,10 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
                 vib_env = min(1.0, (t - vib_delay) / max(1e-3, vib_rise))
             for m in range(modes):
                 d = (d * 1664525 + 1013904223) % 4294967296
-                wander1[m] += sa * (sg * ((d >> 8) * (2.0 / 16777216.0) - 1.0) - wander1[m])
+                if use_slx:
+                    wander1[m] += sa * (sg * sl_x[m] * ((d >> 8) * (2.0 / 16777216.0) - 1.0) - wander1[m])
+                else:
+                    wander1[m] += sa * (sg * ((d >> 8) * (2.0 / 16777216.0) - 1.0) - wander1[m])
                 wander[m] += sa * (wander1[m] - wander[m])
             d = (d * 1664525 + 1013904223) % 4294967296
             loud1 += sa * (lg * ((d >> 8) * (2.0 / 16777216.0) - 1.0) - loud1)
@@ -506,6 +529,12 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
                 else:
                     flhp = flut
                 swing_db = fl_clip * np.tanh(env * flhp * fshape / fl_clip)
+                if use_fa:
+                    if i % 128 == 0:
+                        fyy = fq0 * (flhp - fx2) - fq1 * fy1 - fq2 * fy2
+                        fx2 = fx1; fx1 = flhp.copy(); fy2 = fy1; fy1 = fyy
+                        fa_d = (fa_k * fyy * (env * min(1.0, max(0.0, (t - fa_t0) / fa_tr)) * fa_g) - fa_t) * 0.25
+                    fa_t = fa_t + fa_d
                 dk = np.exp(-sigma * np.exp(-DB * swing_db) * k)
                 fall = dk * dk
                 turn = 2.0 * dk * np.cos(2 * np.pi * hz * k)
@@ -522,7 +551,7 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
                 lvib = (1.0 + vd) * min(1.0, max(0.0, (t - vib_delay - am_dly) / max(1e-3, vib_rise)))
                 ripple = ripple + am_amp * lvib * (np.sin(phase) * amc + np.cos(phase) * ams)
             # (glided to over the block: a step would zip)
-            out_step = (out0 * np.exp(DB * (ripple + wander + (0.0 if fl_damp > 0 else 1.0) * flut * fshape - ob_now - rdk * xdrop + lr_w * lr_now + kn_now)) - out) / 32.0
+            out_step = (out0 * np.exp(DB * (ripple + wander + (0.0 if fl_damp > 0 else 1.0) * flut * fshape - ob_now - rdk * xdrop + lr_w * lr_now + kn_now + fa_t)) - out) / 32.0
         nxt = turn * q - fall * qp
         v = np.sum(shape * (nxt - qp)) * 0.5 * sr
         on = 1.0 if i < held else 0.0
@@ -735,12 +764,14 @@ def body_coeffs(inst, size=None):
     return [np.array(v) for v in (b0, a1, a2, gg)]
 
 
+# (round 15) loud_db 1.742 -> 0 (DEFAULT) and 0.388165 -> 0 (CELLO): no loudness wander (each partial's own movement, the
+# tables' fa_k and sl_db, carries what it gave); fa_t0 / fa_tr the partials' fast movement's onset
 # (round 14) vib_depth_dev 0.4561 -> 0.22805 and vib_drift_hz 0.8 -> 2.4 (both sizes); CELLO vib_depth_dev 0.31309 -> 0.156545, loud_db 0.77633 -> 0.388165
 DEFAULT = dict(beta=0.11, loss0=0.8, loss1=3.244e-06, bright=1.7841, b=1.0e-5, grip=0.5, speed=0.5, vel=80 / 127,
                vib_ct=14.65, vib_rate=5.2, vib_delay=0.25, vib_rise=0.4, swell_s=0.20311, swell_amt=0.91629,
                rosin=0.017985, jitter=0.08536, rel_s=0.30149, fade_db=22.334, hiss=0.014072, hiss_hp=8571.2, top=12000.0,
                attack_scale=0.050102, lp_hz=5701.8,
-               rip_db=3.326, rip_c=19.46, slow_db=2.052, slow_hz=3.0, loud_db=1.742,
+               rip_db=3.326, rip_c=19.46, slow_db=2.052, slow_hz=3.0, loud_db=0.0,
                vib_rate_dev=0.09024, vib_depth_dev=0.22805, vib_drift_hz=2.4, direct_db=-12.074, ring=9.3783, lift=1.0, ring_s=0.4991,
                fl_db=21.35, fl_hz=16.51, fl_slope=0.0, fl_hzslope=0.7853, jit_ct=0.0, jit_hz=20.0, pdrift_ct=1.441, pdrift_hz=0.5,
                fl_knee=818.2, fl_fslope=1.285, rip_knee=963.9, rip_fslope=2.074, direct_hp=57.747, fl_damp=1.0, fl_clip=30.0,
@@ -776,7 +807,7 @@ DEFAULT = dict(beta=0.11, loss0=0.8, loss1=3.244e-06, bright=1.7841, b=1.0e-5, g
                rs2_on=1, rs2_att=0.0, rs2_tau=0.0, rs2_rdb=0.0, rs2_rs=0.15, rs2_fade=40.0,
                # (round 12, the cello's) what the cello's layers replace (0..1, by their weight; by t already)
                rsc_cflr=1.0, rsc_hf=1.0, rsc_nfl=1.0, rsc_hiss=0.0,
-               out_db=0.0)   # (round 13: the table's dB on the note's whole output)
+               fa_hz=5.5, fa_bw=4.0, fa_rel=0.06, fa_t0=0.6, fa_tr=0.4, out_db=0.0)   # (round 13: the table's dB on the note's whole output)
 
 # (Round 8) The two-stage let-go (rel_s, fade_db, ring, rloss, rdrop_db, tail_db, ntail) was fitted to the
 # violin's partial trajectories. On held-out notes (2 seeds) it brings the trajectory error after
@@ -800,7 +831,7 @@ CELLO = dict(swell_s=0.3544, swell_amt=0.8208, ob_db=15.04, ob_knee=1990.0, ob_s
              hiss=0.0022,
              slow_hz=0.6, hs_depth=0.0, lp_k=0.0,   # (round 10: the violin's retuned wander corner and hair onset blend back)
              # (round 10, the cello's, blended in by t like the rest)
-             slow_db=0.093356, loud_db=0.388165, rip_db=2.1124, fl_db=13.929, vib_depth_dev=0.156545, vib_rate=5.0418, vib_rise=0.46505, vib_delay=0.12956, fl_hz=22.958)
+             slow_db=0.093356, loud_db=0.0, rip_db=2.1124, fl_db=13.929, vib_depth_dev=0.156545, vib_rate=5.0418, vib_rise=0.46505, vib_delay=0.12956, fl_hz=22.958)
 
 # (Round 9) The per-note tables, each fitted at one size (notes_<inst>.json; write_engine.py puts
 # them in ModalBowedNotes.h). Per note: gain_db (dB on each partial's share of the bridge force),
@@ -812,8 +843,11 @@ CELLO = dict(swell_s=0.3544, swell_amt=0.8208, ob_db=15.04, ob_knee=1990.0, ob_s
 _HERE = os.path.dirname(os.path.abspath(__file__))
 NOTES = [json.load(open(os.path.join(_HERE, "notes_%s.json" % inst))) for inst in ("violin", "cello")]
 TABLE_SCALARS = ("flr_db", "tail_db", "rdrop_db", "fade_db", "ob_db", "swell_s", "vib_ct", "slow_db", "rip_db", "rel_s", "ring",
-                 "hiss_db", "a0_db", "sn_db", "am_db", "out_db")   # (round 10: hiss_db, dB on the hiss; a0_db, the air mode's level)
-TABLE_ARRAYS = ("gain_db", "dark_db", "loss_add", "drop_db")
+                 "hiss_db", "a0_db", "sn_db", "am_db", "out_db", "hum_k")   # (round 10: hiss_db, dB on the hiss; a0_db, the air mode's level)
+TABLE_ARRAYS = ("gain_db", "dark_db", "loss_add", "drop_db", "fa_k", "sl_db")
+# (round 15: hum_k, the hum's high-pass corner against the note (the violin's 63-70: the rosin's jitter on the fundamental's
+# low skirt, 4-9 dB too loud at 140-190 Hz where the layers are off already); fa_k [64] each partial's fast level movement from its flutter (dB per dB), sl_db [64] dB on
+# each partial's slow wander (the noise wander's and the cello's sine wander's depth))
 # (round 12, the cello's: sn_db, am_db, the sine wander's and the level vibrato's depth per note)
 # (round 13: out_db, dB on the note's whole output, which keeps each note's loudness at round 12's: the joint refit's
 # picture score is blind to level)
@@ -957,6 +991,13 @@ def play(inst, note, seconds=4.8, held=4.0, seed=1, tables=None, **kw):
     hzm = np.minimum(np.arange(1, modes + 1) * f0, SR * 0.49)
     sn_amp = t * p["sn_db"] * np.where(hzm < p["sn_knee"], p["sn_lo"], (hzm / p["sn_knee"]) ** -p["sn_slope"]) if p["sn_db"] != 0.0 else np.zeros(modes)
     am_amp = t * p["am_db"] / (1.0 + (hzm / p["am_knee"]) ** p["am_slope"]) if p["am_db"] != 0.0 else np.zeros(modes)
+    # (round 15) the tables' fa_k and sl_db (kw fa_kk / sl_dbk add, fitting)
+    fa_k = _arr(rows, "fa_k")[:modes] + np.resize(np.asarray(kw.get("fa_kk", 0.0), float), 64)[:modes]
+    sl_db = _arr(rows, "sl_db")[:modes] + np.resize(np.asarray(kw.get("sl_dbk", 0.0), float), 64)[:modes]
+    fa_k = fa_k if np.any(fa_k != 0.0) else np.zeros(0)
+    sl_x = 10 ** (sl_db / 20) if np.any(sl_db != 0.0) else np.zeros(0)
+    if len(sl_x):
+        sn_amp = sn_amp * sl_x
     flrg = _flrg(p, f0, t)
     # (round 11, the cello's, by t) the low partials' ring-on after the let-go: lr_dbs dB a second, as
     # 1 / (1 + (hz / lr_knee) ^ lr_slope) by partial
@@ -991,7 +1032,7 @@ def play(inst, note, seconds=4.8, held=4.0, seed=1, tables=None, **kw):
                   lr_w, max(0.0, p["lr_cap"]), *_knots(p, rows, kw, hzm, t),
                   *_layers(p, rows, lrows, note, t, kw, hzm),
                   np.asarray(kw.get("_mmask", np.zeros(0)), float), np.asarray(kw.get("_ymask", np.zeros(0)), float),
-                  np.asarray(kw.get("_rsmask", np.zeros(0)), float), np.asarray(kw.get("_sd", np.zeros(0)), np.int64))
+                  np.asarray(kw.get("_rsmask", np.zeros(0)), float), np.asarray(kw.get("_sd", np.zeros(0)), np.int64), fa_k, sl_x, p["fa_hz"], p["fa_bw"], p["fa_rel"], p["fa_t0"] if p["fa_t0"] >= 0 else p["vib_delay"], max(1e-3, p["fa_tr"] if p["fa_tr"] > 0 else p["vib_rise"]))
     # (round 13) the note's whole output, out_db (the table's: each note's loudness kept at round 12's)
     return y * 10 ** (p["out_db"] / 20) if p["out_db"] != 0.0 else y
 

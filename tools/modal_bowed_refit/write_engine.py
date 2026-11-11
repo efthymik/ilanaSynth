@@ -111,6 +111,13 @@ for name, key in (("airDb", "a0_db"), ("airSlope", "a0_k"), ("airHz", "a0_hz"), 
 put("wanderHzCello", sim.CELLO["slow_hz"], "")
 # (round 14: the vibrato's rate and depth wanders' corner, one value at every size (vib_drift_hz is not blended))
 put("vibratoWanderHz", p["vib_drift_hz"], "")
+# (round 15: each partial's fast level movement, the band-pass on its flutter (one value at every size, not blended);
+# bowDriftDb and bowDriftDbCello are 0 now: no loudness wander)
+for name, key in (("fastLevelHz", "fa_hz"), ("fastLevelWidth", "fa_bw"), ("fastLevelOnset", "fa_t0"), ("fastLevelRise", "fa_tr"),
+                  ("fastLevelRelease", "fa_rel")):
+    put(name, p[key], "")
+    assert sim.CELLO.get(key, p[key]) == p[key]
+assert p["fa_t0"] >= 0 and p["fa_tr"] > 0
 assert sim.CELLO.get("vib_drift_hz", p["vib_drift_hz"]) == p["vib_drift_hz"]
 assert p["rnb"] == 0 and p["lp_k"] == 0 and p["flr_ord"] == 2 and p["hs_rn"] == 1 and p["hiss_db"] == 0
 assert sim.CELLO["hs_depth"] == 0 and sim.CELLO["lp_k"] == 0
@@ -143,11 +150,15 @@ NOTES_H = os.path.join(os.path.dirname(ENGINE), "ModalBowedNotes.h")
 SCALARS = (("floorDb", "flr_db"), ("tailDb", "tail_db"), ("letGoDropDb", "rdrop_db"), ("fadeDb", "fade_db"), ("onsetDarkDb", "ob_db"),
            ("swellSeconds", "swell_s"), ("vibratoCents", "vib_ct"), ("wanderDb", "slow_db"), ("rippleDb", "rip_db"),
            ("releaseSeconds", "rel_s"), ("releaseRing", "ring"), ("hissDb", "hiss_db"), ("airDb", "a0_db"),
-           ("sineWanderDb", "sn_db"), ("levelVibratoDb", "am_db"), ("outputDb", "out_db"))   # (round 13: out_db)
+           ("sineWanderDb", "sn_db"), ("levelVibratoDb", "am_db"), ("outputDb", "out_db"),   # (round 13: out_db)
+           ("humCorner", "hum_k"))   # (round 15: on some rows only, 0 in the others: the engine skips a 0)
 assert tuple(k for _, k in SCALARS) == sim.TABLE_SCALARS
 # (round 10, the cello's: columns added to a value by the table's weight, not replacing it)
 SCALARS += (("stringTopAddDb", "hf_add"), ("lowFloorAddDb", "cflr_add"))
-ARRAYS = (("gainDb", "gain_db"), ("darkDb", "dark_db"), ("lossAdd", "loss_add"), ("dropDb", "drop_db"))
+ARRAYS = (("gainDb", "gain_db"), ("darkDb", "dark_db"), ("lossAdd", "loss_add"), ("dropDb", "drop_db"),
+          ("fastLevel", "fa_k"), ("slowDb", "sl_db"))   # (round 15)
+# (round 15: scalars a table may set on some of its rows only; a row without one holds 0, which the engine skips)
+PARTIAL = ("hum_k",)
 
 
 def floats(v, digits):
@@ -180,6 +191,9 @@ out = ["#pragma once", "",
        "// between notes), all there at its own size and gone a quarter of the way (in log size) toward",
        "// the next; below first it is held (holdBelow) or absent, above last it fades over fadeAbove",
        "// semitones (0: absent). Another instrument's table is one more Row array and Table entry.",
+       "// (Round 15) fastLevel: each partial's fast level movement, dB of level per dB of its band-passed flutter;",
+       "// slowDb: dB on each partial's slow wander (and the cello's sine wander); humCorner: the hum high-pass's corner",
+       "// against the note, set on some rows only (0: the engine's own).",
        "// Generated (tools/modal_bowed_refit/write_engine.py from notes_<inst>.json): edit the tools, not this file.",
        "struct ModalBowedNotes",
        "{",
@@ -258,7 +272,8 @@ for inst in ("violin", "cello"):
                 mask |= 1 << i
         rows.append(row)
     for row in rows:
-        assert all((key in row) == bool(mask >> i & 1) for i, (_, key) in enumerate(SCALARS))
+        assert all((key in row) == bool(mask >> i & 1) for i, (_, key) in enumerate(SCALARS) if key not in PARTIAL)
+        assert all(row[key] != 0 for key in PARTIAL if key in row)
         assert all(len(row.get(key, [])) <= 64 for _, key in ARRAYS)
     out.append("    static constexpr Row %sRows[%d] {" % (inst, len(rows)))
     for n, row in zip(range(tab["first"], tab["last"] + 1), rows):

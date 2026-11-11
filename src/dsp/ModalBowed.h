@@ -360,6 +360,8 @@ public:
         pitchDrift = pitchDriftIn = 0.0f;
         std::fill (std::begin (wander), std::end (wander), 0.0f);
         std::fill (std::begin (wanderIn), std::end (wanderIn), 0.0f);
+        for (auto* state : { fastX1, fastX2, fastY1, fastY2, fastNow, fastStep })   // (round 15)
+            std::fill (state, state + maxModes, 0.0f);
         bowDrift = rateDrift = depthDrift = bowDriftIn = rateDriftIn = depthDriftIn = 0.0f;
         bowWander = 1.0f;
         modesDirty = bodyDirty = true;
@@ -1035,7 +1037,7 @@ private:
         };
         for (int n = 0; n < modes; ++n)
         {
-            wanderIn[n] += wanderPole * (wanderGain * draw() - wanderIn[n]);
+            wanderIn[n] += wanderPole * (wanderGainOf[n] * draw() - wanderIn[n]);   // (round 15: by the partial's slowDb)
             wander[n] += wanderPole * (wanderIn[n] - wander[n]);
         }
         bowDriftIn += wanderPole * (bowDriftGain * draw() - bowDriftIn);
@@ -1094,6 +1096,28 @@ private:
                 flutterFast[n] = flutter[n] - flutterSlow[n];
             }
             swaying = flutterFast;
+        }
+        // (Round 15) Each partial's fast level movement: its swaying through
+        // the band-pass every fourth block (the twin's 128 samples), glided
+        // to over the four, into the level's exponent (fastNow).
+        if (fastOn)
+        {
+            if (elapsed % (4 * blockSize) == 0)
+            {
+                const auto held = releasedAt < 0 ? 1.0 : std::exp (-(double) (elapsed + blockSize - releasedAt) / sampleRate / fastLevelRelease);
+                const auto gate = (float) ((double) envelope * juce::jlimit (0.0, 1.0, (seconds - fastLevelOnset) / fastLevelRise) * held);
+                for (int n = 0; n < modes; ++n)
+                {
+                    const auto y = fastQ0 * (swaying[n] - fastX2[n]) - fastQ1 * fastY1[n] - fastQ2 * fastY2[n];
+                    fastX2[n] = fastX1[n];
+                    fastX1[n] = swaying[n];
+                    fastY2[n] = fastY1[n];
+                    fastY1[n] = y;
+                    fastStep[n] = (fastBy[n] * y * gate - fastNow[n]) * 0.25f;
+                }
+            }
+            for (int n = 0; n < modes; ++n)
+                fastNow[n] += fastStep[n];
         }
         for (int n = 0; n < modes; ++n)
         {
@@ -1194,7 +1218,8 @@ private:
                     ripple += onA[n] + (onB[n] - onA[n]) * onU + offA[n] + (offB[n] - offA[n]) * offU + suA[n] + (suB[n] - suA[n]) * suU;
                 // (glided to over the block: a step would zip)
                 // (round 9: less each partial's own drop at the let-go, the cello's table's)
-                outStep[n] = (outBase[n] * std::exp (decibel * (ripple + wander[n] - dark * onsetDark[n] - releaseDrop[n] * dropNow)) - out[n]) * (1.0f / (float) blockSize);
+                // (round 15: and its fast level movement, fastNow: 0 without one)
+                outStep[n] = (outBase[n] * std::exp (decibel * (ripple + wander[n] - dark * onsetDark[n] - releaseDrop[n] * dropNow + fastNow[n])) - out[n]) * (1.0f / (float) blockSize);
             }
         };
         // (the cello's terms; round 12, the knots without them, the violin's)
@@ -1300,6 +1325,30 @@ private:
         float unused = 0.0f;
         wanderFilter (wanderHzNow, wanderDbNow, wanderPole, wanderGain);
         wanderFilter (wanderHzNow, bowDriftDbNow, unused, bowDriftGain);
+        // (Round 15) each partial's slow wander by its table's slowDb (slowBy,
+        // updateFit), and its fast level movement: the tables' fastLevel by
+        // their weights over flutterShape (the flutter here carries it, the
+        // twin's does not), off when no partial has one (a pluck, a size no
+        // table reaches).
+        fastOn = false;
+        for (int n = 0; n < modes; ++n)
+        {
+            wanderGainOf[n] = wanderGain * slowBy[n];
+            auto fast = 0.0;
+            if (! plucked)
+                for (int i = 0; i < ModalBowedNotes::tableCount; ++i)
+                    if (tableWeight[i] > 0.0)
+                        fast += tableWeight[i] * (double) noteRow[i]->fastLevel[n];
+            fastBy[n] = (float) (fast / (double) flutterShape[n]);
+            fastOn = fastOn || fast != 0.0;
+        }
+        {
+            const auto every = 4.0 * blockSize / sampleRate;
+            const auto r = std::exp (-juce::MathConstants<double>::pi * fastLevelWidth * every);
+            fastQ0 = (float) ((1.0 - r * r) * 0.5);
+            fastQ1 = (float) (-2.0 * r * std::cos (juce::MathConstants<double>::twoPi * fastLevelHz * every));
+            fastQ2 = (float) (r * r);
+        }
         wanderFilter (vibratoWanderHz, rateWander, vibratoPole, rateDriftGain);
         wanderFilter (vibratoWanderHz, (float) depthWanderNow, unused, depthDriftGain);
         // (The flutter is deeper and quicker up high: the violin's against the cello's.)
@@ -1468,6 +1517,13 @@ private:
                            * std::pow (juce::jmin (noteHz, hissCap) / 440.0, at (hissSlope, 0.0)) * outputScale);
         bodyNoiseNow = (float) at (bodyNoise, bodyNoiseCello);
         humRatioNow = (float) at (humRatio, humRatioCello);
+        // (round 15: the table's humCorner where its row has one, by its weight, as note() does)
+        for (int i = 0; i < ModalBowedNotes::tableCount; ++i)
+            if (tableWeight[i] > 0.0 && (ModalBowedNotes::tables[i].scalars >> S::humCorner & 1u) != 0 && noteRow[i]->scalar[S::humCorner] != 0.0f)
+            {
+                const auto v = noteRow[i]->scalar[S::humCorner];
+                humRatioNow = tableWeight[i] >= 1.0 ? v : (float) ((double) humRatioNow + ((double) v - (double) humRatioNow) * tableWeight[i]);
+            }
         flutterDbNow = (float) at (flutterDb, flutterDbCello);
         wanderDbNow = (float) note (S::wanderDb, at (wanderDb, wanderDbCello));
         bowDriftDbNow = (float) at (bowDriftDb, bowDriftDbCello);
@@ -1522,7 +1578,15 @@ private:
         for (int n = 0; n < modes; ++n)
         {
             const auto hz = juce::jmin ((double) (n + 1) * noteHz, sampleRate * 0.49);
-            sineAmp[n] = (float) (cello * sineDb * (hz < sineWanderKnee ? sineWanderLow : std::pow (hz / sineWanderKnee, -sineWanderSlope)));
+            // (round 15: each partial's slow wanders by its table's slowDb, by their weights)
+            auto slowDb = 0.0;
+            if (! plucked)
+                for (int i = 0; i < ModalBowedNotes::tableCount; ++i)
+                    if (tableWeight[i] > 0.0)
+                        slowDb += tableWeight[i] * (double) noteRow[i]->slowDb[n];
+            const auto slow = slowDb != 0.0 ? std::exp ((double) decibel * slowDb) : 1.0;
+            slowBy[n] = (float) slow;
+            sineAmp[n] = (float) (cello * sineDb * (hz < sineWanderKnee ? sineWanderLow : std::pow (hz / sineWanderKnee, -sineWanderSlope)) * slow);
             levelVibratoAmp[n] = (float) (cello * levelDb / (1.0 + std::pow (hz / levelVibratoKnee, levelVibratoSlope)));
         }
         // (Round 11, the cello's) The ring-on by partial (by toCello) and the
@@ -2013,8 +2077,14 @@ private:
     // The slow wander (dB standard deviation and corner): each partial's
     // level on its own, the bow's speed; the vibrato's rate and depth
     // (fractions; Spitfire's vibrato is never quite even).
-    static constexpr float wanderDb = 2.052f, bowDriftDb = 1.742f, rateWander = 0.09024f, depthWander = 0.22805f;
+    static constexpr float wanderDb = 2.052f, bowDriftDb = 0.0f, rateWander = 0.09024f, depthWander = 0.22805f;
     static constexpr double wanderHz = 3.0, vibratoWanderHz = 2.4;
+    // (Round 15) Each partial's fast level movement: its flutter (the cello's
+    // less its slow part) through a two-pole band-pass at fastLevelHz,
+    // fastLevelWidth Hz wide, into its level (the table's fastLevel, dB per
+    // dB), in from fastLevelOnset s over fastLevelRise s, gone over
+    // fastLevelRelease s once let go. One value at every size.
+    static constexpr double fastLevelHz = 5.5, fastLevelWidth = 4.0, fastLevelOnset = 0.6, fastLevelRise = 0.4, fastLevelRelease = 0.06;
     // The bow's fast randomness: each partial's flutter (dB standard
     // deviation and corner at A4, and how both grow with the register), the
     // pitch's slow drift (cents).
@@ -2051,7 +2121,7 @@ private:
     static constexpr double brightnessCello = 2.144, stringLossHighCello = 3.9470e-06, directDbCello = -10.33, directHpCello = 96.61, tiltHzCello = 3000.0;
     static constexpr double bodyNoiseCello = 1.6950e-06, humRatioCello = 0.33, attackScale = 0.050102, attackScaleCello = 0.05;
     static constexpr double hissHp = 8571.2, hissHpCello = 8000.0, hissSlope = 3.8134, hissLevelCello = 0.0022;
-    static constexpr double flutterDbCello = 13.929, wanderDbCello = 0.093356, bowDriftDbCello = 0.38816, rippleDbCello = 2.1124;
+    static constexpr double flutterDbCello = 13.929, wanderDbCello = 0.093356, bowDriftDbCello = 0.0, rippleDbCello = 2.1124;
     static constexpr double directSizeDbPizz = -12.0, tiltHzPizz = 5590.0;
     // The violin's hall floor: a pink noise hallFloorDb against the note at
     // A4 (hallFloorSlope dB more per doubling of the note), low-passed
@@ -2164,6 +2234,14 @@ private:
     alignas (32) float releaseLoss[maxModes] {}, wolfPush[maxModes] {}, releaseDrop[maxModes] {};
     alignas (32) float sineAmp[maxModes] {}, sineCos[maxModes] {}, sineSin[maxModes] {}, sineTurnCos[maxModes] {}, sineTurnSin[maxModes] {};
     alignas (32) float levelVibratoAmp[maxModes] {}, flutterSlow[maxModes] {}, flutterFast[maxModes] {};
+    // (Round 15) Each partial's slow wander's gain (wanderGain by the table's
+    // slowDb: slowBy) and its fast level movement (fastBy, the table's
+    // fastLevel over flutterShape; the band-pass's state, the dB now and its
+    // step a block; fastOn when any partial has one).
+    alignas (32) float slowBy[maxModes] {}, wanderGainOf[maxModes] {}, fastBy[maxModes] {};
+    alignas (32) float fastX1[maxModes] {}, fastX2[maxModes] {}, fastY1[maxModes] {}, fastY2[maxModes] {}, fastNow[maxModes] {}, fastStep[maxModes] {};
+    float fastQ0 = 0.0f, fastQ1 = 0.0f, fastQ2 = 0.0f;
+    bool fastOn = false;
     // (Round 11, the cello's) each partial's ring-on (dB a second) and its
     // gain envelope's knots (dB: a column per knot, the last of knotOn and
     // the first of knotRelease 0; knotZero for none).

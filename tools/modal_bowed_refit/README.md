@@ -388,4 +388,113 @@ the render less a render with the share 0 (the noise paths are linear, their ran
 noise to tone -16.4 -> -22.4 dB (its noise -32.1 -> -38.1 dB, one note's -34.8 to -46.6), violin G4 B4 D5 G5 -12.1 ->
 -18.0 dB (-28.6 -> -34.6, one note's -31.4 to -43.2). Staggered entries and exits glide (largest 20 ms step 0.4 dB).
 
+Round 15 (2026-11-11), both instruments: each partial's own movement.
+
+Scores: twin, all notes, seeds 4-6 against Spitfire, paired by note (se over notes); t2t = the twin against itself over all
+pairs of seeds 1-8 (28 pairs); ES = raw - 0.5 t2t; held = the held-out note pairs (Spitfire samples every whole tone).
+  violin  raw 8.034 -> 7.455 (-0.579 se 0.047, better on 40 of 42; held -0.625 se 0.074, 16 of 16)
+          ES 5.072 -> 4.520 (-0.552 se 0.042, 41 of 42); t2t 5.924 -> 5.869 (falls)
+  cello   raw 7.491 -> 6.741 (-0.750 se 0.091, 19 of 19; held -0.587 se 0.112, 6 of 6)
+          ES 4.854 -> 4.111 (-0.743 se 0.065, 19 of 19); t2t 5.274 -> 5.260 (flat; +0.015 on 6 seeds)
+  Mean take (8 seeds): violin 6.515 -> 5.834, cello 6.208 -> 5.268.
+  Demo notes, seeds 1-3: violin 7.78 -> 7.05, cello 7.68 -> 6.88.
+  By term (raw / ES; t2t on seeds 1-6):
+    violin    raw before -> after   ES before -> after   (d raw, notes better)
+    sustain   0.835 -> 0.826        0.593 -> 0.592       (-0.009, 19/42)
+    wobble    0.697 -> 0.686        0.537 -> 0.525       (-0.012, 25/42)
+    attack    4.181 -> 4.109        2.493 -> 2.486       (-0.072, 30/42)
+    release   4.098 -> 4.063        2.332 -> 2.326       (-0.035, 32/42)
+    plevel    0.723 -> 0.724        0.368 -> 0.381       (+0.001, 20/42)
+    vibam     0.521 -> 0.329        0.396 -> 0.182       (-0.193, 42/42)
+    slow      0.479 -> 0.419        0.263 -> 0.217       (-0.060, 36/42)
+    cello
+    sustain   0.476 -> 0.474        0.294 -> 0.298       (-0.001, 10/19)
+    wobble    0.647 -> 0.545        0.510 -> 0.408       (-0.102, 18/19)
+    attack    3.374 -> 3.333        1.864 -> 1.856       (-0.041, 11/19)
+    release   3.560 -> 3.487        2.016 -> 1.963       (-0.072, 16/19)
+    plevel    0.869 -> 0.879        0.647 -> 0.662       (+0.010,  9/19)
+    vibam     0.603 -> 0.432        0.463 -> 0.274       (-0.170, 19/19)
+    slow      0.631 -> 0.504        0.426 -> 0.296       (-0.127, 17/19)
+  Per-partial corr(Spitfire, twin's mean take) over the partials within 40 dB: vibam violin 0.09 -> 0.73, cello 0.33 -> 0.65;
+  slow violin 0.74 -> 0.82, cello 0.64 -> 0.81 (the twin's own take against its other takes: 0.84 / 0.80, the ceiling).
+
+What was found (scratch scripts vib.py, an1-an3.py):
+- The vibrato-rate movement (vibam) was bias: the twin's per-partial depth correlated 0.09 (violin) / 0.34 (cello) with
+  Spitfire's, its own takes 0.84 with each other. But Spitfire's partial movement is mostly NOT locked to its vibrato: a
+  regression of each partial's 3-10 Hz dB track on cos/sin of the vibrato's phase (from its f0, the partials' instantaneous
+  frequency) explains 10-30 % of the variance (the twin's: 15-70 %, its body ripple). Replacing the twin's locked part by
+  Spitfire's locked phasors would leave vibam no better (mean take, violin 0.49 -> 0.52, cello 0.58 -> 0.52), so the
+  signed vibrato-AM table was not built: the movement Spitfire has is random, partial by partial.
+- Spitfire's vibrato is shallower than the twin's: violin 8.1 cents against 12.9, cello 6.1 against 15.6 (open strings near
+  0); its rate 5.4 / 5.3 Hz against 5.26 / 5.04. Its per-note kinematics do not help (below).
+- In Spitfire the loudest partials move most (vibam 2.4 dB at the top, 1.9 at -40); in the twin the reverse (1.7 / 2.0).
+- The violin's 140-190 Hz excess sits on notes 63-73 only (4-9 dB, sustain and attack), with the residual layers already
+  off there: it is the rosin's jitter on the fundamental's low skirt (jitter 0 removes it), under the hum high-pass's corner.
+- The cello's plevel gap is mostly its weak partials: those below -40 dB carry 0.44 of its 0.87 (twin t2t there 0.22).
+
+So, in sim.py and the tables:
+- Per note and partial, fa_k: each partial's flutter (its fast part, flhp) through a two-pole band-pass at 5.5 Hz (4 Hz wide,
+  updated every fourth block and glided) into its level, dB per dB, signed (negative calms the flutter's own pull on the
+  ring), in from 0.6 s over 0.4 s, gone over 0.06 s once let go; and sl_db, dB on its slow wander (on the cello its sine
+  wander too). Fitted in closed form: per note four renders (fa 0, +0.25, -0.25; the wander off) on the fit seeds (1-3,
+  7-15), each partial's mean vibam^2 and slow^2 a quadratic in fa and the wander's gain; the |vibam| + |slow| error to
+  Spitfire minimised per partial (fa within +-1, the wander 0.25-2.8 times). Then the gains moved back to round 14's
+  partial levels.
+- No loudness wander (loud_db 0, both sizes): with each partial's own movement fitted, the common wander only added take to
+  take (violin, refit each way: 1.742 -0.230 t2t +0.24; half -0.298 t2t +0.09; none -0.335 t2t +0.02).
+- The violin's hum corner per note (hum_k in the table, 13 notes; gains moved by the corner's own change at each partial):
+  -0.043 (13 of 42 better: those 13; held -0.062).
+- The round 13/14 joint frozen-bow refit once more (fit 1,2,3,7,8,9, val 4-6): violin -0.194 (40/42), cello -0.280 (19/19);
+  its share is another pass's (round 14's control: one pass on its own -0.18 on the cello).
+- out_db relevelled: each note's loudness is round 14's (violin and cello: 0.00 dB). The viola (no table of its own) moves
+  -0.11 dB on average (-0.50 .. +0.17 over 48-74): regenerate ModalBowedSizeLevel.h in the port.
+Steps on the way (seeds 4-6, against round 14): fa/sl alone (with loudness wander) violin -0.230 t2t +0.24, cello -0.500
+t2t +0.23; + no loudness wander violin -0.335 (t2t +0.02), cello -0.454 (t2t +0.19); + the 0.6 s onset violin -0.342
+(t2t 0.00), cello -0.470 (t2t +0.15); + hum violin -0.385; + refit violin -0.579 (t2t -0.09), cello -0.750 (t2t +0.02; 8 seeds -0.01).
+
+Tried and left out:
+- The flutter straight into the level (no band-pass): vibam -0.16 but sustain +1.1, plevel +0.65, attack +0.54 (most of its
+  power above 10 Hz and under 3: the 85 ms STFT's power average lifts the level); a one-pole band-pass: sustain +0.5.
+- Spitfire's per-note vibrato (depth by its f0, rate): rate alone violin +0.050 (13/42), cello -0.021 (held +0.046);
+  depth alone +0.75 / +0.23 (plevel and sustain: the twin's partial gains were fitted under the deeper vibrato); depth and
+  rate with the fa/sl refit on top: violin -0.030 against -0.230 without them, cello -0.486 against -0.500 (even). The onset
+  phase and the vibrato's delay/rise were not fitted (Spitfire's onset envelope is too irregular to read reliably).
+- The locked vibrato-AM table (in-phase / quadrature dB per partial): see above, predicted no gain; not built.
+- AM onset at the vibrato's own delay/rise: 0.6 s / 0.4 s was -0.007 (violin) / -0.016 (cello) better, t2t -0.02 / -0.04.
+
+CPU: about +1 % on a bowed voice (the band-pass: 5 multiply-adds a mode every 128 samples, one add a mode a block); sl_db and
+hum_k are note-on only; loud_db 0 changes no code. Old presets: with round 14's loud_db and tables the sim is bit for bit
+round 14's (chk2/).
+
+Lessons:
+- Before fitting a phase-locked model, measure how much of the target is locked: Spitfire's partial movement at the
+  vibrato's rates is 70-90 % random, so its depth by partial is the thing to match, not a phasor.
+- A per-partial random modulation has to sit in the measured band: power outside it (below 3 Hz, above 10 Hz) costs the
+  level and spectrum terms more than it buys.
+- Fit the per-partial movement first, then drop a global randomness it makes redundant (the loudness wander): the take to
+  take falls back and the raw score gains.
+Engine (round 15): the tables' new columns are `ModalBowedNotes::Row::fastLevel` / `slowDb` (64 each) and the scalar
+`humCorner` (a row without one holds 0, which the engine skips; `write_engine.py`'s `PARTIAL`); the globals are
+`fastLevelHz`, `fastLevelWidth`, `fastLevelOnset`, `fastLevelRise`, `fastLevelRelease` (one value at every size) and
+`bowDriftDb` / `bowDriftDbCello` 0. At the fit (`updateModes`, `updateFit`): `slowBy[n]` (the tables' slowDb by their weights,
+as a factor) on each partial's wander gain (`wanderGainOf`) and on the cello's `sineAmp`; `fastBy[n]` = the tables'
+fastLevel / `flutterShape[n]` (the engine's flutter carries flutterShape, the twin's does not); `humRatioNow` takes the
+table's humCorner by its weight where the row has one. In `updateVibrato`, after the flutter: every fourth block the
+band-pass on `swaying[n]` (the flutter, the cello's less its slow part; `fastQ0..2` from 4 blocks / rate), its target
+`fastBy * y * envelope * onset ramp * let-go fade`, glided over the four blocks (`fastNow`, `fastStep`) and added to the
+level's exponent. Skipped (and 0) when no partial has a fastLevel (a pluck, a size no table reaches); with slowDb 0 and
+no humCorner the code is round 14's to the bit. The pizzicato renders bit for bit as before.
+The engine alone (bench, 3 takes on the demo notes; the twin seeds 1-3 beside it): violin 8.10 -> 7.32 (twin 7.78 ->
+7.05), cello 8.42 -> 7.49 (twin 7.68 -> 6.88); by term (engine / twin change) violin sustain +0.02 / -0.01, wobble -0.07 /
+-0.07, attack -0.12 / -0.09, release -0.06 / -0.04, plevel -0.02 / -0.13, vibam -0.26 / -0.22, slow -0.06 / -0.03; cello
+sustain 0.00 / -0.03, wobble -0.13 / -0.09, attack -0.12 / -0.13, release -0.16 / -0.06, plevel -0.02 / 0.00, vibam -0.14 /
+-0.13, slow -0.18 / -0.17. On 6 more takes: violin 7.99 -> 7.45 (twin, seeds 4-9, 8.02 -> 7.36), cello 8.45 -> 7.59
+(7.88 -> 6.98). `ModalBowedSizeLevel.h` regenerated with `size_level.cpp` on the round 15 engine (entries move up to
+2.4 dB, mean +0.04; still 0 at size 1, bit for bit). Loudness of the held demo notes (1-4 s) against round 14: violin 62
+0.0, 69 -0.6, 76 -0.5, 81 +0.3 dB, cello 36 -0.1, 43 -0.2, 48 -0.5, 53 -0.4 (the twin's own change on 9 seeds: 69 -0.60,
+48 -0.34). The plugin (demo, Init patch) violin 9.21 -> 8.47, cello 9.52 -> 8.74 (round 14 rendered at e9ed60a, with
+SIZE's loudness and the chords' noise); with the AMP open and F1 at 20 kHz violin 8.28 -> 7.61, cello 8.56 -> 7.76.
+CPU per held voice (callgrind, 2 s held) +0.3 % (violin 81) to +0.7 % (cello 36, 48); memory 2 x 64 floats a table row,
+8 x 64 floats a voice.
+
 Needs numpy, scipy, soundfile, numba, mido, matplotlib.
