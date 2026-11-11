@@ -17,6 +17,7 @@
 #include "FilterWidgets.h"
 
 class FilterDisplay : public juce::Component,
+                      public juce::DragAndDropTarget,
                       public juce::SettableTooltipClient,
                       public IlanaAnim::PageAnimated,
                       private IlanaAnim::FrameTimer
@@ -59,12 +60,57 @@ public:
     }
     bool isVoiceOff() const { return voiceOff; }
 
+    // A source chip dropped on the graph counts as a drop on CUTOFF (UI
+    // review 31, item 27): filter 1's, or filter 2's on a card of filter 2.
+    // One route per source and knob, as on the knob itself.
+    int dropDestination() const { return (int) (onlyFilter == 1 ? Mod::Destination::Filter2Cutoff : Mod::Destination::Filter1Cutoff); }
+
+    bool isInterestedInDragSource (const SourceDetails& details) override
+    {
+        return ! voiceOff && details.description.toString().startsWith ("modsource:");
+    }
+
+    void itemDragEnter (const SourceDetails&) override { setDropHover (true); }
+    void itemDragExit (const SourceDetails&) override { setDropHover (false); }
+
+    void itemDropped (const SourceDetails& details) override
+    {
+        setDropHover (false);
+        dropSource (details.description.toString().fromFirstOccurrenceOf ("modsource:", false, false).getIntValue());
+    }
+
+    // The drop itself; true when it added a route. Public for the tests.
+    bool dropSource (int source)
+    {
+        if (source <= 0)
+            return false;
+        const auto destination = dropDestination();
+        for (int slot = 0; slot < Mod::maxSlots; ++slot)
+            if (const auto routing = processorRef.readModSlot (slot); (int) routing.source == source && routing.destination == destination)
+                return false;
+        processorRef.performEdit ("Add modulation", [this, source, destination] { processorRef.assignModSlot (source, destination, 0.35f); });
+        return true;
+    }
+
     // A card of one filter (PLAY's): -1 shows both, 0 or 1 only that one's curve and marker.
     void setOnlyFilter (int index)
     {
         onlyFilter = index;
         setRepaintsOnMouseActivity (index >= 0);
         repaint();
+    }
+
+    void paintOverChildren (juce::Graphics& g) override
+    {
+        if (! dropHover)
+            return;
+        const auto area = getLocalBounds().toFloat().reduced (1.5f);
+        g.setColour (juce::Colours::white.withAlpha (0.08f));
+        g.fillRoundedRectangle (area, 6.0f);
+        g.setColour (IlanaTheme::accent());
+        g.drawRoundedRectangle (area, 6.0f, 2.0f);
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true));
+        g.drawText (onlyFilter == 1 ? "DROP ON FILTER 2 CUTOFF" : "DROP ON CUTOFF", area.reduced (10.0f, 8.0f).toNearestInt(), juce::Justification::topLeft);
     }
 
     void paint (juce::Graphics& g) override
@@ -922,8 +968,16 @@ private:
     float appear = 1.0f;
     double sweepLo[2] { 0.0, 0.0 }, sweepHi[2] { 0.0, 0.0 };
     bool sweepSeen[2] { false, false };
-    bool voiceOff = false;
+    bool voiceOff = false, dropHover = false;
     int onlyFilter = -1;
+    void setDropHover (bool hover)
+    {
+        if (hover != dropHover)
+        {
+            dropHover = hover;
+            repaint();
+        }
+    }
     bool shows (int filterIndex) const { return onlyFilter < 0 || onlyFilter == filterIndex; }
 
     static constexpr int fftSize = 2048;
