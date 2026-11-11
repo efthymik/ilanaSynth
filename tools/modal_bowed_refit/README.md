@@ -301,4 +301,60 @@ unchanged (22.7 MB). Lessons:
   `osc1_modal_size=2.1` for the cello): the demo with the Init patch scores violin 10.26 -> 9.64, cello 11.44 -> 9.77; rendered so, violin 9.69 -> 8.76, cello 10.53 -> 8.75 (both
   rounds better by 0.6 to 1.0 there, the change itself close to the engine alone's).
 
+Round 14 (2026-11-11), both instruments: the take to take.
+What two takes of the twin differ by (its seed against its seed, "t2t") the score counts as error. Measured stream by stream
+(the twin's kw `_sd` gives each random stream its own seed: 0 the bow's noise, 1 the slow wander (each partial's, the
+loudness's, the vibrato's rate and depth), 2 the flutter and pitch drift, 3 the floor, 4 the sine wander's phases, 5 the
+string top's noise, 6 the layers' start, 7 their jumps), and Spitfire's own steadiness measured where one take allows
+(wobble.py's measures on all notes, the whole note's level drift, each partial's roughness in the attack and release):
+- About 60 % of the violin's attack and release cells (27 % of the cello's) hold no partial: there two takes differ by
+  4.2-4.6 dB, and the twin differs from Spitfire by 4.7-4.8: noise against noise. Spitfire's noise wobbles over time as
+  much as the twin's (sustain wobble by band within 0.3 dB), so that part of the grey is honest; it stays.
+- The bow's chaotic onset is not where the attack's take to take comes from: the rosin's jitter brought in over 0.3 s
+  (the string's onset then noise-free) left the attack's scatter in the partials' bands unchanged (2.18 -> 2.20 dB) and
+  the score with it. The slow wander (1.5 dB of it alone) and the flutter (1.3) are.
+- Spitfire's whole note is steadier in level than the twin's (its level's drift under 2 Hz: violin 1.72 against 1.94 dB,
+  cello 1.45 against 2.01) and its partials drift less together (their slow correlation 0.10 against 0.21); its vibrato
+  depth varies cycle to cycle at least as much as the twin's (violin 0.44 against 0.38, cello 0.58 against 0.32), and its
+  pitch drifts as much (violin 3.6 cents against 3.6).
+So, in sim.py's DEFAULT and CELLO (zero CPU: four constants):
+- The vibrato's depth wander half as deep (vib_depth_dev 0.4561 -> 0.22805, the cello's 0.31309 -> 0.156545) and the
+  vibrato's wanders three times quicker (vib_drift_hz 0.8 -> 2.4 Hz, both sizes): the depth still varies cycle to cycle
+  (violin 0.41 against Spitfire's 0.35 on 9 notes), but no longer drifts a whole note's partial levels over a take; the
+  depth's spread take to take halved (1.9 -> 1.0 cents).
+- The cello's loudness wander half as deep (CELLO loud_db 0.77633 -> 0.388165).
+- Each note's partial gains moved back to round 13's mean levels (the wanders' depth shifts them), then round 13's joint
+  frozen-bow refit run once more on top (fit seeds 1, 2, 3, 7, 8, 9; validated on 4-6), out_db relevelled (each note's
+  loudness round 13's).
+Twin, all notes, seeds 4-6 (paired by note, se over notes):
+  violin 8.520 -> 8.034 (-0.486 se 0.041, better on 41 of 42; held-out pairs -0.423, 16 of 16); globals alone -0.242
+  (39/42), the refit on top -0.245 (39/42). Take to take (8 seeds, 28 pairs) 6.58 -> 5.92.
+  cello 7.798 -> 7.491 (-0.306 se 0.035, 19 of 19; held-out pairs -0.374, 6 of 6); globals alone -0.128 (17/19), the refit
+  on top -0.178 (19/19). Take to take 5.68 -> 5.27.
+  Demo notes, seeds 1-3: violin 8.32 -> 7.78, cello 8.08 -> 7.68.
+  Control (cello): the same refit pass on round 13's cello alone gains -0.177 (18/19, take to take 5.66 -> 5.63): the refit's
+  share is another pass's, not the calming's. Against that control round 14's cello is -0.129 (15/19, held-out 5/6), the
+  globals' own share, and its take to take 0.39 lower. (No violin control: the refit's -0.245 there is likely the same kind.)
+Tried and left out: no loudness wander on the violin (attack and release better, wobble and vibam worse: even), the pitch
+drift off (Spitfire drifts as much; worse on the cello), the rate wander off, the violin's per-partial noise wander as the
+cello's sines (-0.016, 28/42: not worth the cello path's CPU on every violin voice), the flutter halved (+0.43 / +0.41:
+Spitfire's upper partials flutter), the ripple halved (+0.24 violin), the rosin's jitter halved (even / +0.05), the rosin's
+jitter faded in at the onset (even).
+Engine: `depthWander`, `vibratoWanderHz`, `depthWanderCello`, `bowDriftDbCello` and the tables; `write_engine.py` now writes
+`vibratoWanderHz` too (from `vib_drift_hz`, one value at every size). The engine alone, 3 takes: violin 8.42 -> 8.10, cello
+8.78 -> 8.42, each term within 0.1 of the twin's change but the violin's plevel (-0.03 against the twin's -0.33 on seeds 1-3:
+take luck, round 13's twin was 0.31 worse there than on other seeds; on 6 more takes / seeds the engine moves 8.43 -> 7.99,
+plevel -0.09, the twin 8.56 -> 8.02, plevel -0.13). The plugin (demo, Init patch) violin 9.64 -> 9.21, cello 9.77 -> 9.23;
+rendered with the AMP open and F1 at 20 kHz, violin 8.76 -> 8.28, cello 8.75 -> 8.23. Loudness of the held part within
+0.4 dB of round 13's; the cello's G2 (43) starts about 2 dB softer and ends 0.7 dB louder in the twin and the engine
+alike (the refit's onset and release knots; the relevel holds 1-4 s), -0.8 dB over the whole note. Pizzicato bit for bit,
+CPU per held voice unchanged (callgrind within 0.04 %), memory unchanged.
+Lessons:
+- Measure what two takes differ by, stream by stream, before calming anything: most of it is noise cells the recording
+  shares, and the rest (wander, flutter) is where the twin is less steady than one take of Spitfire, not the bow's onset.
+- A random process whose slow part moves a whole take (a 0.8 Hz vibrato-depth drift over a 2.8 s window) costs the score
+  through its spread; the same randomness moved quicker (cycle to cycle) keeps the character and averages out.
+- Judge a global that moves the partials' mean levels after moving the gains back (a recentred table, seeds 1-3): the level
+  shift otherwise hides or fakes its effect on the movement terms.
+
 Needs numpy, scipy, soundfile, numba, mido, matplotlib.

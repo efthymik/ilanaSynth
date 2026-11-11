@@ -109,6 +109,9 @@ for name, key in (("airDb", "a0_db"), ("airSlope", "a0_k"), ("airHz", "a0_hz"), 
                   ("hairOnsetDepth", "hs_depth"), ("hairOnsetSeconds", "hs_s"), ("wanderHz", "slow_hz")):
     put(name, p[key], "")
 put("wanderHzCello", sim.CELLO["slow_hz"], "")
+# (round 14: the vibrato's rate and depth wanders' corner, one value at every size (vib_drift_hz is not blended))
+put("vibratoWanderHz", p["vib_drift_hz"], "")
+assert sim.CELLO.get("vib_drift_hz", p["vib_drift_hz"]) == p["vib_drift_hz"]
 assert p["rnb"] == 0 and p["lp_k"] == 0 and p["flr_ord"] == 2 and p["hs_rn"] == 1 and p["hiss_db"] == 0
 assert sim.CELLO["hs_depth"] == 0 and sim.CELLO["lp_k"] == 0
 # (round 10, the cello's: the vibrato's and flutter's values at the cello's size, the sine wander, the

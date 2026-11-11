@@ -1950,8 +1950,8 @@ private:
     // The slow wander (dB standard deviation and corner): each partial's
     // level on its own, the bow's speed; the vibrato's rate and depth
     // (fractions; Spitfire's vibrato is never quite even).
-    static constexpr float wanderDb = 2.052f, bowDriftDb = 1.742f, rateWander = 0.09024f, depthWander = 0.4561f;
-    static constexpr double wanderHz = 3.0, vibratoWanderHz = 0.8;
+    static constexpr float wanderDb = 2.052f, bowDriftDb = 1.742f, rateWander = 0.09024f, depthWander = 0.22805f;
+    static constexpr double wanderHz = 3.0, vibratoWanderHz = 2.4;
     // The bow's fast randomness: each partial's flutter (dB standard
     // deviation and corner at A4, and how both grow with the register), the
     // pitch's slow drift (cents).
@@ -1988,7 +1988,7 @@ private:
     static constexpr double brightnessCello = 2.144, stringLossHighCello = 3.9470e-06, directDbCello = -10.33, directHpCello = 96.61, tiltHzCello = 3000.0;
     static constexpr double bodyNoiseCello = 1.6950e-06, humRatioCello = 0.33, attackScale = 0.050102, attackScaleCello = 0.05;
     static constexpr double hissHp = 8571.2, hissHpCello = 8000.0, hissSlope = 3.8134, hissLevelCello = 0.0022;
-    static constexpr double flutterDbCello = 13.929, wanderDbCello = 0.093356, bowDriftDbCello = 0.77633, rippleDbCello = 2.1124;
+    static constexpr double flutterDbCello = 13.929, wanderDbCello = 0.093356, bowDriftDbCello = 0.38816, rippleDbCello = 2.1124;
     static constexpr double directSizeDbPizz = -12.0, tiltHzPizz = 5590.0;
     // The violin's hall floor: a pink noise hallFloorDb against the note at
     // A4 (hallFloorSlope dB more per doubling of the note), low-passed
@@ -2040,7 +2040,7 @@ private:
     // last mode and low-passed (four poles) at stringTopLowPassHz, at
     // stringTopDb plus the table's stringTopAddDb (on a few low notes only).
     static constexpr double vibratoRateCello = 5.0418, vibratoDelayCello = 0.12956, vibratoRiseCello = 0.46505, flutterHzCello = 22.958;
-    static constexpr double depthWanderCello = 0.31309;
+    static constexpr double depthWanderCello = 0.15654;
     static constexpr double sineWanderDb = 3.7854, sineWanderHz = 0.74098, sineWanderSpread = 0.36811, sineWanderKnee = 392.17, sineWanderSlope = 0.19059, sineWanderLow = 1.1794;
     static constexpr double flutterHighPassHz = 1.2142;
     static constexpr double levelVibratoDb = 1.8913, levelVibratoKnee = 428.76, levelVibratoSlope = 2.0, levelVibratoLead = 1.1911, levelVibratoDelay = 0.0;
