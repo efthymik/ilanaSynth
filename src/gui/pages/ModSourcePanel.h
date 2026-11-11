@@ -204,9 +204,13 @@ public:
         {
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
             g.setColour (IlanaTheme::Ui::text3);
-            IlanaTheme::drawFitted (g, "Nothing yet. Drag " + ModNames::sourceUpper (source, &processorRef)
-                                           + " onto any knob; its routes and depths show here.",
-                                    rowArea (0), juce::Justification::centredLeft, 1);
+            // (The compact pop-up is 300 px wide: the short line there, never cut off.)
+            const auto line = rowArea (0);
+            const juce::String full = "Nothing yet. Drag " + ModNames::sourceUpper (source, &processorRef)
+                                      + " onto any knob; its routes and depths show here.";
+            const auto fits = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), full) <= line.getWidth();
+            IlanaTheme::drawFitted (g, fits ? full : juce::String ("Nothing yet. Drag it onto any knob."),
+                                    line, juce::Justification::centredLeft, 1);
             return;
         }
 

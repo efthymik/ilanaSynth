@@ -944,6 +944,10 @@ public:
         else if (remapEditor != nullptr && dockAutomatic && spareAtBase < dockHeight + 8)
             closeRemapQuietly();
 
+        // (A dock the user opens where none fits leaves the rows as they were:
+        // the list keeps the height and headings it had without it, V6-22.)
+        const auto heightWithoutDock = area.getHeight();
+        const auto dockFits = spareAtBase >= dockHeight + 8;
         if (! visibleRows.empty() && remapEditor != nullptr)
             dockArea = area.removeFromBottom (juce::jlimit ((int) dockHeight, 400, spareAtBase)).withTrimmedTop (8);
         else
@@ -952,7 +956,9 @@ public:
 
         // Source headings only while every row still fits with them (a long
         // matrix scrolled only for its headings: UI review 31, item 11).
-        const auto listHeight = area.getHeight();
+        // (Laid out for the dock whenever one fits, open or not, so opening or
+        // closing a curve never moves a row.)
+        const auto listHeight = dockFits ? heightWithoutDock - juce::jlimit ((int) dockHeight, 400, spareAtBase) : heightWithoutDock;
         headingsShown = wantsGroupHeadings() && baseRowsHeight + numGroups() * groupHeadingHeight <= listHeight;
         const auto headingsHeight = headingsShown ? numGroups() * groupHeadingHeight : 0;
 
