@@ -1045,6 +1045,8 @@ inline const HelpRow helpRows[] {
                         "a pentagon for five, a hexagon for six." },
     { is ("vec_path"), "Moves the dot round the drawn path at PATH RATE (X / Y then offset the whole path)." },
     { is ("vec_rate"), "How fast the dot goes round the path." },
+    { is ("vec_sync"), "Locks the path to the host tempo: one trip round it per PATH RATE note value." },
+    { is ("vec_div"), "One trip round the path per this note value at the host tempo (while SYNC is on)." },
     { starts ("vec_px|vec_py"), "A point of the vector path; drag the points on the pad." },
     { is ("vec_drift"), "Lets the dot wander on its own around where it is." },
     { is ("vec_drift_rate"), "How fast the drift wanders." },
