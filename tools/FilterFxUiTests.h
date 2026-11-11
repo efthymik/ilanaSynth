@@ -317,7 +317,7 @@ void runFilterFxTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProce
                 "an effect's picture stays readable wherever it sits in the chain (Chorus, Reverb in either order: " + juce::String (chorusReverb.front())
                     + " and " + juce::String (swapped.empty() ? 0 : swapped.front()) + " px at the least)");
         loadFx ({ 7, 13 });
-        expect (shownButtons ("+ ADD EFFECT").size() == 1, "the rack has one + ADD EFFECT, in its top bar");
+        expect (shownButtons ("+ ADD EFFECT").size() == 1, "the rack has one + ADD EFFECT, the add row at the page's foot (UI review 31)");
 
         // V7-29, S7-16: OUTPUT follows the last card instead of the page's foot.
         loadFx ({ 27, 2, 20 });

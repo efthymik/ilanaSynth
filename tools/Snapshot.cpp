@@ -2284,13 +2284,14 @@ int runUiTests()
             expect (std::none_of (libraryButtons.begin(), libraryButtons.end(), [] (FxLibraryButton* b) { return visibleInTree (b); }),
                     "no library or chain list beside the cards once the rack has an effect");
 
+            // (UI review 31: the one + ADD EFFECT is the add row at the page's foot.)
             juce::Button* addEffect = nullptr;
-            std::vector<juce::Button*> allButtons;
-            findAll<juce::Button> (*editor, allButtons);
+            std::vector<DashedAddButton*> allButtons;
+            findAll<DashedAddButton> (*editor, allButtons);
             for (auto* button : allButtons)
-                if (button->getButtonText() == "+ ADD EFFECT" && visibleInTree (button))
+                if (button->getButtonText().contains ("ADD EFFECT") && visibleInTree (button))
                     addEffect = button;
-            expect (addEffect != nullptr, "the rack's top bar has + ADD");
+            expect (addEffect != nullptr, "the rack has + ADD EFFECT");
 
             if (addEffect != nullptr)
             {
@@ -2685,6 +2686,168 @@ int runUiTests()
             }
             else
                 expect (false, "three FX cards to drag");
+
+            // UI review 31: a short rack's dials are the SEQ page's 38, a long one's 32 (12); the
+            // OUTPUT stage in the top bar and SUGGESTED NEXT as chips beside + ADD EFFECT (13); a
+            // card's menu duplicates, copies, pastes and resets one effect, Delete takes the
+            // selected card out, and a new effect goes in after the selected card (31).
+            {
+                const auto knobOf = [&] (const juce::String& id) -> KnobControl*
+                {
+                    std::vector<KnobControl*> knobs;
+                    findAll<KnobControl> (*editor, knobs);
+                    for (auto* knob : knobs)
+                        if (knob->getParameterId() == id && visibleInTree (knob))
+                            return knob;
+                    return nullptr;
+                };
+                const auto dialOf = [&] (const juce::String& id) { auto* knob = knobOf (id); return knob != nullptr ? knob->getPackedDial() : 0.0f; };
+                loadFx ({ 7, 13 });
+                expect (juce::approximatelyEqual (dialOf ("fx_chorus_rate"), 38.0f) && juce::approximatelyEqual (dialOf ("fx_reverb_size"), 38.0f),
+                        "a short rack's cards have the SEQ page's 38 px dials (" + juce::String (dialOf ("fx_chorus_rate")) + ")");
+                if (auto* rate = knobOf ("fx_chorus_rate"); rate != nullptr)
+                    expect (rate->packedNumberDevicePx() > rate->packedDialDevicePx() * 0.33f, "a grown card's value is bigger than a 28 px dial's");
+                loadFx ({ 7, 13, 2, 4, 20 });
+                expect (juce::approximatelyEqual (dialOf ("fx_chorus_rate"), 32.0f), "a long rack's cards have 32 px dials (" + juce::String (dialOf ("fx_chorus_rate")) + ")");
+
+                auto* view = stackViewport();
+                auto* page = view != nullptr ? view->getParentComponent() : nullptr;
+                if (page != nullptr)
+                {
+                    juce::Component* clip = nullptr;
+                    std::vector<ToggleControl*> toggles;
+                    findAll<ToggleControl> (*page, toggles);
+                    for (auto* toggle : toggles)
+                        if (toggle->getParameterId() == "master_clip" && visibleInTree (toggle))
+                            clip = toggle;
+                    std::vector<OutputMeter*> meters;
+                    findAll<OutputMeter> (*page, meters);
+                    expect (clip != nullptr && clip->getBottom() <= view->getY() && meters.size() == 1 && meters.front()->getBottom() <= view->getY(),
+                            "SOFT CLIP and the output meter are in the FX page's top bar");
+
+                    loadFx ({ 7 });
+                    std::vector<DashedAddButton*> adds;
+                    findAll<DashedAddButton> (*page, adds);
+                    std::vector<FxSuggestTile*> tiles;
+                    findAll<FxSuggestTile> (*page, tiles);
+                    auto chips = 0, inRow = 0;
+                    for (auto* tile : tiles)
+                        if (visibleInTree (tile))
+                        {
+                            ++chips;
+                            inRow += adds.size() == 1 && tile->getY() == adds.front()->getY() && tile->getHeight() == adds.front()->getHeight() ? 1 : 0;
+                        }
+                    expect (adds.size() == 1 && visibleInTree (adds.front()) && chips >= 3 && inRow == chips,
+                            "SUGGESTED NEXT is one row of chips beside + ADD EFFECT (" + juce::String (chips) + " chips, " + juce::String (inRow) + " in its row)");
+                }
+
+                loadFx ({ 7, 13, 2 });
+                view = stackViewport();
+                page = view != nullptr ? view->getParentComponent() : nullptr;
+                const auto call = [&] (const char* name, std::initializer_list<juce::var> arguments) -> juce::var
+                {
+                    if (page == nullptr || ! page->getProperties()[name].isMethod())
+                        return {};
+                    const std::vector<juce::var> list (arguments);
+                    return page->getProperties()[name].getNativeFunction() (juce::var::NativeFunctionArgs ({}, list.data(), (int) list.size()));
+                };
+                const auto items = call ("fxCardMenu", { 0 });
+                const auto itemId = [&] (const juce::String& text)
+                {
+                    if (const auto* array = items.getArray())
+                        for (const auto& item : *array)
+                            if (item.toString().fromFirstOccurrenceOf ("|", false, false).upToLastOccurrenceOf ("|", false, false) == text)
+                                return item.toString().upToFirstOccurrenceOf ("|", false, false).getIntValue();
+                    return 0;
+                };
+                expect (itemId ("Duplicate") > 0 && itemId ("Copy settings") > 0 && itemId ("Paste settings") > 0 && itemId ("Reset to default") > 0,
+                        "a card's menu has Duplicate, Copy settings, Paste settings and Reset to default");
+
+                // Duplicate: a new instance with a copy of the settings, right after the card.
+                setParam ("fx_chorus_rate", 2.0f);
+                processor.getUndoManager().beginNewTransaction();
+                call ("fxCardAction", { 0, itemId ("Duplicate") });
+                settle (300);
+                auto copied = 0.0f;
+                expect ((int) readParam ("fx_slot1") == 7 && (int) readParam ("fx_slot2") == 7 && (int) readParam ("fx_slot3") == 13 && (int) readParam ("fx_slot4") == 2
+                            && processor.getFxInstanceValue (0, "fx_chorus_rate", copied) && std::abs (copied - 2.0f) < 0.01f
+                            && std::abs (readParam ("fx_chorus_rate") - 2.0f) < 0.01f
+                            && processor.getUndoManager().getUndoDescription() == "Duplicate Chorus",
+                        "Duplicate puts a copy with the same settings right after the card, as one undo step ("
+                            + juce::String ((int) readParam ("fx_slot2")) + ", " + processor.getUndoManager().getUndoDescription() + ")");
+                processor.getUndoManager().undo();
+                settle (300);
+                expect ((int) readParam ("fx_slot2") == 13 && (int) readParam ("fx_slot4") == 0, "one undo takes the duplicate out again");
+
+                // Copy and paste settings onto the same effect; reset it.
+                loadFx ({ 7, 13, 2 });
+                setParam ("fx_reverb_size", 0.8f);
+                call ("fxCardAction", { 1, itemId ("Copy settings") });
+                setParam ("fx_reverb_size", 0.2f);
+                processor.getUndoManager().beginNewTransaction();
+                call ("fxCardAction", { 1, itemId ("Paste settings") });
+                settle (100);
+                expect (std::abs (readParam ("fx_reverb_size") - 0.8f) < 0.01f && processor.getUndoManager().getUndoDescription() == "Paste Reverb settings",
+                        "Paste settings brings the copied settings back as one undo step (" + juce::String (readParam ("fx_reverb_size")) + ")");
+                const auto pasteOnDrive = call ("fxCardMenu", { 2 });
+                expect (pasteOnDrive.toString().isNotEmpty() || pasteOnDrive.isArray(), "the menu lists for another card");
+                if (const auto* array = pasteOnDrive.getArray())
+                    for (const auto& item : *array)
+                        if (item.toString().contains ("Paste settings"))
+                            expect (item.toString().endsWith ("|0"), "Paste settings is off on another effect's card (" + item.toString() + ")");
+                processor.getUndoManager().beginNewTransaction();
+                call ("fxCardAction", { 1, itemId ("Reset to default") });
+                settle (100);
+                const auto* size = processor.apvts.getParameter ("fx_reverb_size");
+                expect (size != nullptr && std::abs (size->getValue() - size->getDefaultValue()) < 0.001f && processor.getUndoManager().getUndoDescription() == "Reset Reverb",
+                        "Reset to default puts the effect back to its defaults as one undo step");
+
+                // A new effect goes in after the selected card; Delete takes the selected card out.
+                titles = typeButtons();
+                auto* content = view != nullptr ? view->getViewedComponent() : nullptr;
+                if (titles.size() == 3 && content != nullptr)
+                {
+                    auto source = juce::Desktop::getInstance().getMainMouseSource();
+                    const auto clickCard = [&] (FxTypeButton* title)
+                    {
+                        const auto at = juce::Point<float> ((float) title->getX() + 2.0f, (float) title->getY() - 6.0f);
+                        const auto now = juce::Time::getCurrentTime();
+                        const juce::MouseEvent event (source, at, juce::ModifierKeys::leftButtonModifier, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                                      content, content, now, at, now, 1, false);
+                        content->mouseDown (event);
+                        content->mouseUp (event.withNewPosition (at));
+                    };
+                    clickCard (titles[0]);
+                    FxSuggestTile* delay = nullptr;
+                    std::vector<FxSuggestTile*> tiles;
+                    findAll<FxSuggestTile> (*editor, tiles);
+                    for (auto* tile : tiles)
+                        if (tile->getType() == 9 && visibleInTree (tile))
+                            delay = tile;
+                    expect (delay != nullptr, "DELAY is a suggested chip");
+                    if (delay != nullptr)
+                    {
+                        delay->triggerClick();
+                        settle (300);
+                        expect ((int) readParam ("fx_slot1") == 7 && (int) readParam ("fx_slot2") == 9 && (int) readParam ("fx_slot3") == 13 && (int) readParam ("fx_slot4") == 2,
+                                "a new effect goes in after the selected card (" + juce::String ((int) readParam ("fx_slot2")) + ")");
+                    }
+                    titles = typeButtons();
+                    if (titles.size() == 4)
+                    {
+                        clickCard (titles[1]);
+                        processor.getUndoManager().beginNewTransaction();
+                        const auto taken = content->keyPressed (juce::KeyPress (juce::KeyPress::deleteKey));
+                        settle (300);
+                        expect (taken && (int) readParam ("fx_slot2") == 0 && (int) readParam ("fx_slot3") == 13
+                                    && processor.getUndoManager().getUndoDescription() == "Remove Delay",
+                                "Delete takes the selected card out as one undo step (" + juce::String (taken ? "taken, " : "not taken, ")
+                                    + processor.getUndoManager().getUndoDescription() + ")");
+                    }
+                }
+                else
+                    expect (false, "three FX cards for the menu tests");
+            }
         }
 
         // The live meters: OTT and the limiter report gain while audio runs.

@@ -1434,14 +1434,6 @@ public:
     // The packed number's height on screen in device pixels, and the dial's (a layout test's measure:
     // the number keeps its share of the dial at every zoom).
     float packedNumberDevicePx() const { return IlanaTheme::font (packedValueUnits(), true, true).getHeight() * IlanaTheme::uiScaleRef(); }
-    // The number's size in units: the dial's share, or a fixed size when a row wants its rings wider than its numbers
-    // (the wave card's AMT dials, UI review 31: rings 4 wider, numbers as before, so "100" keeps 3 px from the ring).
-    float packedValueUnits() const { return packedValueSize > 0.0f ? packedValueSize : packedD * kPackedValueScale; }
-    void setPackedValueSize (float units)
-    {
-        packedValueSize = units;
-        repaint();
-    }
     float packedDialDevicePx() const { return packedD * IlanaTheme::uiScaleRef(); }
     // A packed name too wide for its cell breaks at its first space onto a second line ("KEY" over "TRACK"),
     // in full words; the cell the page gives the knob must leave the room (about 9 px under the name).
@@ -1457,6 +1449,14 @@ public:
         packedNameSize = size;
         repaint();
     }
+    // The packed number's size in units, when a page wants it apart from the dial's own share (the FX
+    // rack's: a bigger ring round the same number keeps it clear of the ring, UI review 31); 0: the dial's.
+    void setPackedValueSize (float units)
+    {
+        packedValueSize = units;
+        repaint();
+    }
+    float packedValueUnits() const { return packedValueSize > 0.0f ? packedValueSize : packedD * kPackedValueScale; }
     // Pixels a packed value may run past the dial's width before its unit is dropped ("1.20 kHz").
     void setPackedValueRoom (int pixels)
     {
@@ -1847,6 +1847,9 @@ public:
             if (unit.length() > 3)
                 unit = {};
         }
+        // (A zero needs no sign: "+0.0" is "0.0", UI review 31.)
+        if ((value.startsWithChar ('+') || value.startsWithChar ('-')) && value.length() > 1 && value.substring (1).containsOnly ("0."))
+            value = value.substring (1);
         if (value.length() > 4 && value.containsChar ('.'))
             value = value.dropLastCharacters (value.length() - 4).trimCharactersAtEnd (".");
         // ("5.00" is "5.0": two decimals in one digit's dial came within 2 px of the ring, UI review 25.)

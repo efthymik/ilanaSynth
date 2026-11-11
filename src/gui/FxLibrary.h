@@ -967,16 +967,18 @@ private:
     std::pair<float, float> shown;
 };
 
-// One suggested next effect under "+ ADD EFFECT": a small tile with the
-// effect's family colour, a tiny picture of what it does, its name and a few
-// words on its job. One click adds it (N16-1).
+// One suggested next effect beside "+ ADD EFFECT": a chip with the effect's
+// family colour, a tiny picture of what it does and its name; the few words
+// on its job are its tooltip (UI review 31: one row of chips, not tiles). A
+// tile taller than a chip still draws the words under the name. One click
+// adds it (N16-1).
 class FxSuggestTile : public juce::Button
 {
 public:
     explicit FxSuggestTile (int typeIn) : juce::Button (fxTypeName (typeIn)), type (typeIn)
     {
         setMouseCursor (juce::MouseCursor::PointingHandCursor);
-        setTooltip ("Add " + fxTypeName (type) + " to the next empty slot.\n" + hint (type) + ".");
+        setTooltip ("Add " + fxTypeName (type) + " after the selected card.\n" + hint (type) + ".");
     }
 
     int getType() const { return type; }
@@ -1021,6 +1023,20 @@ public:
         }
         g.setColour (highlighted ? colour.withAlpha (0.55f) : IlanaTheme::Ui::line);
         g.strokePath (shape, juce::PathStrokeType (1.0f));
+
+        if (getHeight() < 56)
+        {
+            // The chip: the picture in a small well, the name beside it.
+            auto inner = getLocalBounds().reduced (6, 5).withTrimmedLeft (3);
+            const auto picture = inner.removeFromLeft (juce::roundToInt ((float) inner.getHeight() * 1.4f)).toFloat();
+            inner.removeFromLeft (8);
+            IlanaTheme::paintWell (g, picture, 4.0f);
+            paintGlyph (g, picture.reduced (5.0f, 4.0f), colour);
+            g.setColour (highlighted ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2);
+            g.setFont (IlanaTheme::pillFont());
+            IlanaTheme::drawFitted (g, getButtonText().toUpperCase(), inner, juce::Justification::centredLeft, 1);
+            return;
+        }
 
         auto inner = getLocalBounds().reduced (10, 8).withTrimmedLeft (3);
         auto picture = inner.removeFromLeft (juce::jmin (74, inner.getWidth() / 2)).toFloat();
