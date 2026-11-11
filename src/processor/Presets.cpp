@@ -1590,6 +1590,16 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
     // An old MSEG module becomes an LFO drawn the same (UI review 9, I9-2).
     moveLegacyMsegToLfo();
 
+    // A route with no source does nothing (Mod::Slot::isActive) but the
+    // matrix listed it as a switched-on "None >" row: 74 voicing lines clear
+    // modN_src and leave the rest of the slot. Cleared last, after every step
+    // above that picks a free slot, so no route moves to another slot and the
+    // preset sounds bit for bit as before (UI review 31, item 5).
+    if (clearSourcelessRoutes)
+        for (int i = 0; i < Mod::maxSlots; ++i)
+            if (const auto slot = readModSlot (i); slot.source == Mod::Source::None && slot.destination != 0)
+                clearModSlot (i);
+
     updateExciterLevelMatch (0);
 }
 
