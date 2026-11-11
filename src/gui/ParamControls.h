@@ -4047,6 +4047,139 @@ private:
     int hovered = -1;
 };
 
+// A multi-position slide switch (the exciter type's engines: ilana, 2026-11-11, "like the minilogue, 3 or 4 way
+// switches"): a track split into labelled positions, the lever lit under the chosen one. Click a position, or drag
+// the lever along. One position draws as a plain lit pill (nothing to switch).
+class PositionSwitch : public juce::Component,
+                       public juce::SettableTooltipClient,
+                       private IlanaAnim::FrameTimer
+{
+public:
+    std::function<int()> getChosen;
+    std::function<void (int)> onChoose;
+
+    void setPositions (juce::StringArray labels)
+    {
+        if (labels != positions)
+        {
+            positions = std::move (labels);
+            lever = (float) juce::jlimit (0, juce::jmax (0, positions.size() - 1), chosen());
+            repaint();
+        }
+    }
+    void setColour (juce::Colour newColour) { colour = newColour; repaint(); }
+    // (A preset load or another control moved it: the lever jumps there; only a click slides it.)
+    void refresh()
+    {
+        if (! isTimerRunning())
+            lever = (float) juce::jlimit (0, juce::jmax (0, positions.size() - 1), chosen());
+        repaint();
+    }
+    int size() const { return positions.size(); }
+
+    // The width the labels need at the header's segment size (every position as wide as the widest word, so the
+    // lever is one size), measured at the design zoom as SegmentBar does.
+    int idealWidth() const
+    {
+        auto widest = 0;
+        for (const auto& label : positions)
+            widest = juce::jmax (widest, SegmentBar::measure (label));
+        return (widest + 14) * juce::jmax (1, positions.size()) + 4;
+    }
+
+    juce::Rectangle<float> cell (int index) const
+    {
+        const auto r = getLocalBounds().toFloat().reduced (2.0f);
+        const auto w = r.getWidth() / (float) juce::jmax (1, positions.size());
+        return { r.getX() + w * (float) index, r.getY(), w, r.getHeight() };
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto on = isEnabled() ? 1.0f : 0.5f;
+        const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
+        const auto radius = bounds.getHeight() * 0.5f;
+        g.setColour (IlanaTheme::Ui::well.withMultipliedAlpha (on));
+        g.fillRoundedRectangle (bounds, radius);
+        g.setColour (IlanaTheme::Ui::line.withMultipliedAlpha (on));
+        g.drawRoundedRectangle (bounds, radius, 1.0f);
+        if (positions.isEmpty())
+            return;
+
+        // The detents between positions (the slots a minilogue lever clicks into).
+        g.setColour (IlanaTheme::Ui::line.withMultipliedAlpha (on));
+        for (int i = 1; i < positions.size(); ++i)
+        {
+            const auto x = cell (i).getX();
+            g.fillRect (juce::Rectangle<float> (x - 0.5f, bounds.getCentreY() - 3.0f, 1.0f, 6.0f));
+        }
+
+        // The lever, slid to the chosen position.
+        const auto first = cell (0);
+        const auto leverRect = first.withX (first.getX() + first.getWidth() * lever).reduced (0.5f);
+        g.setColour (colour.withAlpha (0.92f).withMultipliedAlpha (on));
+        g.fillRoundedRectangle (leverRect, leverRect.getHeight() * 0.5f);
+
+        g.setFont (SegmentBar::segmentFont());
+        const auto at = juce::roundToInt (lever);
+        for (int i = 0; i < positions.size(); ++i)
+        {
+            const auto lit = i == at;
+            const auto hover = i == hovered && isMouseOver() && ! lit;
+            g.setColour ((lit ? IlanaTheme::Ui::well : hover ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2).withMultipliedAlpha (on));
+            g.drawText (positions[i], cell (i), juce::Justification::centred, false);
+        }
+    }
+
+    void mouseMove (const juce::MouseEvent& event) override { setHovered (cellAt (event.position)); }
+    void mouseExit (const juce::MouseEvent&) override { setHovered (-1); }
+    void mouseDown (const juce::MouseEvent& event) override { pick (cellAt (event.position)); }
+    void mouseDrag (const juce::MouseEvent& event) override { pick (cellAt (event.position)); }
+
+private:
+    int chosen() const { return getChosen != nullptr ? getChosen() : 0; }
+    int cellAt (juce::Point<float> point) const
+    {
+        for (int i = 0; i < positions.size(); ++i)
+            if (cell (i).expanded (0.0f, 3.0f).contains (point))
+                return i;
+        return point.x < 0.0f ? 0 : positions.size() - 1;
+    }
+    void pick (int index)
+    {
+        if (! isEnabled() || index < 0 || index >= positions.size() || index == chosen() || onChoose == nullptr)
+            return;
+        onChoose (index);
+        startFrames();
+        repaint();
+    }
+    void startFrames() { startTimerHz (60); }
+    void timerCallback() override
+    {
+        const auto target = (float) juce::jlimit (0, juce::jmax (0, positions.size() - 1), chosen());
+        lever += (target - lever) * juce::jmin (1.0f, frameSeconds() * 18.0f);
+        if (std::abs (target - lever) < 0.01f)
+        {
+            lever = target;
+            stopTimer();
+        }
+        repaint();
+    }
+    void setHovered (int index)
+    {
+        if (index != hovered)
+        {
+            hovered = index;
+            repaint();
+        }
+    }
+
+    juce::StringArray positions;
+    juce::Colour colour = IlanaTheme::accent();
+    float lever = 0.0f;
+    int hovered = -1;
+};
+
 class ToggleControl : public juce::Component,
                       public juce::SettableTooltipClient,
                       private IlanaAnim::FrameTimer

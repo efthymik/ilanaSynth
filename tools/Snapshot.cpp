@@ -11,6 +11,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <tuple>
 #include <algorithm>
 #include <iostream>
 #include <functional>
@@ -5990,6 +5991,63 @@ int runUiTests()
                     "OSC: excite " + juce::String (excite) + ", the card shows every string and exciter control, none overlapping"
                         + (missing.isEmpty() ? juce::String() : " (missing " + missing.joinIntoString (", ") + ")"));
         }
+        // The six exciter types and their engine switch (2026-11-11): an old patch's engine shows on its type's
+        // switch (Bow = BOWED on LEGACY), every engine is one type's position, and a type icon picks MODAL first.
+        {
+            auto everyEngineOnce = true;
+            for (int excite = 0; excite < 14; ++excite)
+            {
+                auto seen = 0;
+                for (const auto& type : Exciters::types())
+                    seen += (int) std::count (type.engines.begin(), type.engines.end(), excite);
+                everyEngineOnce = everyEngineOnce && seen == 1;
+            }
+            expect (Exciters::types().size() == 6 && everyEngineOnce, "OSC: 6 exciter types hold each of the 14 engines once");
+            const auto shown = [&] (auto*& found)
+            {
+                using T = std::remove_pointer_t<std::remove_reference_t<decltype (found)>>;
+                std::vector<T*> all;
+                findAll<T> (*editor, all);
+                found = nullptr;
+                for (auto* item : all)
+                    if (visibleInTree (item))
+                        found = item;
+            };
+            for (const auto& [excite, type, position, positions] : { std::tuple<int, int, int, int> { 4, 2, 1, 2 }, { 9, 0, 1, 3 }, { 5, 0, 2, 3 },
+                                                                       { 0, 1, 1, 3 }, { 13, 2, 0, 2 }, { 10, 5, 0, 1 } })
+            {
+                if (auto* parameter = processor.apvts.getParameter (physicalPrefix + "_excite"))
+                    parameter->setValueNotifyingHost (parameter->convertTo0to1 ((float) excite));
+                settle (300);
+                IconPicker* picker = nullptr;
+                PositionSwitch* engineSwitch = nullptr;
+                shown (picker);
+                shown (engineSwitch);
+                const auto switchOk = positions == 1 ? engineSwitch == nullptr
+                                                     : engineSwitch != nullptr && engineSwitch->size() == positions && engineSwitch->getChosen() == position
+                                                           && engineSwitch->getWidth() >= engineSwitch->idealWidth();
+                expect (picker != nullptr && picker->size() == 6 && picker->getChosen() == type && switchOk,
+                        "OSC: excite " + juce::String (excite) + " shows type " + juce::String (type) + ", switch position " + juce::String (position)
+                            + " of " + juce::String (positions) + ", every label fits");
+            }
+            // A type icon picks its first (modal) engine; a click on the type in use keeps the engine.
+            IconPicker* picker = nullptr;
+            shown (picker);
+            if (picker != nullptr && picker->onChoose != nullptr)
+            {
+                picker->onChoose (0);
+                settle (200);
+                const auto piano = juce::roundToInt (processor.apvts.getRawParameterValue (physicalPrefix + "_excite")->load());
+                if (auto* parameter = processor.apvts.getParameter (physicalPrefix + "_excite"))
+                    parameter->setValueNotifyingHost (parameter->convertTo0to1 (4.0f));
+                settle (200);
+                picker->onChoose (2);
+                settle (200);
+                const auto keptBow = juce::roundToInt (processor.apvts.getRawParameterValue (physicalPrefix + "_excite")->load());
+                expect (piano == 11 && keptBow == 4, "OSC: the PIANO icon picks Modal Piano; BOWED clicked on the LEGACY bow keeps it");
+            }
+        }
+
         if (auto* parameter = processor.apvts.getParameter (physicalPrefix + "_excite"))
             parameter->setValueNotifyingHost (parameter->convertTo0to1 (9.0f));
         settle (300);
