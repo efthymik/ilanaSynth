@@ -119,8 +119,8 @@ def analyse(x, rate, f0):
 
 
 def iowa_notes(folder):
-    """{(midi, dynamic): (fret, segment, rate)}: each note from the string where its fret is lowest."""
-    found = {}
+    """{(midi, dynamic): (fret, string, segment, rate, f0)}: each note from the string where its fret is lowest, of the takes that are sound."""
+    takes = {}
     for path in sorted(glob.glob(os.path.join(folder, "Guitar.*.stereo.aif"))):
         m = re.match(r"Guitar\.(pp|mf|ff)\.(sul_?E|sulA|sulD|sulG|sulB)\.", os.path.basename(path))
         if not m:
@@ -143,10 +143,66 @@ def iowa_notes(folder):
             fret = midi - OPEN[string]
             if fret < 0 or fret > 19:
                 continue
-            key = (midi, dyn)
-            if key not in found or fret < found[key][0]:
-                found[key] = (fret, string, seg, rate, f0)
+            takes.setdefault((midi, dyn), []).append((fret, string, seg, rate, f0))
+    # Each note from the lowest fret whose take is sound (2026-11-11: some
+    # Iowa takes have a stretch of digital silence just after the pluck, an
+    # edit in the source file, so the table had E3 pp and F3 mf 60-70 dB
+    # quiet; A#4 pp's pitch read lands between partials).
+    found = {}
+    for key, options in takes.items():
+        options.sort(key=lambda o: o[0])
+        good = [o for o in options if sound_take(o[2], o[3], o[4])]
+        if not good:
+            # The pitch read missed: the note's pitch from its other dynamics.
+            others = [o[4] for (m, d), more in takes.items() if m == key[0] and d != key[1] for o in more]
+            if others:
+                f0 = float(np.median(others))
+                good = [o[:4] + (f0,) for o in options if sound_take(o[2], o[3], f0)]
+        found[key] = good[0] if good else options[0]
+        if not good or good[0][:2] != options[0][:2] or good[0][4] != options[0][4]:
+            print("note %d %s: %s fret %d, %.1f Hz (first take %s fret %d, %.1f Hz)%s"
+                  % (key[0], key[1], found[key][1], found[key][0], found[key][4], options[0][1], options[0][0],
+                     options[0][4], "" if good else ": NO SOUND TAKE"), flush=True)
     return found
+
+
+def sound_take(seg, rate, f0):
+    """False for a take with a dropout (5 ms of digital silence) in its
+    first second, or whose first partial is not near its pitch."""
+    hop = int(0.005 * rate)
+    head = seg[:int(1.0 * rate)].mean(axis=1)
+    frames = len(head) // hop
+    db = 10 * np.log10((head[:frames * hop].reshape(frames, hop) ** 2).mean(axis=1) + 1e-30)
+    if (db < -120).any():
+        return False
+    ratios, _, _ = analyse(seg, rate, f0)
+    return len(ratios) > 0 and abs(ratios[0] - 1.0) < 0.03
+
+
+def even_levels(entries, reach=3, allowed=3.0):
+    """Each dynamic layer's notes pulled to within `allowed` dB of the
+    median of their neighbours (`reach` notes each side), all of a note's
+    levels and its attack together, so its timbre stays as recorded.
+    (2026-11-11: Iowa's takes jump 10-20 dB from note to note, e.g. the
+    open E4 and C5, which then read as a quiet, thin sine next to their
+    neighbours.)"""
+    out = list(entries)
+    t = 1  # (0.08 s: the pluck, past the attack sample's peak)
+    for velocity in sorted({e[1] for e in entries}):
+        index = [i for i, e in enumerate(entries) if e[1] == velocity]
+        index.sort(key=lambda i: entries[i][0])
+        energy = np.array([10 * np.log10(np.sum(10 ** (entries[i][4][:, t] / 10)) + 1e-30) for i in index])
+        for j, i in enumerate(index):
+            near = np.median(energy[max(0, j - reach):j + reach + 1])
+            shift = float(np.clip(energy[j], near - allowed, near + allowed) - energy[j])
+            if abs(shift) < 1e-3:
+                continue
+            note, vel, f0, ratios, levels, (attack, attack_right), bmodes, mlevels, nlevels, ppic, mpic = entries[i]
+            gain = 10 ** (shift / 20)
+            out[i] = (note, vel, f0, ratios, np.maximum(-160.0, levels + shift), (attack * gain, attack_right * gain), bmodes,
+                      np.maximum(-160.0, mlevels + shift), np.maximum(-160.0, nlevels + shift), ppic, mpic)
+            print("note %d v%d: %+.1f dB (to its neighbours)" % (note, vel, shift), flush=True)
+    return out
 
 
 def render_notes(path, midi_path):
@@ -216,6 +272,9 @@ def main():
             print("note %d %s (%s fret %d, %.2f s, %+.0f ct): %d partials, %d body modes"
                   % (note, dyn, string, fret, len(seg) / rate, 1200 * np.log2(f0 / (440 * 2 ** ((note - 69) / 12))),
                      len(ratios), len(modes[note])), flush=True)
+
+    if args.iowa:
+        entries = even_levels(entries)
 
     out = bytearray(b"IMPT")
     out += struct.pack("<HHHf", 4, len(entries), len(TIMES), float(rate))
