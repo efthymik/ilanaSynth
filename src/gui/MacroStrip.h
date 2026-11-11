@@ -163,7 +163,7 @@ public:
             // route (UI review 31, item 26), so macros 5-8 need no drag.
             // With several idle, only the first shows it until hovered
             // (review 11, S11-9; read since UI review 31, item 7).
-            const juce::String label (armed ? "CLICK A KNOB" : "+ ASSIGN");
+            const juce::String label (armed ? "PICK KNOB" : "+ ASSIGN");
             const auto font = IlanaTheme::font (IlanaTheme::TextSize::label, true);
             const auto width = juce::jmin (text.getWidth(), juce::GlyphArrangement::getStringWidthInt (font, label) + 2);
             assignBounds = text.withWidth (width).expanded (3, 1).getIntersection (getLocalBounds());
