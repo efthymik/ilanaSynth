@@ -3154,7 +3154,7 @@ private:
 
         // The name and the type bar.
         card.captionArea = {};
-        auto x = card.bounds.getX() + 62;
+        auto x = card.bounds.getX() + 68; // (past OSC n at FILTER's title size: UI review 31, item 39)
         pieces.typeBar.setBounds ({ x, centre - 8, juce::jmin (pieces.typeBar.preferredWidth(), juce::jmax (0, right.getRight() - x - 4)), 17 });
         x = pieces.typeBar.getRight() + 7;
 
@@ -3870,8 +3870,8 @@ private:
         const auto centre = card.header.getCentreY();
         IlanaTheme::paintTag (g, { (float) card.bounds.getX() + 14.0f, (float) centre }, tint);
         g.setColour (IlanaTheme::Ui::text);
-        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::packedTitle, true));
-        IlanaTheme::drawFitted (g, "OSC " + juce::String (index + 1), juce::Rectangle<int> (card.bounds.getX() + 23, centre - 9, 38, 18), juce::Justification::centredLeft, 1);
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::moduleTitle, true)); // (FILTER's size: UI review 31, item 39)
+        IlanaTheme::drawFitted (g, "OSC " + juce::String (index + 1), juce::Rectangle<int> (card.bounds.getX() + 23, centre - 9, 46, 18), juce::Justification::centredLeft, 1);
 
         if (usesPanels (card.kind))
         {
@@ -3956,7 +3956,7 @@ private:
             g.setColour (panel.colour);
             g.fillRect (panel.area.withHeight (2).reduced (5, 0));
 
-            const auto titleFont = IlanaTheme::font (7.6f, true).withKerningFactor (0.13f);
+            const auto titleFont = IlanaTheme::innerTitleFont(); // (one inner title style: UI review 31, item 39)
             const auto titleArea = juce::Rectangle<int> (panel.area.getX() + 6, panel.area.getY() + panelTop, panel.area.getWidth() - 12, panelTitleH - 1);
             g.setColour (IlanaTheme::Ui::text2);
             g.setFont (titleFont);

@@ -1523,6 +1523,148 @@ int runUiTests()
             compare->triggerClick();
             settle (150);
             expect (compare->getButtonText() == "A" && ! compare->getToggleState(), "A|B flips back to A");
+
+            // UI review 31, item 24: copy one side to the other. B gets A's
+            // cutoff while A plays; then B is changed, and "Copy B to A"
+            // from A brings B's sound into the side playing.
+            if (auto* cutoff = processor.apvts.getParameter ("f1_cutoff"))
+            {
+                const auto original = cutoff->getValue();
+                pages->copyAB (true); // A to B
+                cutoff->setValueNotifyingHost (0.2f);
+                compare->triggerClick(); // to B: the copy of A, not the 0.2
+                settle (150);
+                const auto bHas = cutoff->getValue();
+                cutoff->setValueNotifyingHost (0.7f);
+                compare->triggerClick(); // back to A (0.2)
+                settle (150);
+                pages->copyAB (false); // B (0.7) to A, which plays
+                settle (150);
+                const auto aHas = cutoff->getValue();
+                expect (std::abs (bHas - original) < 0.001f && std::abs (aHas - 0.7f) < 0.001f && pages->isShowingA(),
+                        "A|B's copy: A to B keeps B as A was, B to A brings B's sound into A (" + juce::String (bHas, 3) + ", "
+                            + juce::String (aHas, 3) + ")");
+                cutoff->setValueNotifyingHost (original);
+            }
+        }
+
+        // UI review 31, item 23: Ctrl+F the browser, Ctrl+B A/B, Ctrl+L the
+        // favourite, Ctrl+N a new patch (asking over an edited one), Ctrl+R a
+        // random patch; none while a text field has the keys.
+        {
+            const auto ctrl = [] (int key) { return juce::KeyPress (key, juce::ModifierKeys::ctrlModifier | juce::ModifierKeys::commandModifier, 0); };
+            const auto wasA = pages->isShowingA();
+            const auto b = pages->keyPressed (ctrl ('B'));
+            settle (150);
+            const auto flipped = pages->isShowingA() != wasA;
+            pages->keyPressed (ctrl ('B'));
+            settle (150);
+            auto* display = findChild<PresetDisplay> (*editor);
+            const auto favBefore = display != nullptr && display->getTooltip().isNotEmpty();
+            juce::ignoreUnused (favBefore);
+            const auto l = pages->keyPressed (ctrl ('L'));
+            const auto l2 = pages->keyPressed (ctrl ('L')); // (and back)
+            auto* panel = findChild<PresetPanel> (*editor);
+            const auto f = pages->keyPressed (ctrl ('F'));
+            settle (200);
+            panel = findChild<PresetPanel> (*editor);
+            const auto opened = panel != nullptr && panel->isOpen();
+            pages->keyPressed (ctrl ('F'));
+            settle (200);
+            expect (b && flipped && l && l2 && f && opened, "Ctrl+B flips A/B, Ctrl+L favourites, Ctrl+F opens the browser");
+
+            if (auto* cutoff = processor.apvts.getParameter ("f1_cutoff"))
+            {
+                const auto presetName = processor.getCurrentPresetName();
+                const auto asked = pages->asksBeforeReplacingEdits();
+                pages->setAsksBeforeReplacingEdits (true); // (the settings may say "don't ask again")
+                const auto original = cutoff->getValue();
+                cutoff->setValueNotifyingHost (original > 0.5f ? 0.1f : 0.9f); // an edited patch
+                settle (400);
+                auto* confirm = findChild<ConfirmOverlay> (*editor);
+                const auto n = pages->keyPressed (ctrl ('N'));
+                settle (150);
+                const auto askedN = confirm != nullptr && confirm->isAsking();
+                if (askedN)
+                    confirm->keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
+                settle (150);
+                const auto r = pages->keyPressed (ctrl ('R'));
+                settle (150);
+                const auto askedR = confirm != nullptr && confirm->isAsking();
+                if (askedR)
+                    confirm->keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
+                settle (150);
+                expect (n && askedN && r && askedR, "Ctrl+N and Ctrl+R ask first over an edited patch (edited "
+                                                        + juce::String (pages->isPatchEdited() ? "yes" : "no") + ")");
+                pages->setAsksBeforeReplacingEdits (asked);
+                // (Whatever happened, the tests after this go on with the same preset.)
+                if (processor.getCurrentPresetName() != presetName)
+                    processor.loadFactoryPreset (processor.getFactoryPresetNames().indexOf (presetName));
+                else
+                    cutoff->setValueNotifyingHost (original);
+                settle (300);
+            }
+
+            // A text field keeps Ctrl+F: the editor leaves it.
+            {
+                juce::TextEditor field;
+                pages->addAndMakeVisible (field);
+                field.setBounds (0, 0, 50, 20);
+                field.grabKeyboardFocus();
+                const auto taken = juce::Component::getCurrentlyFocusedComponent() == &field && pages->keyPressed (ctrl ('F'));
+                pages->removeChildComponent (&field);
+                expect (! taken, "Ctrl+F is left to a text field that has the keys");
+            }
+        }
+
+        // UI review 31, item 35: the FX chain's chips in the tab row, one per
+        // effect in chain order; a click bypasses (one undo step).
+        if (auto* chips = findChild<FxChainChips> (*editor))
+        {
+            // (An effect in an empty slot for the test, taken out after.)
+            auto spare = -1;
+            for (int slot = IlanaSynthAudioProcessor::numFxSlots - 1; slot >= 0 && spare < 0; --slot)
+                if (processor.apvts.getRawParameterValue ("fx_slot" + juce::String (slot + 1))->load() < 0.5f)
+                    spare = slot;
+            auto* spareType = spare >= 0 ? processor.apvts.getParameter ("fx_slot" + juce::String (spare + 1)) : nullptr;
+            if (spareType != nullptr)
+                spareType->setValueNotifyingHost (spareType->convertTo0to1 (13.0f)); // Reverb
+            settle (300);
+            auto loaded = 0, firstSlot = -1;
+            for (int slot = 0; slot < IlanaSynthAudioProcessor::numFxSlots; ++slot)
+                if (processor.apvts.getRawParameterValue ("fx_slot" + juce::String (slot + 1))->load() > 0.5f)
+                {
+                    ++loaded;
+                    firstSlot = firstSlot < 0 ? slot : firstSlot;
+                }
+            auto inOrder = true;
+            auto previous = -1;
+            for (const auto& box : chips->getChipBoxes())
+            {
+                inOrder = inOrder && box.first > previous;
+                previous = box.first;
+            }
+            expect (chips->getNumChips() == loaded && inOrder, "one FX chip per effect, in chain order ("
+                                                                   + juce::String (chips->getNumChips()) + " of " + juce::String (loaded) + ")");
+            if (firstSlot >= 0)
+            {
+                auto* bypass = processor.apvts.getRawParameterValue ("fx_slot" + juce::String (firstSlot + 1) + "_bypass");
+                const auto before = bypass->load();
+                chips->toggleBypass (firstSlot);
+                const auto after = bypass->load();
+                processor.getUndoManager().undo();
+                expect (after != before && bypass->load() == before, "an FX chip's click bypasses its effect, one undo step");
+            }
+            auto& hover = pages->getHoverLine();
+            const auto chipsArea = chips->getBounds();
+            expect (chips->isVisible() && ! hover.getBounds().intersects (chipsArea), "the hover line never covers the FX chips");
+            if (spareType != nullptr)
+                spareType->setValueNotifyingHost (0.0f);
+            settle (300);
+        }
+        else
+        {
+            expect (false, "the FX chain's chips are in the tab row");
         }
 
         // UI review 6, header and global: VOICES as "3/32", a tuning
@@ -1542,6 +1684,10 @@ int runUiTests()
                     "a Scala scale shows the tuning indicator (" + pages->getTuningIndicatorText() + error + ", on "
                         + juce::String (processor.apvts.getRawParameterValue ("tuning_on")->load()) + ", scale "
                         + processor.getTuningState().getDescription() + ")");
+            // (UI review 31, item 21: it shows beside the category in the preset box.)
+            if (auto* display = findChild<PresetDisplay> (*editor))
+                expect (display->getTuning().isNotEmpty() && display->getTuning() == pages->getTuningIndicatorText().fromFirstOccurrenceOf ("TUNING: ", false, false),
+                        "the tuning shows beside the preset's category (" + display->getTuning() + ")");
             if (auto* tuningOn = processor.apvts.getParameter ("tuning_on"))
                 tuningOn->setValueNotifyingHost (0.0f);
             settle (600);
@@ -10574,6 +10720,14 @@ int main (int argc, char** argv)
     // ILANA_SNAPSHOT_WIDTH renders at another zoom (795 is 75%, 2120 is 200%).
     const auto width = juce::SystemStats::getEnvironmentVariable ("ILANA_SNAPSHOT_WIDTH", "1060").getIntValue();
     editor->setSize (width, width * 720 / 1060);
+    // ILANA_SNAPSHOT_SKIN=0..4: the pictures in that skin (the settings' themeIndex is left alone).
+    if (const auto skin = juce::SystemStats::getEnvironmentVariable ("ILANA_SNAPSHOT_SKIN", ""); skin.isNotEmpty())
+        if (auto* look = dynamic_cast<IlanaLookAndFeel*> (&editor->getLookAndFeel()))
+        {
+            const auto index = juce::jlimit (0, IlanaTheme::numPalettes - 1, skin.getIntValue());
+            look->setAccent (juce::Colour (IlanaTheme::palette[index]), juce::Colour (IlanaTheme::paletteSecond[index]));
+            editor->sendLookAndFeelChange();
+        }
     settle (400);
 
     // The intro only shows until it has been seen once; capture it anyway.
