@@ -140,7 +140,7 @@ NOTES_H = os.path.join(os.path.dirname(ENGINE), "ModalBowedNotes.h")
 SCALARS = (("floorDb", "flr_db"), ("tailDb", "tail_db"), ("letGoDropDb", "rdrop_db"), ("fadeDb", "fade_db"), ("onsetDarkDb", "ob_db"),
            ("swellSeconds", "swell_s"), ("vibratoCents", "vib_ct"), ("wanderDb", "slow_db"), ("rippleDb", "rip_db"),
            ("releaseSeconds", "rel_s"), ("releaseRing", "ring"), ("hissDb", "hiss_db"), ("airDb", "a0_db"),
-           ("sineWanderDb", "sn_db"), ("levelVibratoDb", "am_db"))
+           ("sineWanderDb", "sn_db"), ("levelVibratoDb", "am_db"), ("outputDb", "out_db"))   # (round 13: out_db)
 assert tuple(k for _, k in SCALARS) == sim.TABLE_SCALARS
 # (round 10, the cello's: columns added to a value by the table's weight, not replacing it)
 SCALARS += (("stringTopAddDb", "hf_add"), ("lowFloorAddDb", "cflr_add"))
@@ -191,7 +191,8 @@ out = ["#pragma once", "",
        "    // the held note's level over time: knotSustain dB by octave at knotSustainSeconds from the note-on, held before the",
        "    // first and after the last (the release too). And each residual layer's envelope on the same knots: layerOn dB",
        "    // (amplitude) at knotOnSeconds[0..5] (0 at the last and after), layerRelease at knotReleaseSeconds[1..5] after the",
-       "    // let-go (0 at the let-go, the last held). All by the table's weight.",
+       "    // let-go (0 at the let-go, the last held); (round 13) and layerSustain dB at knotSustainSeconds as knotSustain.",
+       "    // All by the table's weight; (round 13) any table's (the cello's has them too).",
        "    static constexpr int knotSustainCount = %d;" % len(sim.DEFAULT["su_t"]),
        "    static constexpr double knotSustainSeconds[knotSustainCount] { %s };" % ", ".join(number(x) for x in sim.DEFAULT["su_t"]),
        "    // (round 11, the violin's) The residual layers (ModalBowedLayers.h): each note's noise between and under the",
@@ -225,6 +226,7 @@ out = ["#pragma once", "",
        "        float residualDb[residualLayers][residualBands] {};",
        "        float knotSustain[knotOctaves][knotSustainCount] {};",
        "        float layerOn[residualLayers][knotOnCount] {}, layerRelease[residualLayers][knotReleaseCount] {};",
+       "        float layerSustain[residualLayers][knotSustainCount] {};   // (round 13)",
        "    };",
        "    struct Table",
        "    {",
@@ -236,7 +238,7 @@ out = ["#pragma once", "",
        "        const Row* rows;      // first..last",
        "        bool knots;           // (round 11) any row has knotOn or knotRelease",
        "        bool sustainKnots;    // (round 12) any row has knotSustain",
-       "        bool layerKnots;      // (round 12) any row has layerOn or layerRelease",
+       "        bool layerKnots;      // (round 12) any row has layerOn or layerRelease (round 13: or layerSustain)",
        "        bool residual;        // (round 11) every row has residualDb",
        "        Envelope envelope;    // (round 12) its residual layers' envelope",
        "    };"]
@@ -269,14 +271,16 @@ for inst in ("violin", "cello"):
         if "rs0_db" in row:
             assert all(len(row["rs%d_db" % l]) == len(RS_EDGES) for l in range(3))
             residual = ",\n          { %s }" % ", ".join("{ %s }" % ", ".join(number(x, DIGITS[inst]) + "f" for x in row["rs%d_db" % l]) for l in range(3))
-        # (round 12, the violin's) kv_su, rk_on, rk_rl (the layers' knots share kn_on_t, kn_rl_t)
+        # (round 12, the violin's; round 13, any table's) kv_su, rk_on, rk_rl, (round 13) rk_su (the layers' knots share
+        # kn_on_t, kn_rl_t, su_t)
         assert tuple(sim.DEFAULT["rk_on_t"]) == tuple(sim.DEFAULT["kn_on_t"]) and tuple(sim.DEFAULT["rk_rl_t"]) == tuple(sim.DEFAULT["kn_rl_t"])
-        more = ", {}, {}, {}"
-        if any(key in row for key in ("kv_su", "rk_on", "rk_rl")):
+        more = ", {}, {}, {}, {}"
+        if any(key in row for key in ("kv_su", "rk_on", "rk_rl", "rk_su")):
             assert len(row["kv_su"]) == 8 and all(len(v) == len(sim.DEFAULT["su_t"]) for v in row["kv_su"])
             assert all(len(row[key]) == 3 and all(len(v) == len(sim.DEFAULT[key + "_t"]) - 1 for v in row[key]) for key in ("rk_on", "rk_rl"))
-            more = ",\n          { %s },\n          { %s },\n          { %s }" % tuple(", ".join(floats(v, DIGITS[inst]) for v in row[key]) for key in ("kv_su", "rk_on", "rk_rl"))
-        assert "rk_su" not in row   # (the twin's hook, unused: not in the engine)
+            assert len(row["rk_su"]) == 3 and all(len(v) == len(sim.DEFAULT["su_t"]) for v in row["rk_su"])
+            more = ",\n          { %s },\n          { %s },\n          { %s },\n          { %s }" % tuple(", ".join(floats(v, DIGITS[inst]) for v in row[key])
+                                                                                         for key in ("kv_su", "rk_on", "rk_rl", "rk_su"))
         out.append("          %s%s%s%s }," % (floats([row.get(key, 0.0) for _, key in SCALARS] if mask else [], DIGITS[inst]), knots, residual, more))
     out.append("    };")
     assert all(("rs0_db" in row) == ("rs0_db" in rows[0]) for row in rows)
@@ -287,7 +291,7 @@ for inst in ("violin", "cello"):
     flag = lambda *keys: "true" if any(key in row for row in rows for key in keys) else "false"
     tables.append("{ %s, %d, %d, %s, %d, 0x%xu, %sRows, %s, %s, %s, %s, %s }" % (number(tab["size"]), tab["first"], tab["last"],
                                                                                  "true" if tab["hold_below"] else "false", tab["fade_above"], mask, inst,
-                                                                                 flag("kn_on", "kn_rl", "kv_on", "kv_rl"), flag("kv_su"), flag("rk_on", "rk_rl"),
+                                                                                 flag("kn_on", "kn_rl", "kv_on", "kv_rl"), flag("kv_su"), flag("rk_on", "rk_rl", "rk_su"),
                                                                                  "true" if "rs0_db" in rows[0] else "false", envelope))
 out += ["    static constexpr int tableCount = %d;" % len(tables),
         "    static constexpr Table tables[tableCount] { %s };" % (", ".join(tables)),

@@ -26,6 +26,10 @@ and each residual layer's onset and release envelope by knot (rk_on, rk_rl), fit
 Round 12, the cello's (by its table and t; nothing at a violin's size): its own residual layers (the cello table's rs*_db,
 note_rows(layer=True): w (1 - |t - u_table|)) with their own envelope (rs_env), replacing its low floor, string top and release
 floor (rsc_*); per-note sn_db and am_db; kn_on / kn_rl refitted; CELLO's lp_hz 3000.
+Round 13 (both instruments, all in the tables): a joint frozen-bow refit of every linear output part at once (each
+partial's gain, the partials' knots, the layers' band levels and knots) on the whole picture score; the held note's knots
+su_t now every 0.3 s (10, was 4 every 0.9 s) and on the layers too (the table's rk_su); kv_su, rk_on, rk_rl, rk_su now
+any table's, by its weight, as the engine already plays them (the cello's table has them too).
 Bit-identical to the fits' twins at size 1 and (to float rounding) at 2.1."""
 import json
 import os
@@ -745,14 +749,15 @@ DEFAULT = dict(beta=0.11, loss0=0.8, loss1=3.244e-06, bright=1.7841, b=1.0e-5, g
                kn_on_t=(0.0, 0.05, 0.1, 0.2, 0.35, 0.6, 0.9), kn_rl_t=(0.0, 0.05, 0.15, 0.3, 0.45, 0.6),
                # (round 12, the violin's) the layers' knot times (the table's rk_on, rk_rl)
                rk_on_t=(0.0, 0.05, 0.1, 0.2, 0.35, 0.6, 0.9), rk_rl_t=(0.0, 0.05, 0.15, 0.3, 0.45, 0.6),
-               su_t=(1.0, 1.9, 2.8, 3.7),
+               su_t=(1.0, 1.3, 1.6, 1.9, 2.2, 2.5, 2.8, 3.1, 3.4, 3.7),   # (round 13: every 0.3 s, was 1.0, 1.9, 2.8, 3.7)
                # (round 11, the violin's) the residual layers: 0 sustain, 1 onset, 2 release
                rs_replace=1,
                rs0_on=1, rs0_att=0.25, rs0_tau=0.0, rs0_rdb=10.0, rs0_rs=0.05, rs0_fade=60.0,
                rs1_on=1, rs1_att=0.005, rs1_tau=0.25, rs1_rdb=0.0, rs1_rs=0.05, rs1_fade=0.0,
                rs2_on=1, rs2_att=0.0, rs2_tau=0.0, rs2_rdb=0.0, rs2_rs=0.15, rs2_fade=40.0,
                # (round 12, the cello's) what the cello's layers replace (0..1, by their weight; by t already)
-               rsc_cflr=1.0, rsc_hf=1.0, rsc_nfl=1.0, rsc_hiss=0.0)
+               rsc_cflr=1.0, rsc_hf=1.0, rsc_nfl=1.0, rsc_hiss=0.0,
+               out_db=0.0)   # (round 13: the table's dB on the note's whole output)
 
 # (Round 8) The two-stage let-go (rel_s, fade_db, ring, rloss, rdrop_db, tail_db, ntail) was fitted to the
 # violin's partial trajectories. On held-out notes (2 seeds) it brings the trajectory error after
@@ -788,9 +793,11 @@ CELLO = dict(swell_s=0.3544, swell_amt=0.8208, ob_db=15.04, ob_knee=1990.0, ob_s
 _HERE = os.path.dirname(os.path.abspath(__file__))
 NOTES = [json.load(open(os.path.join(_HERE, "notes_%s.json" % inst))) for inst in ("violin", "cello")]
 TABLE_SCALARS = ("flr_db", "tail_db", "rdrop_db", "fade_db", "ob_db", "swell_s", "vib_ct", "slow_db", "rip_db", "rel_s", "ring",
-                 "hiss_db", "a0_db", "sn_db", "am_db")   # (round 10: hiss_db, dB on the hiss; a0_db, the air mode's level)
+                 "hiss_db", "a0_db", "sn_db", "am_db", "out_db")   # (round 10: hiss_db, dB on the hiss; a0_db, the air mode's level)
 TABLE_ARRAYS = ("gain_db", "dark_db", "loss_add", "drop_db")
 # (round 12, the cello's: sn_db, am_db, the sine wander's and the level vibrato's depth per note)
+# (round 13: out_db, dB on the note's whole output, which keeps each note's loudness at round 12's: the joint refit's
+# picture score is blind to level)
 # (round 11) and the cello's kn_on [8 octaves][6 knots] and kn_rl [8][5] (dB): the gain envelope by octave and time knot
 
 
@@ -935,7 +942,7 @@ def play(inst, note, seconds=4.8, held=4.0, seed=1, tables=None, **kw):
     lr_w = t * p["lr_dbs"] / (1.0 + (hzm / p["lr_knee"]) ** p["lr_slope"]) if t > 0.0 and p["lr_dbs"] != 0.0 else np.zeros(modes)
     rg, rl, rfb, rp = room_coeffs(dict(p, room_db=p["room_db"] + p["room_sz"] * np.log2(sz),
                                        room_lo=p["room_lo"] * sz ** p["room_lk"], room_hi=p["room_hi"] * sz ** p["room_hk"]))
-    return kernel(f0, int(seconds * SR), int(held * SR), SR, modes, p["beta"], p["loss0"], loss1, p["b"], p["grip"],
+    y = kernel(f0, int(seconds * SR), int(held * SR), SR, modes, p["beta"], p["loss0"], loss1, p["b"], p["grip"],
                   0.05 + 0.3 * p["speed"], p["vel"], seed, p["vib_ct"], p["vib_rate"], p["vib_delay"], p["vib_rise"],
                   attack, p["swell_s"], p["swell_amt"], p["rosin"], p["jitter"], p["rel_s"], p["fade_db"],
                   b0, a1, a2, g, 30000.0, (1.0 - p["rsc_hiss"] * wl * t) * p["hiss"] * 10 ** (p["hiss_db"] / 20) * (min(f0, p["hiss_cap"]) / 440.0) ** p["hiss_k"], p["hiss_hp"], p["lp_hz"] * (f0 / 440.0) ** p["lp_k"],
@@ -964,6 +971,8 @@ def play(inst, note, seconds=4.8, held=4.0, seed=1, tables=None, **kw):
                   *_layers(p, rows, lrows, note, t, kw, hzm),
                   np.asarray(kw.get("_mmask", np.zeros(0)), float), np.asarray(kw.get("_ymask", np.zeros(0)), float),
                   np.asarray(kw.get("_rsmask", np.zeros(0)), float))
+    # (round 13) the note's whole output, out_db (the table's: each note's loudness kept at round 12's)
+    return y * 10 ** (p["out_db"] / 20) if p["out_db"] != 0.0 else y
 
 
 # (round 11, the violin's) The residual layers. Each layer's spectrum is the note's table column
@@ -1097,7 +1106,7 @@ def _layers(p, rows, lrows, note, t, kw, hzm):
 
 
 def _su_knots(p, rows, kw, hzm, t):
-    """(round 12, the violin's) the held note's level over time: the violin table's kv_su [8 octaves][len(su_t)] (dB on each
+    """(round 12, the violin's; round 13, any table's) the held note's level over time: the table's kv_su [8 octaves][len(su_t)] (dB on each
     partial's gain at su_t from the note-on, held before the first knot and after the last; spread over the partials as
     kv_on) and rk_su [3 layers][len(su_t)] (dB on each layer), by the table's weight; kw kv_suk / rk_suk (fitting) add.
     Returns (ksu [modes, knots], su_t, rs_ksu [3, knots])."""
@@ -1111,7 +1120,7 @@ def _su_knots(p, rows, kw, hzm, t):
                 V += w * np.asarray(row[key], float); hit = True
         if key + "k" in kw:
             V += np.asarray(kw[key + "k"], float); hit = True
-        out.append(V if (hit and t < 1.0 and np.any(V != 0.0)) else None)
+        out.append(V if (hit and np.any(V != 0.0)) else None)   # (round 13: any table's, by its weight, as the engine; was the violin's only)
     if out[0] is None:
         ksu = np.zeros((len(hzm), 0))
     else:
@@ -1123,7 +1132,7 @@ def _su_knots(p, rows, kw, hzm, t):
 
 
 def _rs_knots(p, rows, kw, t):
-    """(round 12, the violin's) the layers' gain envelope: the violin table's rk_on [3 layers][len(rk_on_t) - 1] (dB at
+    """(round 12, the violin's; round 13, any table's) the layers' gain envelope: the table's rk_on [3 layers][len(rk_on_t) - 1] (dB at
     rk_on_t from the note-on; 0 at the last knot and after) and rk_rl [3][len(rk_rl_t) - 1] (dB at rk_rl_t after the let-go;
     0 at the let-go, the last held), by the table's weight; kw rk_onk / rk_rlk (fitting) add."""
     res = []
@@ -1136,7 +1145,7 @@ def _rs_knots(p, rows, kw, t):
                 V += w * np.asarray(row[key], float); hit = True
         if key + "k" in kw:
             V += np.asarray(kw[key + "k"], float); hit = True
-        if t >= 1.0 or not hit or not np.any(V != 0.0):
+        if not hit or not np.any(V != 0.0):   # (round 13: any table's, by its weight, as the engine; was the violin's only)
             res += [np.zeros((RS_LAYERS, 0)), tk]
             continue
         Z = np.zeros((RS_LAYERS, 1))

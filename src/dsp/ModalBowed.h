@@ -361,6 +361,7 @@ public:
         silent = false;
         untilBlock = 0;
         level = 1.0f;
+        levelFall = 1.0f;
         peakBridge = peakBody = 1.0e-20f;
         if (plucked)
         {
@@ -507,6 +508,7 @@ private:
             wolfGrip += ((wolfLost ? wolfFloor : 1.0f) - wolfGrip) * wolfGripStep;
         }
         // The hair's scrape reaches the bridge too, coloured by the body.
+        level *= levelFall;   // (round 13: 1 but for a released bowed note)
         bridge = (bridge + bodyNoiseNow * tailNoiseGain * hairOnset * hairNoise) * level;
         peakBridge = juce::jmax (peakBridge, std::abs (bridge));
 
@@ -593,7 +595,7 @@ private:
             sound += stringTopGain * x * level;
         }
         peakBody = juce::jmax (peakBody, std::abs (sound));
-        sound *= outputGain;
+        sound *= outputNow;   // (round 13: outputGain by the note's outputDb)
         // The hair's hiss, high-passed, straight out (past the body's top).
         const auto hiss = hissPole * (hissState + hairNoise - hissLast);
         hissLast = hairNoise;
@@ -785,8 +787,15 @@ private:
         // the string's level down faster (a pluck at 0 rings on).
         if (releasedAt >= 0 && (damperAmount > 0.0f || ! plucked))
         {
-            const auto seconds = (float) (blockSize / sampleRate);
-            level *= std::exp2 (-(damperAmount * 60.0f + (plucked ? 0.0f : releaseFadeAtSize / 6.0206f)) * seconds);
+            const auto octaves = -(damperAmount * 60.0f + (plucked ? 0.0f : releaseFadeAtSize / 6.0206f));   // (a second)
+            // (Round 13: bowed, the fade goes a sample at a time, as the twin's; a
+            // step a block amplitude-modulated the ringing string at the block
+            // rate, a buzz of lines at 1.5 kHz and its multiples around each
+            // partial in a cello's tail. A pluck steps a block, as before.)
+            if (plucked)
+                level *= std::exp2 (octaves * (float) (blockSize / sampleRate));
+            else
+                levelFall = std::exp2 (octaves / (float) sampleRate);
         }
         if (layerNote != nullptr)
             updateLayers();
@@ -806,9 +815,9 @@ private:
             // (letGo: the let-go's gain on all of it, 1 for a pluck)
             // (and the hall's floor gone as far under the note's loudest)
             if (((energy * level * letGo < 3.0e-5f * peakBridge && body * letGo < 3.0e-5f * peakBody) || level < 1.0e-5f)
-                && room * roomReturn * letGo < 3.0e-5f * peakBody * outputGain
-                && floorGain * floorEnvelope < 3.0e-5f * peakBody * outputGain
-                && layerLevel() < 3.0e-5f * peakBody * outputGain)
+                && room * roomReturn * letGo < 3.0e-5f * peakBody * outputNow
+                && floorGain * floorEnvelope < 3.0e-5f * peakBody * outputNow
+                && layerLevel() < 3.0e-5f * peakBody * outputNow)
                 silent = true;
         }
     }
@@ -900,11 +909,26 @@ private:
     }
 
     // (Round 12, the violin's) A residual layer's knots now (amplitude):
-    // layerKnotOn under knotOnSeconds' last, layerKnotRelease once let go.
+    // layerKnotOn under knotOnSeconds' last, layerKnotRelease once let go;
+    // (round 13) layerKnotSustain at knotSustainSeconds from the note-on,
+    // held before the first and after the last (the release too).
     double layerKnots (int l, double onFor) const
     {
         using N = ModalBowedNotes;
+        constexpr auto lastSustain = N::knotSustainCount - 1;
         auto db = 0.0;
+        if (onFor <= N::knotSustainSeconds[0])
+            db += layerKnotSustain[l][0];
+        else if (onFor >= N::knotSustainSeconds[lastSustain])
+            db += layerKnotSustain[l][lastSustain];
+        else
+        {
+            auto j = 0;
+            while (N::knotSustainSeconds[j + 1] <= onFor)
+                ++j;
+            const auto u = (onFor - N::knotSustainSeconds[j]) / (N::knotSustainSeconds[j + 1] - N::knotSustainSeconds[j]);
+            db += layerKnotSustain[l][j] * (1.0 - u) + layerKnotSustain[l][j + 1] * u;
+        }
         if (onFor < N::knotOnSeconds[N::knotOnCount])
         {
             auto j = 0;
@@ -1346,6 +1370,13 @@ private:
             return value;
         };
         using S = ModalBowedNotes;
+        // (Round 13) The note's whole output, its tables' outputDb (added by
+        // their weights; bowed only), as the twin's out_db on its output: on
+        // the bridge and body's sum (outputGain), the hiss, the floors, the
+        // rumble and the layers; the room and the roll-off are linear after them.
+        const auto outputScale = plucked ? 1.0 : std::pow (10.0, noteSum (S::outputDb) / 20.0);
+        outputNow = (float) (outputGain * outputScale);
+        layerAmp = (float) (layerAmp * outputScale);
         const auto swellTime = note (S::swellSeconds, at (swellSeconds, swellSecondsCello));
         swellCoefficient = (float) (1.0 - std::exp (-1.0 / (swellTime * sampleRate)));
         swellOnCoefficient = (float) (1.0 - std::exp (-1.0 / (swellTime * std::pow (size, swellSize) * sampleRate)));
@@ -1375,7 +1406,7 @@ private:
         hissHpNow = at (hissHp, hissHpCello);
         // (round 10: up to hissCap only, and the note's table's hissDb on it)
         hissNow = (float) (at (hissLevel, hissLevelCello) * std::pow (10.0, note (S::hissDb, 0.0) / 20.0)
-                           * std::pow (juce::jmin (noteHz, hissCap) / 440.0, at (hissSlope, 0.0)));
+                           * std::pow (juce::jmin (noteHz, hissCap) / 440.0, at (hissSlope, 0.0)) * outputScale);
         bodyNoiseNow = (float) at (bodyNoise, bodyNoiseCello);
         humRatioNow = (float) at (humRatio, humRatioCello);
         flutterDbNow = (float) at (flutterDb, flutterDbCello);
@@ -1394,8 +1425,8 @@ private:
                                                                               : toCello * std::pow (10.0, (lowFloorDb + noteSum (S::lowFloorAddDb)) / 20.0)
                                                                                     * std::pow (noteHz / 440.0, lowFloorSlope / 6.0206)
                                                                                     * (1.0 - layersReplaceLowFloor * replaced);
-        floorGain = (float) (violinFloor + lowFloor);
-        violinFloorGain = (float) violinFloor;
+        floorGain = (float) ((violinFloor + lowFloor) * outputScale);
+        violinFloorGain = (float) (violinFloor * outputScale);   // (round 13: so the rumble's; the air's floor share is a ratio to outputNow)
         const auto floorAt = [lowFloor, toCello] (double violin, double cello) { return lowFloor == 0.0 ? violin : violin + (cello - violin) * toCello; };
         floorLowHzNow = floorAt (hallFloorLowHz, lowFloorLowHz);
         floorHighHzNow = floorAt (hallFloorHighHz, lowFloorHighHz);
@@ -1412,7 +1443,7 @@ private:
         const auto fade = plucked ? 0.0 : 1.0 - toCello;
         const auto airDbNow = note (S::airDb, airDb);
         airGain = fade > 0.0 && airDbNow > -150.0 && keep > 0.0 ? (float) (fade * std::pow (10.0, airDbNow / 20.0) * std::pow (noteHz / 440.0, airSlope / 6.0206) * keep) : 0.0f;
-        airFloorShare = airGain > 0.0f ? (float) (airFloor * (double) violinFloorGain / ((double) airGain * (double) outputGain)) : 0.0f;
+        airFloorShare = airGain > 0.0f ? (float) (airFloor * (double) violinFloorGain / ((double) airGain * (double) outputNow)) : 0.0f;
         rumbleGain = (float) ((double) violinFloorGain * std::pow (10.0, rumbleDb / 20.0));
         hairBodyGain = fade > 0.0 && keep > 0.0 ? (float) (fade * std::pow (10.0, hairBodyDb / 20.0) * std::pow (noteHz / 440.0, hairBodySlope / 6.0206) * keep) : 0.0f;
         hairOnsetDepthAtSize = plucked ? 0.0f : (float) at (hairOnsetDepth, 0.0);
@@ -1478,6 +1509,8 @@ private:
             std::fill (std::begin (layer), std::end (layer), 0.0);
         for (auto& layer : layerKnotRelease)
             std::fill (std::begin (layer), std::end (layer), 0.0);
+        for (auto& layer : layerKnotSustain)
+            std::fill (std::begin (layer), std::end (layer), 0.0);
         if (! plucked)
             for (int i = 0; i < ModalBowedNotes::tableCount; ++i)
             {
@@ -1506,6 +1539,8 @@ private:
                             layerKnotOn[l][j] += tableWeight[i] * (double) row.layerOn[l][j];
                         for (int j = 0; j < ModalBowedNotes::knotReleaseCount; ++j)
                             layerKnotRelease[l][j + 1] += tableWeight[i] * (double) row.layerRelease[l][j];
+                        for (int j = 0; j < ModalBowedNotes::knotSustainCount; ++j)   // (round 13)
+                            layerKnotSustain[l][j] += tableWeight[i] * (double) row.layerSustain[l][j];
                     }
                     layerKnotsOn = true;
                 }
@@ -1810,7 +1845,7 @@ private:
     float grip = 0.5f, bowSpeed = 0.2f, damperAmount = 0.0f, velocityLevel = 0.5f;
     float bodySize = 1.0f, stringScale = 1.0f, sizeTermsAt = 1.0f;
     float envelope = 0.0f, attackCoefficient = 0.001f, releaseCoefficient = 0.001f;
-    float biteEnvelope = 1.0f, biteFall = 0.999f, level = 1.0f;
+    float biteEnvelope = 1.0f, biteFall = 0.999f, level = 1.0f, levelFall = 1.0f;
     float halfRate = 22050.0f, forceScale = 1.0f, pluckScale = 1.0f, peakBridge = 0.0f, peakBody = 0.0f;
     float swell = 0.0f, swellCoefficient = 0.0001f, swellOnCoefficient = 0.0001f, hairNoise = 0.0f, hissState = 0.0f, hissLast = 0.0f, hissPole = 0.35f, tilt = 0.0f, tiltPole = 0.6f;
     float vibratoCents = 9.0f, vibratoPhase = 0.0f;
@@ -2055,6 +2090,7 @@ private:
     // The output's level: the string's units are tiny (metres of string,
     // narrow resonators); this brings a violin D4 near a plucked string's.
     static constexpr float outputGain = 30000.0f;
+    float outputNow = outputGain;   // (round 13: outputGain by the note's tables' outputDb, updateFit)
 
     alignas (32) float q[maxModes] {}, qp[maxModes] {}, turn[maxModes] {}, fall[maxModes] {};
     alignas (32) float shape[maxModes] {}, push[maxModes] {}, out[maxModes] {}, outBase[maxModes] {}, modeHz[maxModes] {}, lossUpper[maxModes] {}, lossOf[maxModes] {}, decayNow[maxModes] {};
@@ -2079,6 +2115,7 @@ private:
     bool knotSustainOn = false, layerKnotsOn = false;
     double layerKnotOn[ModalBowedNotes::residualLayers][ModalBowedNotes::knotOnCount + 1] {};
     double layerKnotRelease[ModalBowedNotes::residualLayers][ModalBowedNotes::knotReleaseCount + 1] {};
+    double layerKnotSustain[ModalBowedNotes::residualLayers][ModalBowedNotes::knotSustainCount] {};   // (round 13)
     // (Round 11, the violin's) The residual layers (ModalBowedLayers.h): on
     // here (a compile-time switch: false plays round 10's noise paths and
     // builds nothing); the bank at this rate, the note's loops and their
