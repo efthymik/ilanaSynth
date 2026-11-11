@@ -4,6 +4,167 @@
 
 namespace
 {
+// The modulated knob a destination is (its parameter), for the matrix's
+// curve dock: the first parameter whose knob draws that destination's ring
+// (an oscillator's pitch is its SEMI). Empty when no knob draws it.
+inline juce::String knobParameterFor (IlanaSynthAudioProcessor& processor, int destination)
+{
+    static std::map<int, juce::String> ids;
+    static bool built = false;
+    if (! built)
+    {
+        built = true;
+        for (auto* parameter : processor.getParameters())
+            if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter))
+                if (const auto d = modRingConfigFor (withId->paramID).destination; d != 0)
+                    if (const auto found = ids.find (d); found == ids.end() || withId->paramID.endsWith ("_semi"))
+                        ids[d] = withId->paramID;
+    }
+    const auto found = ids.find (destination);
+    return found != ids.end() ? found->second : juce::String();
+}
+
+// The curve dock's right half (UI review 31, item 33; it was four help
+// sentences): the route's destination as its knob, live (its value and the
+// range every route into it sweeps, rings in their sources' colours), and the
+// other routes into the same knob as chips; a click on one opens its curve.
+class MatrixDockTarget : public juce::Component
+{
+public:
+    explicit MatrixDockTarget (IlanaSynthAudioProcessor& p) : processorRef (p) {}
+
+    std::function<void (int slot)> onPickRow;
+
+    void setSlot (int newSlot)
+    {
+        slot = newSlot;
+        refresh();
+    }
+
+    int getSlot() const { return slot; }
+    KnobControl* getKnob() const { return knob.get(); }
+    int getNumOtherRoutes() const { return (int) chips.size(); }
+    juce::Button* getOtherRoute (int index) const { return juce::isPositiveAndBelow (index, (int) chips.size()) ? chips[(size_t) index].get() : nullptr; }
+
+    // Polled by the page: rebuilds the knob when the destination changes and
+    // the chips when the routes into it do.
+    void refresh()
+    {
+        const auto routing = processorRef.readModSlot (juce::jmax (0, slot));
+        const auto wantedDestination = slot >= 0 ? routing.destination : 0;
+        juce::String key (wantedDestination);
+        std::vector<int> others;
+        if (wantedDestination != 0)
+            for (int i = 0; i < Mod::maxSlots; ++i)
+                if (const auto other = processorRef.readModSlot (i); i != slot && other.destination == wantedDestination && other.source != Mod::Source::None)
+                {
+                    others.push_back (i);
+                    key << "," << i << ":" << (int) other.source << ":" << juce::roundToInt (other.depth * 100.0f) << (other.bypass ? "b" : "");
+                }
+
+        if (key == shownKey)
+            return;
+        shownKey = key;
+
+        if (wantedDestination != destination || (knob == nullptr && wantedDestination != 0))
+        {
+            destination = wantedDestination;
+            knob.reset();
+            const auto id = destination != 0 ? knobParameterFor (processorRef, destination) : juce::String();
+            if (id.isNotEmpty())
+            {
+                knob = std::make_unique<KnobControl> (processorRef.apvts, id, ModNames::destinationParts (destination).control.toUpperCase());
+                // (Not the knob "Show destination" goes to: that one is on its page.)
+                knob->getProperties().set ("matrixDock", true);
+                addAndMakeVisible (*knob);
+            }
+        }
+
+        chips.clear();
+        for (const auto other : others)
+        {
+            const auto route = processorRef.readModSlot (other);
+            const auto colour = modSourceColour ((int) route.source);
+            const auto percent = Mod::shownPercent (route.depth, Mod::isBipolarRoute (route));
+            auto chip = std::make_unique<juce::TextButton> (ModNames::source ((int) route.source, &processorRef).toUpperCase() + "  "
+                                                            + (percent > 0 ? "+" : "") + juce::String (percent) + "%");
+            chip->setColour (juce::TextButton::buttonColourId, IlanaTheme::Ui::raised.interpolatedWith (colour, 0.12f));
+            chip->setColour (juce::TextButton::textColourOffId, colour.interpolatedWith (juce::Colours::white, 0.35f).withAlpha (route.bypass ? 0.5f : 1.0f));
+            chip->setTooltip ("Row " + juce::String (other + 1) + ": " + ModNames::source ((int) route.source, &processorRef)
+                              + " also moves this knob" + (route.bypass ? " (switched off)" : "") + ".\nClick to open its curve here.");
+            chip->onClick = [this, other] { if (onPickRow != nullptr) onPickRow (other); };
+            addAndMakeVisible (*chip);
+            chips.push_back (std::move (chip));
+        }
+
+        resized();
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto column = textColumn();
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
+        g.setColour (IlanaTheme::Ui::text2);
+        g.drawText ("INTO", column.removeFromTop (14), juce::Justification::centredLeft);
+        g.setColour (IlanaTheme::Ui::text);
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::body, true));
+        IlanaTheme::drawFitted (g, destination != 0 ? ModNames::destination (destination, processorRef) : juce::String ("No destination yet"),
+                                column.removeFromTop (20), juce::Justification::centredLeft, 1);
+        column.removeFromTop (6);
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
+        g.setColour (IlanaTheme::Ui::text2);
+        g.drawText ("ALSO INTO IT", column.removeFromTop (14), juce::Justification::centredLeft);
+
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
+        g.setColour (IlanaTheme::Ui::text3);
+        if (destination == 0)
+            IlanaTheme::drawFitted (g, "Pick a destination in the row.", column.removeFromTop (20), juce::Justification::centredLeft, 1);
+        else if (chips.empty())
+            IlanaTheme::drawFitted (g, "No other route.", column.removeFromTop (20), juce::Justification::centredLeft, 1);
+    }
+
+    void resized() override
+    {
+        // The knob: a square on the left, as tall as the area (with its name under the dial).
+        const auto side = juce::jlimit (0, 120, juce::jmin (getHeight(), getWidth() / 3));
+        if (knob != nullptr)
+            knob->placeAsRing (getLocalBounds().removeFromLeft (side), 64);  // value inside the ring, name under it
+
+        // The chips flow in rows under ALSO INTO IT.
+        auto column = textColumn().withTrimmedTop (14 + 20 + 6 + 14);
+        auto x = column.getX(), y = column.getY();
+        const auto font = juce::Font (IlanaTheme::font (IlanaTheme::TextSize::minInteractive, true));
+        for (auto& chip : chips)
+        {
+            const auto width = juce::jmin (column.getWidth(), juce::GlyphArrangement::getStringWidthInt (font, chip->getButtonText()) + 20);
+            if (x + width > column.getRight() && x > column.getX())
+            {
+                x = column.getX();
+                y += chipHeight + 4;
+            }
+            chip->setBounds (x, y, width, chipHeight);
+            chip->setVisible (y + chipHeight <= column.getBottom());
+            x += width + 6;
+        }
+    }
+
+private:
+    static constexpr int chipHeight = 22;
+
+    juce::Rectangle<int> textColumn() const
+    {
+        const auto side = juce::jlimit (0, 120, juce::jmin (getHeight(), getWidth() / 3));
+        return getLocalBounds().withTrimmedLeft (knob != nullptr ? side + 12 : 0);
+    }
+
+    IlanaSynthAudioProcessor& processorRef;
+    int slot = -1, destination = 0;
+    juce::String shownKey;
+    std::unique_ptr<KnobControl> knob;
+    std::vector<std::unique_ptr<juce::TextButton>> chips;
+};
+
 class MatrixPage : public juce::Component,
                    public juce::SettableTooltipClient,
                    private IlanaAnim::FrameTimer
@@ -17,6 +178,8 @@ public:
             auto row = std::make_unique<MatrixRow> (p, i);
             row->getCurve().onOpenRemap = [this] (int slot) { toggleRemap (slot); };
             row->onDuplicateClicked = [this] (int slot) { showMergeMenu (slot); };
+            row->onRowMenu = [this] (int slot) { showRowMenu (slot); };
+            row->onRowMenuChoice = [this, i] (int choice) { rowMenuChoice (i, choice); };
             list.addChildComponent (*row);
             rows.push_back (std::move (row));
         }
@@ -80,6 +243,11 @@ public:
             shapeTiles.push_back (std::move (tile));
         }
 
+        // A click on a source's heading switches its routes off or on.
+        list.onHeadingClick = [this] (int source) { toggleSourceRoutes (source); };
+        dockTarget.onPickRow = [this] (int slot) { toggleRemap (slot); };
+        addChildComponent (dockTarget);
+
         viewport.setViewedComponent (&list, false);
         viewport.setScrollBarsShown (true, false);
         viewport.setScrollBarThickness (8);
@@ -103,7 +271,9 @@ public:
                                                 : juce::String (used) + " of " + juce::String (Mod::maxSlots) + " routes")
                            + (numDuplicates > 0 ? juce::String::fromUTF8 (" \xc2\xb7 ") + repeatText : juce::String())
                            + (numIdle > 0 ? juce::String::fromUTF8 (" \xc2\xb7 ") + juce::String (numIdle) + " into a module that is off (dimmed)"
-                                          : juce::String()));
+                                          : juce::String())
+                           + (soloSlot >= 0 ? juce::String::fromUTF8 (" \xc2\xb7 row ") + juce::String (rows[(size_t) soloSlot]->getDisplayNumber())
+                                                  + " soloed" : juce::String()));
 
         // The hint, at the right of the title line while the matrix is new to
         // the user (a few routes; the filter field takes the place after that),
@@ -225,37 +395,15 @@ public:
             }
         }
 
-        info.removeFromTop (8);
-        // QUICK SHAPES over the tiles at the dock's bottom.
+        // QUICK SHAPES over the tiles at the dock's bottom; between, the
+        // destination's knob (MatrixDockTarget; the how-to sentences are in
+        // the CURVE cell's tooltip).
         if (! shapeTiles.empty() && shapeTiles.front()->isVisible())
         {
             g.setColour (IlanaTheme::Ui::text2);
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
             g.drawText ("QUICK SHAPES", juce::Rectangle<int> (info.getX(), shapeTiles.front()->getY() - 16, info.getWidth(), 14),
                         juce::Justification::centredLeft);
-            info = info.withBottom (shapeTiles.front()->getY() - 24); // (6 px clear of the caption: V10-22)
-        }
-        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::body));
-        g.setColour (IlanaTheme::Ui::text2);
-        const auto bipolar = Mod::isBipolarRoute (slot);
-        const juce::String lines[] {
-            "Amount " + juce::String (slot.depth >= 0.0f ? "+" : "") + juce::String (Mod::shownPercent (slot.depth, bipolar)) + "%,  "
-                + (bipolar ? "bipolar (-1 to 1 across)" : "unipolar (0 to 1 across)"),
-            "Left to right: the source's range.  Bottom to top: what it sends.",
-            "Click to add a point, drag the middle dots to bend, double-click to remove.",
-            "Click another row's CURVE to edit it. To add a route, drag a source onto a knob, then drag its ring for the depth.",
-        };
-        // Two lines to a sentence where the dock is tall enough for three,
-        // else one line each, so none runs into QUICK SHAPES.
-        const auto twoLines = info.getHeight() >= 3 * 32;
-        // (A line that doesn't whole fit is left out, not drawn into the
-        // caption below: V11-9.)
-        for (const auto& line : lines)
-        {
-            const auto height = twoLines ? 32 : 20;
-            if (info.getHeight() < height)
-                break;
-            IlanaTheme::drawFitted (g, line, info.removeFromTop (height), juce::Justification::topLeft, twoLines ? 2 : 1);
         }
     }
 
@@ -327,6 +475,7 @@ public:
             });
         });
         addAndMakeVisible (*remapEditor);
+        dockTarget.setSlot (slot);
 
         for (auto& row : rows)
             row->setSelected (row->getSlotIndex() == slot);
@@ -358,6 +507,7 @@ public:
             });
         });
         addAndMakeVisible (*remapEditor);
+        dockTarget.setSlot (slot);
 
         for (auto& row : rows)
             row->setSelected (row->getSlotIndex() == slot);
@@ -419,6 +569,159 @@ public:
 
     // The dock's area (empty when it isn't shown); the tests.
     juce::Rectangle<int> getDockArea() const { return dockArea; }
+    MatrixDockTarget& getDockTarget() { return dockTarget; }
+    // Whether the source group headings are drawn (only when every row fits with them).
+    bool areGroupHeadingsShown() const { return headingsShown; }
+    int getRowHeight() const { return rowHeight; }
+    juce::Rectangle<int> getHeadingArea (int source) const
+    {
+        for (const auto& heading : list.headings)
+            if (heading.source == source)
+                return getLocalArea (&list, heading.area);
+        return {};
+    }
+    int getSoloSlot() const { return soloSlot; }
+
+    // "Show destination": the editor switches to the knob's page and flashes it.
+    std::function<void (int destination)> onShowDestination;
+
+    // The row's own menu (UI review 31, item 33; MVF-4).
+    void showRowMenu (int slot)
+    {
+        const auto routing = processorRef.readModSlot (slot);
+        juce::PopupMenu menu;
+        menu.addSectionHeader (ModNames::source ((int) routing.source, &processorRef) + juce::String::fromUTF8 ("  \xe2\x86\x92  ")
+                               + (routing.destination != 0 ? ModNames::destination (routing.destination, processorRef) : juce::String ("no destination")));
+        menu.addItem (1, "Duplicate (same source, pick a new destination)", freeSlot() >= 0 && routing.source != Mod::Source::None);
+        menu.addItem (2, "Show destination", routing.destination != 0 && onShowDestination != nullptr);
+        menu.addItem (3, soloSlot == slot ? "End solo (the other routes back on)" : "Solo this route", routing.source != Mod::Source::None || soloSlot == slot);
+        menu.addSeparator();
+        menu.addItem (4, "Remove");
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (rows[(size_t) slot].get()),
+                            [safeThis = juce::Component::SafePointer<MatrixPage> (this), slot] (int result)
+                            {
+                                if (safeThis != nullptr && result > 0)
+                                    safeThis->rowMenuChoice (slot, result);
+                            });
+    }
+
+    // 1 duplicate, 2 show destination, 3 solo / end solo, 4 remove; public for the tests.
+    void rowMenuChoice (int slot, int choice)
+    {
+        if (choice == 1)
+            duplicateRow (slot);
+        else if (choice == 2)
+        {
+            if (const auto destination = processorRef.readModSlot (slot).destination; destination != 0 && onShowDestination != nullptr)
+                onShowDestination (destination);
+        }
+        else if (choice == 3)
+            soloRow (slot);
+        else if (choice == 4)
+        {
+            if (soloSlot == slot)
+                soloRow (slot); // (the others come back on first)
+            processorRef.performEdit ("Remove modulation", [this, slot] { processorRef.clearModSlot (slot); });
+            updateRows (true);
+        }
+    }
+
+    // A new row with the slot's source, amount, curve, polarity and via, and
+    // no destination yet: its destination list opens. Returns the new slot.
+    int duplicateRow (int slot)
+    {
+        const auto target = freeSlot();
+        if (target < 0)
+            return -1;
+
+        processorRef.performEdit ("Duplicate modulation", [this, slot, target]
+        {
+            processorRef.clearModSlot (target);
+            for (const auto* field : { "src", "aux", "amt", "curve", "pol" })
+                processorRef.setModSlotValue (target, field, processorRef.apvts.getParameter (processorRef.getModSlotParamId (slot, field)) != nullptr
+                                                                 ? processorRef.apvts.getParameter (processorRef.getModSlotParamId (slot, field))->convertFrom0to1 (
+                                                                       processorRef.apvts.getParameter (processorRef.getModSlotParamId (slot, field))->getValue())
+                                                                 : 0.0f);
+            if (processorRef.readModSlot (slot).remap != nullptr)
+                processorRef.setModRemap (target, processorRef.getModRemap (slot));
+        });
+        updateRows (true);
+
+        const auto rowBounds = rows[(size_t) target]->getBounds();
+        if (! viewport.getViewArea().contains (rowBounds))
+            viewport.setViewPosition (0, juce::jmax (0, rowBounds.getBottom() - viewport.getHeight() + rowHeight + 4));
+
+        if (openListsOnDuplicate)
+            juce::MessageManager::callAsync ([safeThis = juce::Component::SafePointer<MatrixPage> (this), target]
+            {
+                if (safeThis != nullptr && safeThis->rows[(size_t) target]->isShowing())
+                    safeThis->rows[(size_t) target]->showDestinationList();
+            });
+        return target;
+    }
+
+    // (The tests duplicate without the list popping up.)
+    bool openListsOnDuplicate = true;
+
+    // Solo: every other route off until the solo ends (the same item again,
+    // or another row's solo); those the solo switched off come back on.
+    void soloRow (int slot)
+    {
+        const auto ending = soloSlot == slot;
+        const auto previous = soloSlot;
+        processorRef.performEdit (ending ? "End solo" : "Solo modulation", [this, slot, ending, previous]
+        {
+            if (previous >= 0)
+            {
+                for (const auto other : soloMuted)
+                    processorRef.setModSlotValue (other, "byp", 0.0f);
+                if (soloWasOff)
+                    processorRef.setModSlotValue (previous, "byp", 1.0f);
+            }
+            soloMuted.clear();
+            soloSlot = -1;
+            soloWasOff = false;
+            if (ending)
+                return;
+
+            soloSlot = slot;
+            soloWasOff = processorRef.readModSlot (slot).bypass;
+            processorRef.setModSlotValue (slot, "byp", 0.0f);
+            for (int other = 0; other < Mod::maxSlots; ++other)
+                if (const auto route = processorRef.readModSlot (other); other != slot && ! route.bypass
+                                                                         && (route.source != Mod::Source::None || route.destination != 0))
+                {
+                    soloMuted.push_back (other);
+                    processorRef.setModSlotValue (other, "byp", 1.0f);
+                }
+        });
+        updateRows (true);
+        repaint();
+    }
+
+    // A click on a source's group heading: all its routes off, or (all off
+    // already) all back on (UI review 31, item 33; MVF-2).
+    void toggleSourceRoutes (int source)
+    {
+        std::vector<int> slots;
+        auto anyOn = false;
+        for (const auto index : visibleRows)
+            if (sourceOfSlot (index) == source)
+            {
+                slots.push_back (index);
+                anyOn = anyOn || ! processorRef.readModSlot (index).bypass;
+            }
+        if (slots.empty())
+            return;
+
+        processorRef.performEdit ((anyOn ? "Switch off " : "Switch on ") + ModNames::source (source, &processorRef) + " routes", [this, slots, anyOn]
+        {
+            for (const auto index : slots)
+                processorRef.setModSlotValue (index, "byp", anyOn ? 1.0f : 0.0f);
+        });
+        updateRows (true);
+        list.repaint();
+    }
 
     // Folds every repeated routing it can into one row.
     void mergeAll()
@@ -626,34 +929,40 @@ public:
         filterField.setBounds (top.removeFromRight (210).withTrimmedTop (5).withTrimmedBottom (1));
         headerArea = area.removeFromTop (18);
 
-        // Rows grow a little taller while there are few (V7-20), never past
-        // 34 px: Serum's rows are about this tall and a long matrix should
-        // not scroll more than it has to (review 9, S9-7).
-        const auto listRows = (int) visibleRows.size() + 1; // (and the add row)
-        const auto headingsHeight = showsGroupHeadings() ? numGroups() * groupHeadingHeight : 0;
-        rowHeight = MatrixRow::rowHeight;
-        while (rowHeight < 34 && listRows * (rowHeight + 1) + 8 + headingsHeight <= area.getHeight())
-            ++rowHeight;
+        // The dock is decided first, with the rows at their base height
+        // (UI review 31, item 11: growing the rows first ate the room it
+        // needed, so 6 to 9 routes got neither). The dock always holds a curve
+        // (V14-4): a matrix that leaves it room opens its first row's by itself;
+        // once the rows need the room that automatic one goes again (a curve the
+        // user opened stays). The rows never move for it, the list just scrolls
+        // above it (V6-22).
+        const auto baseRowsHeight = listContentHeight (MatrixRow::rowHeight, 0);
+        const auto spareAtBase = area.getHeight() - baseRowsHeight;
 
-        // The dock shows while a remap is open. Otherwise its how-to note
-        // only takes room the rows leave over, never the list's own room
-        // (review 9, S9-6), so a short matrix has no bare block under it.
-        // The rows never move for it, the list just scrolls above it (V6-22).
-        const auto rowsHeight = listRows * (rowHeight + 1) + 8 + headingsHeight;
-        const auto spare = area.getHeight() - rowsHeight;
-
-        // The dock always holds a curve (V14-4): a short matrix opens its first
-        // row's by itself and gives it every spare pixel; once the rows need
-        // the room that automatic one goes again (a curve the user opened stays).
-        if (! visibleRows.empty() && remapEditor == nullptr && ! dockDismissed && spare >= dockHeight + 8)
+        if (! visibleRows.empty() && remapEditor == nullptr && ! dockDismissed && spareAtBase >= dockHeight + 8)
             openRemapQuietly (visibleRows.front(), true);
-        else if (remapEditor != nullptr && dockAutomatic && spare < dockHeight + 8)
+        else if (remapEditor != nullptr && dockAutomatic && spareAtBase < dockHeight + 8)
             closeRemapQuietly();
 
         if (! visibleRows.empty() && remapEditor != nullptr)
-            dockArea = area.removeFromBottom (juce::jlimit ((int) dockHeight, 400, spare)).withTrimmedTop (8);
+            dockArea = area.removeFromBottom (juce::jlimit ((int) dockHeight, 400, spareAtBase)).withTrimmedTop (8);
         else
             dockArea = {};
+        dockTarget.setVisible (! dockArea.isEmpty() && remapEditor != nullptr);
+
+        // Source headings only while every row still fits with them (a long
+        // matrix scrolled only for its headings: UI review 31, item 11).
+        const auto listHeight = area.getHeight();
+        headingsShown = wantsGroupHeadings() && baseRowsHeight + numGroups() * groupHeadingHeight <= listHeight;
+        const auto headingsHeight = headingsShown ? numGroups() * groupHeadingHeight : 0;
+
+        // Then the rows grow a little taller into what is left (V7-20), never
+        // past 34 px: Serum's rows are about this tall and a long matrix should
+        // not scroll more than it has to (review 9, S9-7).
+        rowHeight = MatrixRow::rowHeight;
+        while (rowHeight < 34 && listContentHeight (rowHeight + 1, headingsHeight) <= listHeight)
+            ++rowHeight;
+        const auto rowsHeight = listContentHeight (rowHeight, headingsHeight);
 
         // Over an open dock the list ends at a whole row, not half-way through
         // one (V11-9, S14-10): the last row that fits, with the headings the
@@ -680,6 +989,13 @@ public:
         const auto tilesShown = remapEditor != nullptr;
         auto tiles = tilesShown ? dockArea.withTrimmedLeft (remapEditor->getRight() - dockArea.getX() + 16).removeFromBottom (48)
                                 : juce::Rectangle<int>();
+        // The destination's knob between the live readout and QUICK SHAPES
+        // (the readout is 16 + 46 px under the dock's 8 px inset, paintDock).
+        if (tilesShown)
+        {
+            const auto info = dockArea.withTrimmedLeft (remapEditor->getRight() - dockArea.getX() + 16).reduced (0, 8);
+            dockTarget.setBounds (info.withTrimmedTop (16 + 46 + 8).withBottom (tiles.getY() - 22));
+        }
         const auto tileWidth = juce::jmin (72, tiles.getWidth() / juce::jmax (1, (int) shapeTiles.size()));
         for (auto& tile : shapeTiles)
         {
@@ -1003,14 +1319,30 @@ private:
 
         // A source changed under the group headings: lay them out again.
         {
-            juce::String key (showsGroupHeadings() ? "g" : "n");
-            if (showsGroupHeadings())
+            juce::String key (wantsGroupHeadings() ? "g" : "n");
+            if (wantsGroupHeadings())
                 for (const auto index : visibleRows)
-                    key << sourceOfSlot (index) << ",";
+                    key << sourceOfSlot (index) << (processorRef.readModSlot (index).bypass ? "b," : ",");
             if (key != headingKey)
             {
                 headingKey = key;
                 resized();
+            }
+        }
+
+        // A solo undone, or a patch loaded over it, is forgotten (its "end"
+        // would switch on routes that are off on purpose).
+        if (soloSlot >= 0)
+        {
+            auto intact = ! processorRef.readModSlot (soloSlot).bypass;
+            for (const auto muted : soloMuted)
+                intact = intact && processorRef.readModSlot (muted).bypass;
+            if (! intact)
+            {
+                soloSlot = -1;
+                soloMuted.clear();
+                soloWasOff = false;
+                repaint();
             }
         }
 
@@ -1026,17 +1358,30 @@ private:
             numIdle = idle;
             repaint();
         }
+
+        if (dockTarget.isVisible())
+            dockTarget.refresh(); // (a load keeps the dock's slot but not its destination)
     }
 
-    // A heading over each source's group, in a long list sorted by source.
+    // A heading over each source's group, in a long list sorted by source
+    // (none over rows with no source: they drive nothing).
     static constexpr int groupHeadingHeight = 18, groupHeadingsFrom = 8;
 
-    bool showsGroupHeadings() const
+    bool wantsGroupHeadings() const
     {
         return sort == Sort::source && visibleRows.size() >= (size_t) groupHeadingsFrom;
     }
 
     int sourceOfSlot (int slot) const { return (int) processorRef.readModSlot (slot).source; }
+
+    // The list's height as layoutList lays it out: the rows, the headings,
+    // the add row under them and the 8 px foot.
+    int listContentHeight (int height, int headingsHeight) const
+    {
+        const auto count = (int) visibleRows.size();
+        const auto addRowHeight = count > 0 && count < Mod::maxSlots ? DashedAddButton::standardHeight + 2 : 0;
+        return count * height + headingsHeight + addRowHeight + 8;
+    }
 
     int numGroups() const
     {
@@ -1044,10 +1389,18 @@ private:
         for (const auto slot : visibleRows)
             if (const auto source = sourceOfSlot (slot); source != last)
             {
-                ++groups;
+                groups += source != 0 ? 1 : 0;
                 last = source;
             }
         return groups;
+    }
+
+    int freeSlot() const
+    {
+        for (int i = 0; i < Mod::maxSlots; ++i)
+            if (const auto slot = processorRef.readModSlot (i); slot.source == Mod::Source::None && slot.destination == 0)
+                return i;
+        return -1;
     }
 
     void layoutList()
@@ -1071,22 +1424,32 @@ private:
         }
 
         list.headings.clear();
-        const auto headed = showsGroupHeadings();
+        const auto headed = headingsShown;
         auto lastSource = -1;
-        const auto names = Mod::getSourceNames();
         for (const auto index : visibleRows)
         {
             auto& row = *rows[(size_t) index];
-            if (const auto source = sourceOfSlot (index); headed && source != lastSource)
+            if (const auto source = sourceOfSlot (index); headed && source != lastSource && source != 0)
             {
-                auto count = 0;
+                auto count = 0, off = 0;
                 for (const auto other : visibleRows)
-                    count += sourceOfSlot (other) == source ? 1 : 0;
+                    if (sourceOfSlot (other) == source)
+                    {
+                        ++count;
+                        off += processorRef.readModSlot (other).bypass ? 1 : 0;
+                    }
+                // The row's own name for the source (UI review 31, item 6: the
+                // headings said FILTER ENV over FILT ENV rows, MACRO 1 over TONE).
                 list.headings.push_back ({ { 0, y, width, groupHeadingHeight }, modSourceColour (source),
-                                           names[source].toUpperCase() + (count == 1 ? "   1 route" : "   " + juce::String (count) + " routes") });
+                                           ModNames::source (source, &processorRef).toUpperCase()
+                                               + (count == 1 ? "   1 route" : "   " + juce::String (count) + " routes")
+                                               + (off == count ? juce::String::fromUTF8 (" \xc2\xb7 off") : juce::String()),
+                                           source, off == count });
                 y += groupHeadingHeight;
                 lastSource = source;
             }
+            else if (source != lastSource)
+                lastSource = source;
             row.setBounds (0, y, width, rowHeight);
             y += rowHeight;
         }
@@ -1114,6 +1477,9 @@ private:
 
         if (changeGate.check (processorRef.getUiEpoch()))
             updateRows();
+
+        if (dockTarget.isVisible())
+            dockTarget.refresh();
 
         // The dock's live readout follows the input.
         if (remapEditor != nullptr && ! readoutArea.isEmpty() && dockArea.isEmpty() == false)
@@ -1185,16 +1551,55 @@ private:
     juce::String repeatText;
     juce::Rectangle<int> dockArea;
     std::unique_ptr<RemapEditor> remapEditor;
-    bool dockDismissed = false, dockAutomatic = false;
+    bool dockDismissed = false, dockAutomatic = false, headingsShown = false;
+    // The soloed row (-1: none) and the routes its solo switched off.
+    int soloSlot = -1;
+    std::vector<int> soloMuted;
+    bool soloWasOff = false;
 
     IlanaSynthAudioProcessor& processorRef;
+    MatrixDockTarget dockTarget { processorRef };
     juce::StringArray shownMacroNames;
     std::vector<bool> shownPoolSources;
     juce::Viewport viewport;
     // The rows' canvas: it also paints a small heading over each source's
-    // group once the matrix is long (S13-3).
-    struct ListCanvas : juce::Component
+    // group once the matrix is long (S13-3); a click on one switches that
+    // source's routes off or on.
+    struct ListCanvas : juce::Component,
+                        public juce::TooltipClient
     {
+        std::function<void (int source)> onHeadingClick;
+
+        int headingAt (juce::Point<int> position) const
+        {
+            for (const auto& heading : headings)
+                if (heading.area.contains (position))
+                    return heading.source;
+            return 0;
+        }
+
+        void mouseMove (const juce::MouseEvent& event) override
+        {
+            setMouseCursor (headingAt (event.getPosition()) != 0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+        }
+
+        void mouseUp (const juce::MouseEvent& event) override
+        {
+            if (event.mouseWasDraggedSinceMouseDown() || event.mods.isPopupMenu())
+                return;
+            if (const auto source = headingAt (event.getPosition()); source != 0 && onHeadingClick != nullptr)
+                onHeadingClick (source);
+        }
+
+        juce::String getTooltip() override
+        {
+            for (const auto& heading : headings)
+                if (heading.area.contains (getMouseXYRelative()))
+                    return heading.allOff ? "Click to switch this source's routes back on."
+                                          : "Click to switch all of this source's routes off (click again to bring them back), to hear what it does.";
+            return {};
+        }
+
         void paint (juce::Graphics& g) override
         {
             // As the mockup: a small square swatch, the source's name in bold
@@ -1204,7 +1609,7 @@ private:
             {
                 const auto name = heading.text.upToFirstOccurrenceOf ("   ", false, false);
                 const auto count = heading.text.fromFirstOccurrenceOf ("   ", false, false);
-                g.setColour (heading.colour);
+                g.setColour (heading.colour.withMultipliedAlpha (heading.allOff ? 0.4f : 1.0f));
                 g.fillRoundedRectangle (juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ (float) heading.area.getX() + 8.0f, (float) heading.area.getCentreY() }), 2.0f);
                 g.setFont (nameFont);
                 g.drawText (name, heading.area.withTrimmedLeft (18), juce::Justification::centredLeft, true);
@@ -1215,7 +1620,7 @@ private:
             }
         }
 
-        struct Item { juce::Rectangle<int> area; juce::Colour colour; juce::String text; };
+        struct Item { juce::Rectangle<int> area; juce::Colour colour; juce::String text; int source = 0; bool allOff = false; };
         std::vector<Item> headings;
     } list;
     std::vector<std::unique_ptr<MatrixRow>> rows;
