@@ -129,6 +129,7 @@ public:
             return;
         bodySize = newSize;
         stringScale = newScale;
+        shapeDbDirty = true;
         stretchScale = 1.0f / (newScale * newScale * newScale);
         pitchDirty = true;
     }
@@ -514,13 +515,36 @@ private:
 
     int roundedCount() const { return (slots + group - 1) / group * group; }
 
+    // SIZE and SCALE on a partial's level (2026-11-11; ilana: "size and
+    // scale are not doin anything": they only moved the faint body modes
+    // and the decay). SIZE: the instrument's average tone moved down by the
+    // body's growth (a bigger box rings lower: boomier, darker; a smaller
+    // one thinner, brighter), at 0.6 of its depth, within 9 dB. SCALE: a
+    // longer string at the same pitch is tighter and brighter, 3 dB per
+    // octave of partial number per doubling, within 12 dB. 0 at x1 and x1.
+    float shapeGainDb (int k, float partialHz) const
+    {
+        auto db = 0.0f;
+        if (bodySize != 1.0f && tableData != nullptr)
+            db += juce::jlimit (-9.0f, 9.0f, 0.6f * (tableData->curveAt (partialHz * bodySize) - tableData->curveAt (partialHz)));
+        if (stringScale != 1.0f)
+            db += juce::jlimit (-12.0f, 12.0f, 3.0f * std::log2 (stringScale) * std::log2 ((float) (k + 1)));
+        return db;
+    }
+
     void updatePitch()
     {
         pitchDirty = false;
+        if (shapeDbDirty)
+        {
+            shapeDbDirty = false;
+            segment = -1; // (the levels below are read again with the new shape)
+        }
         for (int k = 0; k < count; ++k)
         {
             const auto ratio = harmonic[k] + (measured[k] - harmonic[k]) * (stiffness * stretchScale);
             hz[k] = (float) (ratio * frequency);
+            shapeDb[k] = shapeGainDb (k, hz[k]);
             const auto w = juce::MathConstants<double>::twoPi * juce::jmin ((double) hz[k], sampleRate * 0.49) / sampleRate;
             rotCos[k] = (float) std::cos (w);
             rotSin[k] = (float) std::sin (w);
@@ -563,8 +587,8 @@ private:
                     a += corners.weights[(size_t) i] * levelOf (*corners.entries[(size_t) i], k, s, times);
                     b += corners.weights[(size_t) i] * levelOf (*corners.entries[(size_t) i], k, s + 1, times);
                 }
-                levelA[k] = a + levelOffset;
-                levelB[k] = b + levelOffset;
+                levelA[k] = a + levelOffset + shapeDb[k];
+                levelB[k] = b + levelOffset + shapeDb[k];
             }
             if (hasNoise)
                 for (int b = 0; b < ModalPianoTable::noiseBandCount; ++b)
@@ -716,6 +740,8 @@ private:
     bool eco = false, pitchDirty = true, silent = true;
     const ModalPianoTable* tableData = &ModalPianoTable::get();
     float bodySize = 1.0f, stringScale = 1.0f, stretchScale = 1.0f;
+    bool shapeDbDirty = false;
+    float shapeDb[maxSlots] {}; // each partial's SIZE / SCALE level change (shapeGainDb)
     // The table's sinusoid levels are the reference's in dBFS (about 20 dB
     // quiet); Voice::exciterTrim brings the Modal Piano up to the other
     // oscillators' level, so this stays 1 (Modal Grand, saved without the
