@@ -1172,6 +1172,483 @@ void runSmallThingsTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioPr
 
 // Drives the real editor the way a user would and checks the processor
 // state, for the wiring that unit tests can't see.
+// UI review 31, builder C: MATRIX (items 5, 6, 11, 33, 42), the macros' + ASSIGN
+// (7), the dock's chip groups (10), the performance pop-ups and wheels (19, 28),
+// click to assign and Alt-drag (26) and the filter graph as a drop target (27).
+void runReview31MatrixTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProcessorEditor& editor)
+{
+    const auto names = processor.getFactoryPresetNames();
+    const auto load = [&] (const juce::String& name)
+    {
+        processor.loadFactoryPreset (names.indexOf (name));
+        settle (300);
+    };
+    // (The editor here has no window, so the MATRIX page's timer doesn't run:
+    // a page change shows it the processor's routes again.)
+    const auto reshow = [&]
+    {
+        const auto id = editor.getCurrentPageId();
+        editor.showPage (id == "PATCH" ? "MAIN" : "PATCH");
+        editor.showPage (id);
+        settle (300);
+    };
+    const auto mouseAt = [] (juce::Component& component, juce::Point<float> at, juce::Point<float> from, juce::ModifierKeys mods)
+    {
+        return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), at, mods, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                 &component, &component, juce::Time::getCurrentTime(), from, juce::Time::getCurrentTime(), 1, false);
+    };
+    const auto shownRows = [&]
+    {
+        std::vector<MatrixRow*> found, visible;
+        findAll<MatrixRow> (editor, found);
+        for (auto* row : found)
+            if (visibleInTree (row))
+                visible.push_back (row);
+        std::sort (visible.begin(), visible.end(), [] (auto* a, auto* b) { return a->getY() < b->getY(); });
+        return visible;
+    };
+    const auto render = [] (IlanaSynthAudioProcessor& synth)
+    {
+        std::vector<float> out;
+        for (int block = 0; block < 160; ++block)
+        {
+            juce::AudioBuffer<float> buffer (2, 512);
+            buffer.clear();
+            juce::MidiBuffer midi;
+            if (block == 1)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+            if (block == 90)
+                midi.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+            synth.processBlock (buffer, midi);
+            for (int channel = 0; channel < 2; ++channel)
+                out.insert (out.end(), buffer.getReadPointer (channel), buffer.getReadPointer (channel) + buffer.getNumSamples());
+        }
+        return out;
+    };
+
+    // 5: no factory preset keeps a route with no source, and clearing them
+    // (the load's last step) changes no sound: each preset that had one renders
+    // bit for bit the same with and without the clearing, on fresh processors.
+    {
+        juce::StringArray orphans, had;
+        IlanaSynthAudioProcessor::clearSourcelessRoutes = false;
+        for (int index = 0; index < names.size(); ++index)
+        {
+            processor.loadFactoryPreset (index);
+            for (int slot = 0; slot < Mod::maxSlots; ++slot)
+                if (const auto routing = processor.readModSlot (slot); routing.source == Mod::Source::None && routing.destination != 0)
+                {
+                    had.add (names[index]);
+                    break;
+                }
+        }
+        IlanaSynthAudioProcessor::clearSourcelessRoutes = true;
+        for (int index = 0; index < names.size(); ++index)
+        {
+            processor.loadFactoryPreset (index);
+            for (int slot = 0; slot < Mod::maxSlots; ++slot)
+                if (const auto routing = processor.readModSlot (slot); routing.source == Mod::Source::None && routing.destination != 0)
+                    orphans.add (names[index] + " slot " + juce::String (slot + 1));
+        }
+        expect (orphans.isEmpty(), "no factory preset loads a route with no source (" + juce::String (had.size()) + " had one before the load clears them"
+                                       + (orphans.isEmpty() ? juce::String() : "; still: " + orphans.joinIntoString (", ")) + ")");
+        std::cout << "  presets with a sourceless route in their recipe or voicing: " << had.joinIntoString (", ") << std::endl;
+
+        // The audio sees only active routes (Mod::Slot::isActive) and the other
+        // parameters: those must match exactly with and without the clearing.
+        // Then the render: bit for bit where the preset renders the same twice
+        // (a preset whose own render varies run to run is reported, its state
+        // check stands).
+        const auto audibleState = [] (IlanaSynthAudioProcessor& synth)
+        {
+            std::map<juce::String, float> state;
+            for (auto* parameter : synth.getParameters())
+                if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter))
+                {
+                    const auto id = withId->paramID;
+                    if (id.startsWith ("mod") && juce::CharacterFunctions::isDigit (id[3]) && id.containsChar ('_'))
+                        if (! synth.readModSlot (id.substring (3).getIntValue() - 1).isActive())
+                            continue;
+                    state[id] = parameter->getValue();
+                }
+            return state;
+        };
+        juce::StringArray differ, stateDiffer, varies;
+        auto rendered = 0;
+        for (const auto& name : had)
+        {
+            std::vector<float> renders[3];
+            std::map<juce::String, float> states[3];
+            for (int pass = 0; pass < 3; ++pass)
+            {
+                IlanaSynthAudioProcessor::clearSourcelessRoutes = pass == 2;
+                auto synth = std::make_unique<IlanaSynthAudioProcessor>();
+                synth->prepareToPlay (48000.0, 512);
+                synth->loadFactoryPreset (names.indexOf (name));
+                states[pass] = audibleState (*synth);
+                renders[pass] = render (*synth);
+            }
+            IlanaSynthAudioProcessor::clearSourcelessRoutes = true;
+            ++rendered;
+            if (states[0] != states[2])
+                stateDiffer.add (name);
+            if (renders[0] != renders[1])
+                varies.add (name);
+            else if (renders[0] != renders[2])
+                differ.add (name);
+        }
+        expect (stateDiffer.isEmpty(), "clearing the sourceless routes leaves every parameter the audio reads as it was"
+                                           + (stateDiffer.isEmpty() ? juce::String() : " (differ: " + stateDiffer.joinIntoString (", ") + ")"));
+        expect (differ.isEmpty() && rendered == had.size(), "clearing the sourceless routes leaves every such preset bit-identical ("
+                                                                + juce::String (rendered - varies.size()) + " rendered bit for bit"
+                                                                + (varies.isEmpty() ? juce::String() : "; " + varies.joinIntoString (", ") + " renders differently run to run even unchanged")
+                                                                + (differ.isEmpty() ? juce::String() : "; differ: " + differ.joinIntoString (", ")) + ")");
+    }
+
+    // A source-less row draws its switch off; STEREO is left out where the destination can't be stereo.
+    load ("FM E-Piano");
+    editor.showPage ("MATRIX");
+    settle (400);
+    {
+        auto stereoShown = 0, stereoHiddenWrong = 0, rows = 0;
+        for (auto* row : shownRows())
+        {
+            ++rows;
+            const auto routing = processor.readModSlot (row->getSlotIndex());
+            const auto can = Mod::canBeStereoAnywhere (routing.destination);
+            stereoShown += row->getStereoButton().isVisible() ? 1 : 0;
+            stereoHiddenWrong += row->getStereoButton().isVisible() != can ? 1 : 0;
+        }
+        expect (rows > 0 && stereoHiddenWrong == 0, "MATRIX: STEREO shows only where the destination can be stereo ("
+                                                       + juce::String (stereoShown) + " of " + juce::String (rows) + " rows)");
+
+        const auto spare = [&]
+        {
+            for (int slot = 0; slot < Mod::maxSlots; ++slot)
+                if (const auto routing = processor.readModSlot (slot); routing.source == Mod::Source::None && routing.destination == 0)
+                    return slot;
+            return -1;
+        }();
+        processor.setModSlotValue (spare, "dst", (float) (int) Mod::Destination::FxReverbMix);
+        processor.setModSlotValue (spare, "amt", 0.3f);
+        reshow();
+        MatrixRow* orphan = nullptr;
+        for (auto* row : shownRows())
+            if (row->getSlotIndex() == spare)
+                orphan = row;
+        expect (orphan != nullptr && ! orphan->getBypassButton().getToggleState() && ! orphan->getBypassButton().isEnabled(),
+                "MATRIX: a row with no source draws its switch off");
+        processor.clearModSlot (spare);
+        reshow();
+    }
+
+    // 11: Cello Section (7 routes) opens the curve dock (rows at their base
+    // height); Neuro Wobble's 15 routes fit without scrolling (no headings then).
+    load ("Cello Section");
+    reshow();
+    if (auto* page = editor.getCurrentPage())
+    {
+        auto* remap = findChild<RemapEditor> (*page);
+        const auto visible = shownRows();
+        expect (remap != nullptr && visibleInTree (remap) && ! visible.empty() && visible[0]->getHeight() == MatrixRow::rowHeight,
+                "MATRIX: 7 routes open the curve dock, the rows at " + juce::String (MatrixRow::rowHeight) + " px ("
+                    + juce::String (visible.empty() ? 0 : visible[0]->getHeight()) + ")");
+
+        // 33: the dock's right half is the destination's knob, live.
+        KnobControl* dockKnob = nullptr;
+        std::vector<KnobControl*> knobs;
+        findAll<KnobControl> (*page, knobs);
+        for (auto* knob : knobs)
+            if (knob->getProperties().contains ("matrixDock") && visibleInTree (knob))
+                dockKnob = knob;
+        const auto slot = remap != nullptr ? remap->getSlotIndex() : -1;
+        if (dockKnob != nullptr)
+            dockKnob->syncRoutings(); // (its timer doesn't run without a window)
+        expect (dockKnob != nullptr && slot >= 0 && dockKnob->getRingDestination() == processor.readModSlot (slot).destination
+                    && dockKnob->getNumRoutings() >= 1,
+                "MATRIX: the curve dock shows its route's destination knob with its rings ("
+                    + (dockKnob == nullptr ? juce::String ("no knob") : juce::String (dockKnob->getRingDestination()) + " / "
+                       + juce::String (slot >= 0 ? processor.readModSlot (slot).destination : -1) + ", " + juce::String (dockKnob->getNumRoutings()) + " rings")
+                    + ")");
+    }
+
+    load ("Neuro Wobble");
+    reshow();
+    if (auto* page = editor.getCurrentPage())
+    {
+        const auto visible = shownRows();
+        auto lastBottom = 0;
+        for (auto* row : visible)
+            lastBottom = juce::jmax (lastBottom, page->getLocalArea (row->getParentComponent(), row->getBounds()).getBottom());
+        auto* viewport = visible.empty() ? nullptr : visible[0]->findParentComponentOfClass<juce::Viewport>();
+        const auto scrolls = viewport != nullptr && viewport->getViewedComponent() != nullptr
+                             && viewport->getViewedComponent()->getHeight() > viewport->getHeight();
+        expect (visible.size() >= 15 && ! scrolls, "MATRIX: Neuro Wobble's " + juce::String (visible.size()) + " routes fit without scrolling");
+
+        // 6: a heading (where there is room for them) names its source as its rows do.
+        processor.clearModSlot (visible.back()->getSlotIndex());
+        processor.clearModSlot (visible[visible.size() - 2]->getSlotIndex());
+        processor.clearModSlot (visible[visible.size() - 3]->getSlotIndex());
+        processor.clearModSlot (visible[visible.size() - 4]->getSlotIndex());
+        processor.clearModSlot (visible[visible.size() - 5]->getSlotIndex());
+        reshow();
+        const auto fewer = shownRows();
+        // (The first row's group heading sits right over it when headings show.)
+        if (! fewer.empty() && fewer[0]->getY() >= 18)
+        {
+            auto& canvas = *fewer[0]->getParentComponent();
+            const auto source = (int) processor.readModSlot (fewer[0]->getSlotIndex()).source;
+            const juce::Point<float> at (20.0f, (float) fewer[0]->getY() - 9.0f);
+            auto groupOn = [&] (bool wanted)
+            {
+                auto all = true;
+                for (auto* row : fewer)
+                    if ((int) processor.readModSlot (row->getSlotIndex()).source == source)
+                        all = all && processor.readModSlot (row->getSlotIndex()).bypass != wanted;
+                return all;
+            };
+            canvas.mouseUp (mouseAt (canvas, at, at, juce::ModifierKeys()));
+            settle (200);
+            const auto off = groupOn (false);
+            canvas.mouseUp (mouseAt (canvas, at, at, juce::ModifierKeys()));
+            settle (200);
+            expect (off && groupOn (true), "MATRIX: a click on a source's heading switches its routes off, again on");
+            auto* tip = dynamic_cast<juce::TooltipClient*> (&canvas);
+            expect (tip != nullptr, "MATRIX: the list canvas gives its headings a tooltip");
+        }
+        else
+            expect (false, "MATRIX: 10 routes by source show their group headings (first row at " + juce::String (fewer.empty() ? -1 : fewer[0]->getY()) + ")");
+
+        // 33: the row menu: duplicate, solo, show destination, remove.
+        auto rows = shownRows();
+        if (rows.size() >= 3 && rows[0]->onRowMenuChoice != nullptr)
+        {
+            auto* first = rows[0];
+            const auto original = processor.readModSlot (first->getSlotIndex());
+            const auto before = (int) rows.size();
+            first->onRowMenuChoice (1);
+            settle (300);
+            juce::PopupMenu::dismissAllActiveMenus();
+            reshow();
+            auto duplicated = false;
+            for (auto* row : shownRows())
+                if (const auto routing = processor.readModSlot (row->getSlotIndex()); row != first && routing.source == original.source
+                                                                                      && routing.destination == 0 && std::abs (routing.depth - original.depth) < 1.0e-4f)
+                    duplicated = true;
+            expect ((int) shownRows().size() == before + 1 && duplicated, "MATRIX: Duplicate adds a row with the same source and amount and no destination");
+            for (auto* row : shownRows())
+                if (processor.readModSlot (row->getSlotIndex()).destination == 0)
+                    processor.clearModSlot (row->getSlotIndex());
+            reshow();
+
+            rows = shownRows();
+            first = rows[0];
+            first->onRowMenuChoice (3);
+            settle (200);
+            auto othersOff = true;
+            for (auto* row : rows)
+                if (row != first)
+                    othersOff = othersOff && processor.readModSlot (row->getSlotIndex()).bypass;
+            const auto soloOn = ! processor.readModSlot (first->getSlotIndex()).bypass;
+            first->onRowMenuChoice (3);
+            settle (200);
+            auto othersBack = true;
+            for (auto* row : rows)
+                othersBack = othersBack && ! processor.readModSlot (row->getSlotIndex()).bypass;
+            expect (othersOff && soloOn && othersBack, "MATRIX: Solo switches every other route off, and back on when it ends");
+
+            const auto destination = processor.readModSlot (first->getSlotIndex()).destination;
+            first->onRowMenuChoice (2);
+            settle (500);
+            KnobControl* shown = nullptr;
+            std::vector<KnobControl*> knobs;
+            findAll<KnobControl> (editor, knobs);
+            for (auto* knob : knobs)
+                if (knob->getRingDestination() == destination && visibleInTree (knob) && ! knob->getProperties().contains ("matrixDock"))
+                    shown = knob;
+            expect (editor.getCurrentPageId() != "MATRIX" && shown != nullptr,
+                    "MATRIX: Show destination opens " + editor.getCurrentPageId() + " with the knob on screen");
+            editor.showPage ("MATRIX");
+            settle (300);
+            const auto removed = first->getSlotIndex();
+            first->onRowMenuChoice (4);
+            settle (300);
+            expect (processor.readModSlot (removed).source == Mod::Source::None && processor.readModSlot (removed).destination == 0,
+                    "MATRIX: Remove clears the row");
+        }
+    }
+
+    // 7: on Init only the first idle macro shows + ASSIGN; the others on hover.
+    load ("Init");
+    editor.showPage ("MAIN");
+    settle (400);
+    {
+        std::vector<StripKnob*> macros;
+        findAll<StripKnob> (editor, macros);
+        auto shown = 0, idle = 0;
+        for (auto* macro : macros)
+            if (macro->getMacroIndex() >= 0 && visibleInTree (macro) && ! macro->isAssigned())
+            {
+                ++idle;
+                shown += macro->showsAssignLabel() ? 1 : 0;
+            }
+        expect (idle >= 2 && shown == 1, "Init: one + ASSIGN of " + juce::String (idle) + " idle macros (" + juce::String (shown) + " shown)");
+
+        // 26: + ASSIGN arms the macro; the next knob clicked gets the route, on PLAY.
+        StripKnob* first = nullptr;
+        for (auto* macro : macros)
+            if (macro->getMacroIndex() == 0)
+                first = macro;
+        KnobControl* cutoff = nullptr;
+        std::vector<KnobControl*> knobs;
+        findAll<KnobControl> (editor, knobs);
+        for (auto* knob : knobs)
+            if (knob->getParameterId() == "f1_cutoff" && visibleInTree (knob))
+                cutoff = knob;
+        if (first != nullptr && first->onAssign != nullptr && cutoff != nullptr)
+        {
+            const auto before = processor.getNumUsedModSlots();
+            first->onAssign (0);
+            settle (100);
+            const auto armed = armedModSource() == (int) Mod::macroSourceFor (0) && editor.getCurrentPageId() == "MAIN";
+            auto& slider = cutoff->getSlider();
+            const auto valueBefore = slider.getValue();
+            const auto centre = slider.getLocalBounds().getCentre().toFloat();
+            slider.mouseDown (mouseAt (slider, centre, centre, juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier)));
+            slider.mouseUp (mouseAt (slider, centre, centre, juce::ModifierKeys()));
+            settle (200);
+            auto routed = false;
+            for (int slot = 0; slot < Mod::maxSlots; ++slot)
+                if (const auto routing = processor.readModSlot (slot); routing.source == Mod::macroSourceFor (0)
+                                                                       && routing.destination == (int) Mod::Destination::Filter1Cutoff)
+                    routed = true;
+            expect (armed && routed && armedModSource() == 0 && processor.getNumUsedModSlots() == before + 1 && slider.getValue() == valueBefore,
+                    "+ ASSIGN arms the macro and the next knob clicked gets the route (the knob doesn't turn, PLAY stays)");
+
+            // Esc (or CANCEL) disarms.
+            setArmedModSource ((int) Mod::Source::Lfo2);
+            editor.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
+            expect (armedModSource() == 0, "Esc cancels click to assign");
+
+            // Alt-drag with a source pinned makes the route and sets its depth.
+            KnobControl* reso = nullptr;
+            for (auto* knob : knobs)
+                if (knob->getParameterId() == "f1_reso" && visibleInTree (knob))
+                    reso = knob;
+            if (reso != nullptr)
+            {
+                pinnedModSource() = (int) Mod::Source::Lfo2;
+                auto& resoSlider = reso->getSlider();
+                const auto resoBefore = resoSlider.getValue();
+                const auto at = resoSlider.getLocalBounds().getCentre().toFloat();
+                const juce::ModifierKeys alt (juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::altModifier);
+                resoSlider.mouseDown (mouseAt (resoSlider, at, at, alt));
+                reso->mouseDrag (mouseAt (resoSlider, at.translated (0.0f, -50.0f), at, alt));
+                reso->mouseUp (mouseAt (resoSlider, at.translated (0.0f, -50.0f), at, juce::ModifierKeys()));
+                resoSlider.mouseUp (mouseAt (resoSlider, at.translated (0.0f, -50.0f), at, juce::ModifierKeys()));
+                pinnedModSource() = 0;
+                settle (200);
+                auto depth = 0.0f;
+                for (int slot = 0; slot < Mod::maxSlots; ++slot)
+                    if (const auto routing = processor.readModSlot (slot); routing.source == Mod::Source::Lfo2
+                                                                           && routing.destination == (int) Mod::Destination::Filter1Reso)
+                        depth = routing.depth;
+                expect (depth > 0.2f && resoSlider.getValue() == resoBefore, "Alt-drag with LFO 2 pinned routes it to RESO and sets the depth ("
+                                                                                 + juce::String (depth, 2) + ")");
+            }
+        }
+        else
+            expect (false, "Init: macro 1's + ASSIGN and PLAY's CUTOFF knob are there");
+    }
+
+    // 27: a source dropped on the filter graph routes to CUTOFF.
+    load ("Init");
+    {
+        std::vector<FilterDisplay*> graphs;
+        findAll<FilterDisplay> (editor, graphs);
+        FilterDisplay* graph = nullptr;
+        for (auto* found : graphs)
+            if (visibleInTree (found))
+                graph = found;
+        auto routed = false;
+        if (graph != nullptr && graph->dropSource ((int) Mod::Source::Lfo3))
+            for (int slot = 0; slot < Mod::maxSlots; ++slot)
+                if (const auto routing = processor.readModSlot (slot); routing.source == Mod::Source::Lfo3 && routing.destination == graph->dropDestination())
+                    routed = true;
+        expect (routed, "a source dropped on the filter graph routes to CUTOFF");
+    }
+
+    // 28: the keyboard strip's mod wheel and the MOD WHEEL pop-up's bar send what MIDI would.
+    {
+        auto* keyboard = findChild<KeyboardStrip> (editor);
+        const auto runBlock = [&]
+        {
+            juce::AudioBuffer<float> buffer (2, 512);
+            juce::MidiBuffer midi;
+            processor.processBlock (buffer, midi);
+        };
+        if (keyboard != nullptr)
+        {
+            keyboard->moveWheel (1, 0.5f);
+            runBlock();
+            const auto wheel = processor.getSourceDisplayValue ((int) Mod::Source::ModWheel);
+            keyboard->moveWheel (1, 0.0f);
+            runBlock();
+            expect (std::abs (wheel - 64.0f / 127.0f) < 0.01f && processor.getSourceDisplayValue ((int) Mod::Source::ModWheel) < 0.01f,
+                    "the keyboard's mod wheel sends CC 1 (" + juce::String (wheel, 3) + ")");
+            if (keyboard->getWidth() > 0)
+                expect (! keyboard->wheelBounds (0).isEmpty() && keyboard->wheelBounds (1).getRight() < 80.0f,
+                        "the keyboard strip has bend and mod wheels at its left");
+        }
+        std::vector<ModSourceChip*> chips;
+        findAll<ModSourceChip> (editor, chips);
+        for (auto* chip : chips)
+            if (chip->getSourceIndex() == (int) Mod::Source::ModWheel && visibleInTree (chip))
+            {
+                editor.toggleSourcePopover (chip->getSourceIndex(), *chip);
+                settle (400);
+                auto* popover = editor.getSourcePopover();
+                juce::Component* bar = nullptr;
+                std::function<void (juce::Component&)> find = [&] (juce::Component& parent)
+                {
+                    for (auto* child : parent.getChildren())
+                    {
+                        if (auto* client = dynamic_cast<juce::SettableTooltipClient*> (child); client != nullptr && child->isVisible()
+                                                                                               && client->getTooltip().startsWith ("Drag to move MOD WHEEL"))
+                            bar = child;
+                        find (*child);
+                    }
+                };
+                if (popover != nullptr)
+                    find (*popover);
+                // 19: about 300 x 150 design px, not 620 x 340.
+                expect (popover != nullptr && popover->getWidth() <= 320 && popover->getHeight() <= 260,
+                        "the MOD WHEEL pop-up is compact (" + (popover != nullptr ? juce::String (popover->getWidth()) + " x " + juce::String (popover->getHeight()) : juce::String ("none")) + ")");
+                if (bar != nullptr)
+                {
+                    const juce::Point<float> at (3.0f + (float) (bar->getWidth() - 6) * 0.25f, (float) bar->getHeight() * 0.5f);
+                    bar->mouseDown (mouseAt (*bar, at, at, juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier)));
+                    bar->mouseUp (mouseAt (*bar, at, at, juce::ModifierKeys()));
+                    runBlock();
+                    const auto wheel = processor.getSourceDisplayValue ((int) Mod::Source::ModWheel);
+                    expect (std::abs (wheel - 32.0f / 127.0f) < 0.02f, "the MOD WHEEL pop-up's bar moves the wheel (" + juce::String (wheel, 3) + ")");
+                    if (keyboard != nullptr)
+                        keyboard->moveWheel (1, 0.0f);
+                    runBlock();
+                }
+                else
+                    expect (false, "the MOD WHEEL pop-up has a value bar to drag");
+                editor.toggleSourcePopover (chip->getSourceIndex(), *chip);
+                settle (300);
+                break;
+            }
+    }
+
+    processor.loadFactoryPreset (names.indexOf ("Neuro Wobble"));
+    editor.showPage ("MAIN");
+    settle (300);
+}
+
 int runUiTests()
 {
     // The FILTER page's SIGNAL FLOW opens on hover or click: the tests hold it open.
@@ -1243,6 +1720,15 @@ int runUiTests()
         runLayoutReview10Tests (processor, *pages);
         runOscCardOverlapTests (processor, *pages);
         runGlobalReview8Tests (processor, *pages);
+        pages->setAsksBeforeReplacingEdits (askedBefore);
+        editor.reset();
+        std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
+        return uiFailures == 0 ? 0 : 1;
+    }
+
+    if (only == "R31C")
+    {
+        runReview31MatrixTests (processor, *pages);
         pages->setAsksBeforeReplacingEdits (askedBefore);
         editor.reset();
         std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
@@ -7928,6 +8414,8 @@ int runUiTests()
     }
     // UI review 8, R6: text fitting, header, browser, SEQ, dialogs.
     runGlobalReview8Tests (processor, *pages);
+    // UI review 31 (builder C): MATRIX, + ASSIGN, the dock, the wheels.
+    runReview31MatrixTests (processor, *pages);
     // Step 18: every drop-down select opens its list, click after click.
     runDropdownTests (processor, *pages);
     // Step A: the cable view.
