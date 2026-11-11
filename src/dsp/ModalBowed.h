@@ -296,8 +296,16 @@ public:
         std::fill (std::begin (layerHeld), std::end (layerHeld), 0.0);
         std::fill (std::begin (layerWasZero), std::end (layerWasZero), false);
         layerCount = 0;
-        layerAt = (int) (seed % (std::uint32_t) ModalBowedNotes::residualLengths[0]);
-        layerAtB = (int) ((seed >> 7) % (std::uint32_t) ModalBowedNotes::residualLengths[1]);
+        layerSeed = seed ^ 0x6A09E667u;
+        for (int which = 0; which < 2; ++which)
+        {
+            const auto length = ModalBowedNotes::residualLengths[which];
+            auto& read = layerRead[which];
+            read.at = (int) ((which == 0 ? seed : seed >> 7) % (std::uint32_t) length);
+            read.next = 0;
+            read.fade = -1;
+            read.until = length - (layerBank != nullptr ? layerBank->fadeLength : 0);
+        }
         floorSeed = seed ^ 0x27D4EB2Fu;
         pink0 = pink1 = pink2 = floorLow = floorHigh = floorLast = floorEnvelope = floorStep = 0.0f;
         clearRound10();
@@ -385,6 +393,10 @@ public:
     }
 
 private:
+    // (Round 11) A residual loop's read: where it is, where it fades to and
+    // how far (-1: not fading), and samples until its next jump.
+    struct LayerRead { int at = 0, next = 0, fade = -1, until = 0; };
+
     template <bool wolf>
     float step (float expression, bool noteHeld)
     {
@@ -651,18 +663,36 @@ private:
         sound = tilt;
         // (Round 11, the violin's) The residual layers, straight out: each
         // active layer's two loops (coprime lengths) at its gliding gain.
+        // Each loop jumps to a random place once a length (not to repeat with
+        // its own period), crossfading over the bank's fade (equal power: the
+        // two places are uncorrelated noise).
         if (layerCount > 0)
         {
-            for (int k = 0; k < layerCount; ++k)
+            if (layerRead[0].fade < 0 && layerRead[1].fade < 0)
+                for (int k = 0; k < layerCount; ++k)
+                {
+                    const auto l = layerActive[k];
+                    layerGain[l] += layerStep[l];
+                    sound += layerGain[l] * (layerLoopA[l][layerRead[0].at] + layerLoopB[l][layerRead[1].at]);
+                }
+            else
             {
-                const auto l = layerActive[k];
-                layerGain[l] += layerStep[l];
-                sound += layerGain[l] * (layerLoopA[l][layerAt] + layerLoopB[l][layerAtB]);
+                const auto* fadeIn = layerBank->fadeIn.data();
+                const auto last = layerBank->fadeLength - 1;
+                const auto& a = layerRead[0];
+                const auto& b = layerRead[1];
+                const auto inA = a.fade >= 0 ? fadeIn[a.fade] : 0.0f, outA = a.fade >= 0 ? fadeIn[last - a.fade] : 1.0f;
+                const auto inB = b.fade >= 0 ? fadeIn[b.fade] : 0.0f, outB = b.fade >= 0 ? fadeIn[last - b.fade] : 1.0f;
+                for (int k = 0; k < layerCount; ++k)
+                {
+                    const auto l = layerActive[k];
+                    layerGain[l] += layerStep[l];
+                    sound += layerGain[l] * (layerLoopA[l][a.at] * outA + layerLoopA[l][a.next] * inA
+                                             + layerLoopB[l][b.at] * outB + layerLoopB[l][b.next] * inB);
+                }
             }
-            if (++layerAt == ModalBowedNotes::residualLengths[0])
-                layerAt = 0;
-            if (++layerAtB == ModalBowedNotes::residualLengths[1])
-                layerAtB = 0;
+            for (int which = 0; which < 2; ++which)
+                advanceLayerRead (layerRead[which], ModalBowedNotes::residualLengths[which]);
         }
         return std::isfinite (sound) ? juce::jlimit (-8.0f, 8.0f, sound) : 0.0f;
     }
@@ -845,6 +875,31 @@ private:
             layerLoopA[l] = layerNote->loop[l][0].data();
             layerLoopB[l] = layerNote->loop[l][1].data();
             layerActive[layerCount++] = l;
+        }
+    }
+
+    // (Round 11) A loop's read: on a sample; a length (less the fade) after
+    // its last jump it starts a crossfade to a random place.
+    void advanceLayerRead (LayerRead& read, int length)
+    {
+        if (++read.at == length)
+            read.at = 0;
+        if (read.fade >= 0)
+        {
+            if (++read.next == length)
+                read.next = 0;
+            if (++read.fade == layerBank->fadeLength)
+            {
+                read.at = read.next;
+                read.fade = -1;
+                read.until = length - layerBank->fadeLength;
+            }
+        }
+        else if (--read.until <= 0)
+        {
+            layerSeed = layerSeed * 1664525u + 1013904223u;
+            read.next = (int) ((layerSeed >> 8) % (std::uint32_t) length);
+            read.fade = 0;
         }
     }
 
@@ -1879,7 +1934,9 @@ private:
     static constexpr double fittedBowSpeed = 0.05 + 0.3 * 0.5;   // (the SPEED knob's default, as fitted)
     const ModalBowedLayers::Bank* layerBank = nullptr;
     const ModalBowedLayers::Note* layerNote = nullptr;
-    int layerTable = -1, layerCount = 0, layerAt = 0, layerAtB = 0;
+    int layerTable = -1, layerCount = 0;
+    LayerRead layerRead[2];
+    std::uint32_t layerSeed = 1;
     float layerAmp = 0.0f;
     float layerGain[ModalBowedNotes::residualLayers] {}, layerStep[ModalBowedNotes::residualLayers] {};
     double layerHeld[ModalBowedNotes::residualLayers] {};

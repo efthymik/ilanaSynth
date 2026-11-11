@@ -220,5 +220,9 @@ Twin, all 42 notes: 12.53 -> 10.40 (16384/14641; 65536/59049 scored 10.38, 8192/
 - The onset and release are layers of their own (their spectra differ from the sustain's); the
   release's step down and fade (10 dB, 60 dB a second) and the release layer's 40 dB a second were
   the biggest gains after the layers themselves.
+- A loop that simply wraps repeats: half of a layer's energy came back every 0.31-0.34 s (its
+  autocorrelation at the loop lengths was about 0.5), a pattern the ear can catch in noise. Each loop
+  now jumps to a random place once a length, crossfading over 15 ms with equal power (the two places
+  are uncorrelated): the autocorrelation there is near 0, the spectrum and the score unchanged.
 
 Needs numpy, scipy, soundfile, numba, mido, matplotlib.

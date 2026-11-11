@@ -18,7 +18,8 @@ octave and time knot (kn_on over the first 0.9 s, kn_rl after the let-go), fitte
 Round 11, the violin's: the residual layers (rs*_, per-note rs0_db / rs1_db / rs2_db in the violin's table): the
 note's own noise between and under the partials as shaped noise loops (sustain, onset, release) synthesised from
 the table's band levels, in place of the hall floor, rumble, air mode and 300-500 Hz modes' noise (rs_replace)
-wherever the violin's table reaches.
+wherever the violin's table reaches. Each loop jumps to a random place once a length (a 15 ms
+equal-power crossfade), so no layer repeats with its loop's period.
 Bit-identical to the fits' twins at size 1 and (to float rounding) at 2.1."""
 import json
 import os
@@ -79,6 +80,15 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
     nrs = rs_t1.shape[0]
     rs_g = np.zeros(nrs); rs_step = np.zeros(nrs); rs_held = np.zeros(nrs)
     rs_i1 = (seed * 7919) % rs_t1.shape[1]; rs_i2 = (seed * 104729) % rs_t2.shape[1]
+    # Each loop jumps to a random place once a length (so it doesn't repeat with its own period),
+    # crossfading over rs_fn samples (0.015 s), equal power (sin / cos of a quarter turn): the two
+    # places are uncorrelated noise. (rs_j*: where it fades to, rs_f*: how far, -1 none; rs_u*: until
+    # the next jump.)
+    rs_fn = max(1, int(round(0.015 * sr)))
+    rs_fin = np.sin(0.5 * np.pi * (np.arange(rs_fn) + 0.5) / rs_fn)
+    rs_j1 = 0; rs_j2 = 0; rs_f1 = -1; rs_f2 = -1
+    rs_u1 = rs_t1.shape[1] - rs_fn; rs_u2 = rs_t2.shape[1] - rs_fn
+    rs_rng = (seed * 2654435761 + 1779033703) % 4294967296
     rs_on = False
     for l in range(nrs):
         if rs_p[l, 0] > 0:
@@ -584,15 +594,44 @@ def kernel(f0, total, held, sr, modes, beta, loss0, loss1, b, grip, vbow, vel, s
         lp = raw + lp_a * (lp - raw)
         y[i] = lp
         if rs_on:
+            in1 = rs_fin[rs_f1] if rs_f1 >= 0 else 0.0
+            out1 = rs_fin[rs_fn - 1 - rs_f1] if rs_f1 >= 0 else 1.0
+            in2 = rs_fin[rs_f2] if rs_f2 >= 0 else 0.0
+            out2 = rs_fin[rs_fn - 1 - rs_f2] if rs_f2 >= 0 else 1.0
             for l in range(nrs):
                 rs_g[l] += rs_step[l]
-                y[i] += rs_g[l] * (rs_t1[l, rs_i1] + rs_t2[l, rs_i2])
+                y[i] += rs_g[l] * (rs_t1[l, rs_i1] * out1 + rs_t1[l, rs_j1] * in1 + rs_t2[l, rs_i2] * out2 + rs_t2[l, rs_j2] * in2)
+            L1 = rs_t1.shape[1]; L2 = rs_t2.shape[1]
             rs_i1 += 1
-            if rs_i1 >= rs_t1.shape[1]:
+            if rs_i1 >= L1:
                 rs_i1 = 0
+            if rs_f1 >= 0:
+                rs_j1 += 1
+                if rs_j1 >= L1:
+                    rs_j1 = 0
+                rs_f1 += 1
+                if rs_f1 == rs_fn:
+                    rs_i1 = rs_j1; rs_f1 = -1; rs_u1 = L1 - rs_fn
+            else:
+                rs_u1 -= 1
+                if rs_u1 <= 0:
+                    rs_rng = (rs_rng * 1664525 + 1013904223) % 4294967296
+                    rs_j1 = (rs_rng >> 8) % L1; rs_f1 = 0
             rs_i2 += 1
-            if rs_i2 >= rs_t2.shape[1]:
+            if rs_i2 >= L2:
                 rs_i2 = 0
+            if rs_f2 >= 0:
+                rs_j2 += 1
+                if rs_j2 >= L2:
+                    rs_j2 = 0
+                rs_f2 += 1
+                if rs_f2 == rs_fn:
+                    rs_i2 = rs_j2; rs_f2 = -1; rs_u2 = L2 - rs_fn
+            else:
+                rs_u2 -= 1
+                if rs_u2 <= 0:
+                    rs_rng = (rs_rng * 1664525 + 1013904223) % 4294967296
+                    rs_j2 = (rs_rng >> 8) % L2; rs_f2 = 0
     return y
 
 
@@ -843,7 +882,8 @@ def play(inst, note, seconds=4.8, held=4.0, seed=1, tables=None, **kw):
 # rs<l>_db (45 values: dB of the band energy in look.py's 1/6-octave bands as the score's STFT reads it,
 # for an envelope of 1), faded out toward the cello by (1 - t) in amplitude. The envelope's globals
 # rs<l>_att, _tau, _rdb, _rs, _fade (DEFAULT) or the row's own. Loops: L1 = 16384 and L2 = 14641 (11 ^ 4)
-# samples (coprime), random phase (fixed per note and layer), each carrying half the energy. Nothing is
+# samples (coprime), random phase (fixed per note and layer), each carrying half the energy; each jumps to
+# a random place once a length, crossfading over 15 ms (kernel: rs_fn), so it doesn't repeat. Nothing is
 # stored but the table: the loops are synthesised from its 45 band levels (the engine once per process).
 # (65536/59049 scored 10.38, 16384/14641 10.40, 8192/6561 10.43 on seeds 4-6; the longer pair has more
 # bins in the lowest bands and repeats less audibly.)

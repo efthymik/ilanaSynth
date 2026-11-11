@@ -29,6 +29,8 @@ class ModalBowedLayers
 public:
     using Notes = ModalBowedNotes;
     static constexpr int layers = Notes::residualLayers;
+    // (A loop jumps to a random place once a length, crossfading over this.)
+    static constexpr double fadeSeconds = 0.015;
 
     // One table row's three layers: two loops each (float, in the engine's output units).
     struct Note
@@ -46,6 +48,10 @@ public:
         std::unique_ptr<Note[]> notes;
         std::unique_ptr<std::atomic<bool>[]> ready;
         std::atomic<bool> done { false };
+        // The crossfade when a loop jumps (fadeSeconds): equal power, sin of
+        // a quarter turn over fadeLength samples (cos is it read backwards).
+        int fadeLength = 1;
+        std::vector<float> fadeIn;
 
         // (any thread) The row's layers once built, else nullptr.
         const Note* get (int table, int row) const
@@ -77,6 +83,10 @@ public:
             return nullptr;
         auto bank = std::make_unique<Bank>();
         bank->rate = rate;
+        bank->fadeLength = std::max (1, (int) std::lround (fadeSeconds * rate));
+        bank->fadeIn.resize ((size_t) bank->fadeLength);
+        for (int i = 0; i < bank->fadeLength; ++i)
+            bank->fadeIn[(size_t) i] = (float) std::sin (0.5 * 3.14159265358979323846 * ((double) i + 0.5) / (double) bank->fadeLength);
         for (int i = 0; i < Notes::tableCount; ++i)
             if (Notes::tables[i].residual)
                 bank->count += Notes::tables[i].last - Notes::tables[i].first + 1;
