@@ -8,6 +8,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <iostream>
 #include "PluginProcessor.h"
+#include "dsp/ModalBowedLayers.h"
 
 int main (int argc, char** argv)
 {
@@ -51,6 +52,7 @@ int main (int argc, char** argv)
         }
     processor.setPlayConfigDetails (0, 2, rate, blockSize);
     processor.prepareToPlay (rate, blockSize);
+    ModalBowedLayers::waitUntilBuilt();   // (Modal Bowed's residual layers: the same render every time)
 
     // ILANA_WARMUP=1: first play 32 high notes at once and let them die out
     // (voices with a history, as in a live session), then render.
