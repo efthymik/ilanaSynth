@@ -92,9 +92,10 @@ void addAll (juce::Component& parent, Components&... components)
 void paintSectionTitle (juce::Graphics& g, const juce::String& text, juce::Rectangle<int> area,
                         const juce::String& subtitle = {})
 {
-    const auto font = juce::Font (IlanaTheme::font (IlanaTheme::TextSize::body, true));
+    // (A page's title, the cards' title style: UI review 31, item 39.)
+    const auto font = juce::Font (IlanaTheme::cardTitleFont());
     const auto width = juce::GlyphArrangement::getStringWidthInt (font, text);
-    g.setColour (IlanaTheme::Ui::text2);
+    g.setColour (IlanaTheme::Ui::text);
     g.setFont (font);
     g.drawText (text, area, juce::Justification::centredLeft);
 
@@ -116,9 +117,11 @@ void paintSubBoxTitle (juce::Graphics& g, juce::Rectangle<int> header, const juc
                        bool on, int reserveRight = 0, juce::Colour tint = {})
 {
     header.removeFromRight (reserveRight);
-    const auto font = IlanaTheme::font (IlanaTheme::TextSize::label, true).withKerningFactor (0.06f);
+    // (The inner title style, grey whatever the box's colour: UI review 31, item 39.)
+    juce::ignoreUnused (tint, on);
+    const auto font = juce::Font (IlanaTheme::innerTitleFont());
     const auto width = juce::GlyphArrangement::getStringWidthInt (font, title);
-    g.setColour (! tint.isTransparent() ? tint : on ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2);
+    g.setColour (IlanaTheme::Ui::text2);
     g.setFont (font);
     g.drawText (title, header, juce::Justification::centredLeft);
 

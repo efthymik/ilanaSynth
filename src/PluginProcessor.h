@@ -329,6 +329,11 @@ public:
     // changes and macro rewiring over the recipe, applied before the trims.
     // Off in tests that check what a recipe itself loads.
     static inline bool presetVoicingEnabled = true;
+    // A voicing line that clears a slot's source (modN_src=0) leaves its
+    // destination and amount: an inert route the matrix listed as "None >".
+    // loadFactoryPreset clears such slots as its last step (UI review 31,
+    // item 5). Off only in the test that checks this changes no sound.
+    static inline bool clearSourcelessRoutes = true;
     static void applyPresetVoicing (const char* presetName, std::vector<std::pair<juce::String, float>>& values,
                                     std::array<juce::String, 4>& macroNames);
     static void applyPresetTrims (const char* presetName, const juce::String& category,
@@ -483,6 +488,14 @@ public:
     float getLfoCurveValue (int lfoIndex, double phase) const;
 
     void triggerPreviewNote (int midiNote, bool isOn, float velocity = 0.7f);
+    // The keyboard strip's wheels and the performance sources' pop-up bar
+    // (UI review 31, item 28): the value goes to the next block as the MIDI
+    // message a hardware wheel would send (CC 1, pitch bend, channel
+    // pressure), on channel 1 at the block's start. Lock-free; the newest
+    // value wins. Nothing is sent until one is moved.
+    void sendUiModWheel (float value) { uiModWheel.store (juce::jlimit (0, 127, juce::roundToInt (value * 127.0f))); }
+    void sendUiPitchBend (float value) { uiPitchBend.store (juce::jlimit (0, 16383, 8192 + juce::roundToInt (value * 8191.0f))); }
+    void sendUiPressure (float value) { uiPressure.store (juce::jlimit (0, 127, juce::roundToInt (value * 127.0f))); }
     void panic() { synth.allNotesOff (0, false); }
 
     // A whole patch's parameters swapped in under playing notes (the A/B
@@ -1469,6 +1482,7 @@ private:
     std::array<ParamRef, Mod::numMacros> macroIds;
     std::array<std::pair<ParamRef, ParamRef>, Mod::numMacros> evolveIds;
     std::array<std::pair<ParamRef, ParamRef>, numVectorPoints> vectorPathIds;
+    ParamRef vectorSyncRef { "vec_sync" }, vectorDivRef { "vec_div" };
     std::array<LfoSmoother, (size_t) numLfos> lfoSmoothers;
     std::array<bool, (size_t) numLfos> lfoRoutedB {};
     std::array<std::atomic<float>, (size_t) numLfos> lfoLastValuesB {};
@@ -1571,6 +1585,8 @@ private:
     static constexpr int previewQueueSize = 128;
     juce::AbstractFifo previewFifo { previewQueueSize };
     std::array<PreviewEvent, (size_t) previewQueueSize> previewEvents {};
+    // The wheels' values waiting for the next block (-1: none).
+    std::atomic<int> uiModWheel { -1 }, uiPitchBend { -1 }, uiPressure { -1 };
     std::atomic<float> cpuUsage { 0.0f };
     std::atomic<int> activeVoiceCount { 0 };
     std::atomic<int> macroLearn { -1 };

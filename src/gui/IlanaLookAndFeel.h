@@ -23,12 +23,48 @@ inline juce::Colour accent() { return accentRef(); }
 // in every skin's own hue.
 inline juce::Colour accentText() { return accentRef().interpolatedWith (juce::Colours::white, 0.2f); }
 
+// The skins' accents (the settings' "themeIndex": appended, never renumbered).
+// UI review 31, item 41: the fifth, Neon to Ice, is a two-colour accent:
+// magenta that turns to ice along the things the accent owns (SAVE, the A/B
+// tile, the tab underline, the logo, lit switches, knob arcs); everything
+// else that uses the accent takes its first colour.
 inline const juce::uint32 palette[]
 {
-    0xffff6a3d, 0xff35c8ff, 0xff8fff3b, 0xffff4fd8
+    0xffff6a3d, 0xff35c8ff, 0xff8fff3b, 0xffff4fd8, 0xffff4fd8
 };
 
-inline constexpr int numPalettes = 4;
+// Each skin's second colour (0: a flat accent).
+inline const juce::uint32 paletteSecond[]
+{
+    0, 0, 0, 0, 0xff35c8ff
+};
+
+inline constexpr int numPalettes = 5;
+
+// The two-colour skin's second colour (transparent on a flat skin).
+inline juce::Colour& accent2Ref()
+{
+    static juce::Colour second;
+    return second;
+}
+
+inline bool hasAccentGradient() { return ! accent2Ref().isTransparent(); }
+
+// The accent at t (0 to 1) along a gradient part; the flat accent on the other skins.
+inline juce::Colour accentAt (float t)
+{
+    return hasAccentGradient() ? accentRef().interpolatedWith (accent2Ref(), juce::jlimit (0.0f, 1.0f, t)) : accentRef();
+}
+
+// Whether a colour handed to a painter is the skin's accent (so the
+// two-colour skin may draw its gradient there instead).
+inline bool isAccent (juce::Colour colour) { return colour.withAlpha (1.0f) == accentRef().withAlpha (1.0f); }
+
+// The accent as a fill from one point to another (the flat accent on a flat skin).
+inline juce::ColourGradient accentGradient (juce::Point<float> from, juce::Point<float> to, float alpha = 1.0f)
+{
+    return { accentAt (0.0f).withMultipliedAlpha (alpha), from, accentAt (1.0f).withMultipliedAlpha (alpha), to, false };
+}
 
 // The colour tokens. Surfaces are flat graphite with a faint cool bias; the
 // accent is kept for what is active or carries a value, so it stays the one
@@ -185,7 +221,12 @@ namespace TextSize
     // type them (Impeccable audit: 47 raw sizes). Same values as before.
     inline constexpr float packedLabel = 7.5f;  // section names, switch and bar names, OUT
     inline constexpr float packedBody  = 8.5f;  // pills, chips, menu text in the packed cards
-    inline constexpr float packedTitle = 10.0f; // a packed card's own title
+    inline constexpr float packedTitle = 10.0f; // a packed card's own glyphs
+    // UI review 31, item 39: one title style per level. A PLAY card's title
+    // (OSC n, FILTER, SUB: white bold, 13); a page's titles are
+    // cardTitleFont (white bold, tracked); an inner section's title
+    // (WAVE, PITCH, EXTRAS, CORNERS) is innerTitleFont (grey bold, tracked, label size).
+    inline constexpr float moduleTitle = 13.0f;
 
     inline constexpr float smallestZoom  = 0.75f;
     inline constexpr float screenFloorPx = 10.0f;
@@ -590,21 +631,36 @@ inline void paintGlow (juce::Graphics& g, juce::Rectangle<float> bounds, float r
     }
 }
 
-// The component sheet's card (.cd): ink 2, a hairline, 10 px corners (a
-// small box keeps its own smaller ones); its family colour only as a 7 %
-// wash at the top that is gone by mid-card (.tint).
+// A card with no family colour (a grey or white one: OUTPUT, SIGNAL FLOW)
+// has no tag in its title and no tint (review 8, I8-32).
+inline bool hasFamilyColour (juce::Colour colour) { return colour.getSaturation() > 0.15f; }
+
+// The share of a card's identity colour in its fill (UI review 31, item 37).
+inline constexpr float cardTintAmount = 0.07f;
+
+// A card's fill: the panel ink with its identity colour mixed in at 7 % (UI
+// review 31, item 37: FILTER purple, AMP ENV red, LFO pink, each oscillator
+// its own, as the FX picker's tiles and the FM nodes already were). A card
+// with no family colour (grey, white) or one that passes the skin's accent
+// (the accent marks state, never identity) keeps the plain panel. The wells
+// painted on it stay near-black, so the graphs gain contrast.
+inline juce::Colour cardFill (juce::Colour tint)
+{
+    const auto identity = tint.withAlpha (1.0f);
+    if (! hasFamilyColour (identity) || identity == accent().withAlpha (1.0f))
+        return Ui::panel;
+    return Ui::panel.interpolatedWith (identity, cardTintAmount);
+}
+
+// The component sheet's card (.cd): ink 2 tinted with its identity colour,
+// a hairline, 10 px corners (a small box keeps its own smaller ones).
 inline void paintCard (juce::Graphics& g, juce::Rectangle<float> bounds, float radius, juce::Colour tint)
 {
     if (bounds.getHeight() >= 40.0f && bounds.getWidth() >= 120.0f)
         radius = juce::jmax (radius, 10.0f);
 
-    g.setColour (Ui::panel);
+    g.setColour (cardFill (tint));
     g.fillRoundedRectangle (bounds, radius);
-
-    // The family colour as the sheet's .tint: 7 % at the very top, gone by
-    // mid-card, so the colour reads as identity and the eye lands on the
-    // displays.
-    juce::ignoreUnused (tint);
 
     g.setColour (Ui::line);
     g.drawRoundedRectangle (bounds.reduced (0.5f), radius - 0.5f, 1.0f);
@@ -696,8 +752,13 @@ inline juce::String captionFragment (const juce::String& text)
     return fragment;
 }
 
-// A card's title: the sheet's h4 (11 px at 800, tracked 0.08 em).
+// A card's title: the sheet's h4 (11 px at 800, tracked 0.08 em). Page
+// section headings (MODULATION, ALGORITHMS) use it too (item 39).
 inline juce::FontOptions cardTitleFont() { return font (15.0f, true).withKerningFactor (0.08f); }
+
+// A section's title inside a card (WAVE, PITCH, EXTRAS, CORNERS, SEQ's
+// GENERATE parts): one style everywhere (UI review 31, item 39), in Ui::text2.
+inline juce::FontOptions innerTitleFont() { return font (TextSize::label, true).withKerningFactor (0.08f); }
 
 // Where a card title's subtitle can start: past the tag and the name.
 inline int cardTitleWidth (const juce::String& text)
@@ -709,7 +770,6 @@ inline int cardTitleWidth (const juce::String& text)
 // A card's title: its tag, then the name in the text colour. A card with no
 // family colour (a grey or white one: OUTPUT, SIGNAL FLOW) has no tag, so
 // no grey dot reads as "switched off" beside the on dots (review 8, I8-32).
-inline bool hasFamilyColour (juce::Colour colour) { return colour.getSaturation() > 0.15f; }
 
 inline void paintCardTitle (juce::Graphics& g, juce::Rectangle<int> header, const juce::String& text, juce::Colour colour)
 {
@@ -863,6 +923,51 @@ inline float fade (juce::Component& owner, int channel, float target, float rate
     return value;
 }
 
+// A knob's value arc from angle `from` to `to` (radians) in `colour`. On the
+// two-colour skin an accent arc changes colour along the knob's whole sweep
+// (startAngle to endAngle), so its colour at the end shows the value (item 41).
+inline void strokeValueArc (juce::Graphics& g, juce::Point<float> centre, float radius, float from, float to,
+                            float startAngle, float endAngle, juce::Colour colour, float brighten, const juce::PathStrokeType& stroke)
+{
+    const auto lo = juce::jmin (from, to), hi = juce::jmax (from, to);
+
+    if (! (hasAccentGradient() && isAccent (colour)) || std::abs (endAngle - startAngle) < 0.01f)
+    {
+        juce::Path arc;
+        arc.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, lo, hi, true);
+        g.setColour (colour.interpolatedWith (juce::Colours::white, brighten));
+        g.strokePath (arc, stroke);
+        return;
+    }
+
+    // Short butt-ended pieces, each in the colour of its place on the
+    // sweep, then the round caps at both ends.
+    const auto pieces = juce::jmax (1, (int) std::ceil ((hi - lo) / 0.12f));
+    const auto pieceStroke = juce::PathStrokeType (stroke.getStrokeThickness(), juce::PathStrokeType::curved, juce::PathStrokeType::butt);
+    const auto colourAt = [&] (float angle)
+    {
+        return accentAt ((angle - startAngle) / (endAngle - startAngle)).withMultipliedAlpha (colour.getFloatAlpha())
+                   .interpolatedWith (juce::Colours::white, brighten);
+    };
+
+    for (int i = 0; i < pieces; ++i)
+    {
+        const auto a = lo + (hi - lo) * (float) i / (float) pieces;
+        const auto b = lo + (hi - lo) * (float) (i + 1) / (float) pieces;
+        juce::Path arc;
+        arc.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, a, juce::jmin (hi, b + 0.01f), true);
+        g.setColour (colourAt ((a + b) * 0.5f));
+        g.strokePath (arc, pieceStroke);
+    }
+
+    for (const auto angle : { lo, hi })
+    {
+        const auto end = centre.getPointOnCircumference (radius, angle);
+        g.setColour (colourAt (angle));
+        g.fillEllipse (juce::Rectangle<float> (stroke.getStrokeThickness(), stroke.getStrokeThickness()).withCentre (end));
+    }
+}
+
 inline void paintSwitch (juce::Graphics& g, juce::Rectangle<float> area, float amount, juce::Colour colour, float hover = 0.0f)
 {
     // The component sheet's switch (.tg): 32 x 18, ink 4 with a hairline
@@ -877,9 +982,21 @@ inline void paintSwitch (juce::Graphics& g, juce::Rectangle<float> area, float a
     const auto pill = juce::Rectangle<float> (w, h).withCentre (area.getCentre());
     const auto fill = Ui::track.interpolatedWith (colour, amount).interpolatedWith (juce::Colours::white, 0.06f * hover);
 
-    g.setColour (fill);
-    g.fillRoundedRectangle (pill, h * 0.5f);
-    g.setColour (Ui::line.interpolatedWith (colour, amount));
+    if (hasAccentGradient() && isAccent (colour) && amount > 0.0f)
+    {
+        // The two-colour skin: a lit switch runs from the first colour to the second.
+        const auto mix = [&] (juce::Colour c) { return Ui::track.interpolatedWith (c, amount).interpolatedWith (juce::Colours::white, 0.06f * hover); };
+        g.setGradientFill (juce::ColourGradient (mix (accentAt (0.0f)), pill.getTopLeft(), mix (accentAt (1.0f)), pill.getTopRight(), false));
+        g.fillRoundedRectangle (pill, h * 0.5f);
+        g.setGradientFill (juce::ColourGradient (Ui::line.interpolatedWith (accentAt (0.0f), amount), pill.getTopLeft(),
+                                                 Ui::line.interpolatedWith (accentAt (1.0f), amount), pill.getTopRight(), false));
+    }
+    else
+    {
+        g.setColour (fill);
+        g.fillRoundedRectangle (pill, h * 0.5f);
+        g.setColour (Ui::line.interpolatedWith (colour, amount));
+    }
     g.drawRoundedRectangle (pill.reduced (0.5f), h * 0.5f - 0.5f, 1.0f);
 
     const auto inset = h / 6.0f;
@@ -1023,9 +1140,10 @@ public:
         applyAccent();
     }
 
-    void setAccent (juce::Colour colour)
+    void setAccent (juce::Colour colour, juce::Colour second = {})
     {
         IlanaTheme::accentRef() = colour;
+        IlanaTheme::accent2Ref() = second;
         applyAccent();
     }
 
@@ -1287,8 +1405,9 @@ public:
         if (width < 1.0f)
             return;
 
-        g.setColour (IlanaTheme::accent().withMultipliedAlpha (alpha));
-        g.fillRoundedRectangle (juce::Rectangle<float> (width, 2.0f).withCentre ({ centre, (float) h - 1.0f }), 1.0f);
+        const auto line = juce::Rectangle<float> (width, 2.0f).withCentre ({ centre, (float) h - 1.0f });
+        g.setGradientFill (IlanaTheme::accentGradient (line.getTopLeft(), line.getTopRight(), alpha)); // (flat on a one-colour skin)
+        g.fillRoundedRectangle (line, 1.0f);
     }
 
     struct TabGlide
@@ -1490,13 +1609,7 @@ public:
         const auto fill = enabled ? slider.findColour (juce::Slider::rotarySliderFillColourId) : Ui::text3;
 
         if (std::abs (sliderPos - originPos) > 0.001f)
-        {
-            juce::Path valueArc;
-            valueArc.addCentredArc (centre.x, centre.y, arcRadius, arcRadius, 0.0f,
-                                    juce::jmin (originAngle, angle), juce::jmax (originAngle, angle), true);
-            g.setColour (fill.interpolatedWith (juce::Colours::white, 0.2f * flare + 0.18f * hover));
-            g.strokePath (valueArc, stroke);
-        }
+            strokeValueArc (g, centre, arcRadius, originAngle, angle, rotaryStartAngle, rotaryEndAngle, fill, 0.2f * flare + 0.18f * hover, stroke);
 
         paintDragGhost (g, slider, centre, arcRadius, lineWidth, angle, rotaryStartAngle, rotaryEndAngle);
         paintDefaultNotch (g, slider, centre, arcRadius, lineWidth, hover, sliderPos, rotaryStartAngle, rotaryEndAngle);
@@ -1602,13 +1715,8 @@ public:
         // The value arc: flat, in the family colour (no glow); it brightens
         // for a moment while the user moves it.
         if (std::abs (sliderPos - originPos) > 0.001f)
-        {
-            juce::Path valueArc;
-            valueArc.addCentredArc (centre.x, centre.y, arcRadius, arcRadius, 0.0f,
-                                    juce::jmin (originAngle, angle), juce::jmax (originAngle, angle), true);
-            g.setColour (accent.interpolatedWith (juce::Colours::white, 0.2f * flare + 0.18f * hover));
-            g.strokePath (valueArc, juce::PathStrokeType (lineWidth, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        }
+            strokeValueArc (g, centre, arcRadius, originAngle, angle, rotaryStartAngle, rotaryEndAngle, accent, 0.2f * flare + 0.18f * hover,
+                            juce::PathStrokeType (lineWidth, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
         paintDragGhost (g, slider, centre, arcRadius, lineWidth, angle, rotaryStartAngle, rotaryEndAngle);
         paintDefaultNotch (g, slider, centre, arcRadius, lineWidth, hover, sliderPos, rotaryStartAngle, rotaryEndAngle);

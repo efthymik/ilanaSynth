@@ -1458,6 +1458,14 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
         addPreview (scope.startIndex2, scope.blockSize2);
     }
 
+    // The on-screen wheels, as MIDI (only once one was moved).
+    if (const auto value = uiModWheel.exchange (-1); value >= 0)
+        midiMessages.addEvent (juce::MidiMessage::controllerEvent (1, 1, value), 0);
+    if (const auto value = uiPitchBend.exchange (-1); value >= 0)
+        midiMessages.addEvent (juce::MidiMessage::pitchWheel (1, value), 0);
+    if (const auto value = uiPressure.exchange (-1); value >= 0)
+        midiMessages.addEvent (juce::MidiMessage::channelPressureChange (1, value), 0);
+
     // Learned and macro CCs reach the sound in this block (before anything
     // reads the parameters).
     takeLearnedCcs (midiMessages);

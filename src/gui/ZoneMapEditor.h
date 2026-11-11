@@ -242,7 +242,18 @@ public:
         mapBounds = inner;
         stripBounds = stripBounds.withX (mapBounds.getX()).withWidth (mapBounds.getWidth());
 
-        layoutParameterRow (parameterRow);
+        // (The three parameters on the readouts' columns, UI review 31, item 22: OUTSIDE ZONES under KEYS, ROUND ROBIN
+        // under VELOCITY, VELOCITY BLEND under ROOT and LEVEL; two menus of 560 px held "Nearest Zone" and "Off".)
+        const auto column = [&parameterRow] (const juce::Component& above, const juce::Component* last = nullptr)
+        {
+            return parameterRow.withX (above.getX()).withWidth ((last != nullptr ? last->getRight() : above.getRight()) - above.getX());
+        };
+        if (unmappedControl != nullptr)
+            unmappedControl->setBounds (column (keysField));
+        if (roundRobinControl != nullptr)
+            roundRobinControl->setBounds (column (velocityField));
+        if (blendControl != nullptr)
+            blendControl->setBounds (column (rootField, &levelField));
     }
 
     // ---------------------------------------------------------------- mouse
@@ -961,27 +972,6 @@ private:
                 return hit;
         }
         return {};
-    }
-
-    void layoutParameterRow (juce::Rectangle<int> row)
-    {
-        std::vector<juce::Component*> cells;
-        for (juce::Component* control : { (juce::Component*) unmappedControl.get(), (juce::Component*) roundRobinControl.get(), (juce::Component*) blendControl.get() })
-            if (control != nullptr)
-                cells.push_back (control);
-        if (cells.empty())
-            return;
-
-        const auto gap = 10;
-        const auto count = (int) cells.size();
-        const auto width = (row.getWidth() - gap * (count - 1)) / count;
-        for (int i = 0; i < count; ++i)
-        {
-            auto bounds = juce::Rectangle<int> (row.getX() + i * (width + gap), row.getY(), width, row.getHeight());
-            if (i == count - 1)
-                bounds.setRight (row.getRight());
-            cells[(size_t) i]->setBounds (bounds);
-        }
     }
 
     // ---------------------------------------------------------------- paint

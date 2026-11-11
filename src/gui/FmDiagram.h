@@ -38,7 +38,21 @@ public:
     static juce::String defaultTooltip()
     {
         return "Drag from one oscillator to another to add or remove an FM route; onto itself for feedback. "
-               "Click an oscillator to mute its output (it still modulates).";
+               "Click an oscillator to edit it in the card below; click its OUT / MOD word to switch whether it is heard (it still modulates).";
+    }
+
+    // (UI review 31, 34) A click on a node picks that operator for the card below (the page's picker follows); the
+    // node then carries the picker's selected outline.
+    std::function<void (int)> onSelectOperator;
+
+    int getSelectedOperator() const { return selectedOsc; }
+
+    void setSelectedOperator (int osc)
+    {
+        if (selectedOsc == osc)
+            return;
+        selectedOsc = osc;
+        repaint();
     }
 
     // [source][target] parameter ids.
@@ -194,22 +208,11 @@ public:
         // The OSC card's WARP FM and Ring: OSC 2 into OSC 1, OSC 1 into the
         // others. Dashed, labelled, so all the FM in the patch shows here
         // (UI review 6, I6-13).
-        for (const auto target : shown)
+        for (const auto& bow : warpBows (centres, radius))
         {
-            const auto prefix = juce::String (OscillatorIds::prefixes[(size_t) target]);
-            const auto warp = juce::roundToInt (read (prefix + "_warp"));
-            const auto source = target == 0 ? 1 : 0;
-            if ((warp != Warp::Fm && warp != Warp::Ring) || read (prefix + "_warp_amt") < 0.001f
-                || std::find (shown.begin(), shown.end(), source) == shown.end())
-                continue;
+            const auto source = bow.source, target = bow.target, warp = bow.warp;
             const auto from = centres[(size_t) source], to = centres[(size_t) target];
-            const auto direction = (to - from) / juce::jmax (1.0f, from.getDistanceFrom (to));
-            auto normal = juce::Point<float> (-direction.y, direction.x);
-            // A bow on the left of the pair (the captions are on the right),
-            // clear of any matrix route between them.
-            if (normal.x > 0.0f || (normal.x == 0.0f && normal.y > 0.0f))
-                normal = -normal;
-            const auto control = (from + to) * 0.5f + normal * radius * 2.2f;
+            const auto control = bow.control;
             const auto startDirection = (control - from) / juce::jmax (1.0f, from.getDistanceFrom (control));
             const auto endDirection = (to - control) / juce::jmax (1.0f, to.getDistanceFrom (control));
             const auto start = from + startDirection * radius, end = to - endDirection * (radius + 4.0f);
@@ -224,12 +227,8 @@ public:
             g.fillPath (dashed);
             g.fillPath (head);
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
-            const auto apex = (from + to) * 0.25f + control * 0.5f;
-            const auto labelBox = juce::Rectangle<float> (60.0f, 12.0f);
-            g.drawText (warp == Warp::Fm ? "WARP FM" : "WARP RING",
-                        normal.x < -0.5f ? labelBox.withRightX (apex.x - 9.0f).withY (apex.y - 6.0f)
-                                         : labelBox.withCentre (apex + normal * 10.0f),
-                        normal.x < -0.5f ? juce::Justification::centredRight : juce::Justification::centred);
+            g.drawText (warp == Warp::Fm ? "WARP FM" : "WARP RING", bow.label,
+                        bow.sideways ? juce::Justification::centredRight : juce::Justification::centred);
         }
 
         // The noise operator: a small node in the corner, drawn only while it
@@ -340,6 +339,13 @@ public:
                 g.fillPath (dashed);
             }
 
+            // The operator the card below edits: the picker's outline, just outside the box.
+            if (osc == selectedOsc)
+            {
+                g.setColour (IlanaTheme::Ui::text.withAlpha (0.85f));
+                g.drawRoundedRectangle (circle.expanded (3.5f), 10.5f, 1.5f);
+            }
+
             // One style for every node (V7-13, I7-11): its name, and under
             // it whether it is heard (OUT), modulates (MOD) or is off.
             const auto nameFont = IlanaTheme::font (radius < compactRadius ? IlanaTheme::TextSize::tiny
@@ -355,6 +361,12 @@ public:
             g.setColour (! on ? IlanaTheme::Ui::text3 : out ? colour : IlanaTheme::Ui::text2);
             g.setFont (IlanaTheme::font (radius < 40.0f ? IlanaTheme::TextSize::tiny : IlanaTheme::TextSize::label, true));
             g.drawText (! on ? "OFF" : out ? "OUT" : "MOD", text.withTrimmedLeft (11.0f), juce::Justification::topLeft, false);
+            if (hoverWord && hoverOsc == osc)
+            {
+                // (The word is the heard / not switch: underlined under the mouse, as a link.)
+                const auto word = roleWordBounds (osc).reduced (5.0f, 3.0f);
+                g.fillRect (juce::Rectangle<float> (word.getX(), word.getBottom() - 1.0f, word.getWidth(), 1.0f));
+            }
 
             // Its tuning and level to its right, so the graph reads without
             // opening each operator (UI review 4, S14); an oscillator that is
@@ -390,12 +402,16 @@ public:
     void mouseMove (const juce::MouseEvent& event) override
     {
         const auto osc = oscAt (event.position);
+        const auto onWord = osc >= 0 && roleWordBounds (osc).contains (event.position);
+        setMouseCursor (onWord ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
 
-        if (osc != hoverOsc)
+        if (osc != hoverOsc || onWord != hoverWord)
         {
             hoverOsc = osc;
+            hoverWord = onWord;
             const auto note = osc >= 0 ? fmInputNote (processorRef, osc) : juce::String();
-            setTooltip (note.isNotEmpty() && ! receivesFm (processorRef, osc) ? note : defaultTooltip());
+            setTooltip (onWord ? juce::String ("OUT or MOD\nClick: whether OSC " + juce::String (osc + 1) + " is heard (OUT) or only modulates (MOD).")
+                        : note.isNotEmpty() && ! receivesFm (processorRef, osc) ? note : defaultTooltip());
             repaint();
         }
     }
@@ -428,8 +444,11 @@ public:
 
         if (target >= 0 && event.getDistanceFromDragStart() < 6)
         {
-            // A click: toggle the operator's output.
-            toggle (juce::String (OscillatorIds::prefixes[(size_t) source]) + "_out");
+            // A click on the OUT / MOD word: toggle the operator's output; anywhere else on the node: edit it.
+            if (roleWordBounds (source).contains (event.mouseDownPosition))
+                toggle (juce::String (OscillatorIds::prefixes[(size_t) source]) + "_out");
+            else if (onSelectOperator != nullptr)
+                onSelectOperator (source);
         }
         else if (target >= 0)
         {
@@ -490,6 +509,16 @@ public:
         return juce::roundToInt ((float) minimumRadius * 2.0f * (float) rows + stackGap * (float) (rows - 1)) + 12;
     }
 
+    // (UI review 31, 17) The height that draws the rows at full size: one row at its grown size, a stack at the
+    // largest node size with an arrow's length between rows, the margins and the hint's strip. The page gives the
+    // diagram this much, and the operator card the rest.
+    int getPreferredHeight() const
+    {
+        const auto rows = getStackRows();
+        const auto nodes = rows > 1 ? 2.0f * maximumRadius * (float) rows + stackGap * (float) (rows - 1) : 2.0f * (singleRowRadius + 4.0f);
+        return juce::roundToInt (nodes + 32.0f + (anyRouteShown() ? 0.0f : hintHeight));
+    }
+
     // Where each shown operator is drawn, and how big (for the UI test).
     std::vector<juce::Rectangle<float>> getNodeBounds() const
     {
@@ -521,6 +550,19 @@ public:
 
     float getOperatorRadius() const { return operatorRadius(); }
 
+    // The WARP FM / RING labels as drawn (for the UI test: no route knob covers one).
+    std::vector<juce::Rectangle<float>> getWarpLabelBoundsList() const
+    {
+        std::vector<juce::Rectangle<float>> labels;
+        for (const auto& bow : warpBows (operatorCentres(), operatorRadius()))
+            labels.push_back (bow.label);
+        return labels;
+    }
+    // (The route knob's disc, as the page draws it.)
+    static constexpr float getHandleDisc() { return handleDisc; }
+    // Where a node's OUT / MOD word sits (for the UI test's clicks).
+    juce::Rectangle<float> getRoleWordBounds (int osc) const { return roleWordBounds (osc); }
+
     // Where a route's depth knob sits: on its cable, at the middle (a long link nearer the node it drives); on a
     // feedback loop's top. Nothing for a route not drawn.
     std::optional<juce::Point<float>> getRouteHandle (int source, int target) const
@@ -541,15 +583,94 @@ public:
     // A route knob's centre: on its cable, or, where a stack's rows sit too
     // close for the knob between the boxes (a four-deep DX7 stack over the
     // OP ENV card, UI review 28), beside the cable on its left, clear of both boxes.
+    // (UI review 31, 4: the knob also keeps off the WARP FM / RING label of the OSC card's warp, which is drawn
+    // on the same left-hand side of a stacked pair: past the label's far end when the near spot is taken.)
     juce::Point<float> cableHandle (int source, int target, const std::array<juce::Point<float>, OscillatorIds::count>& centres, float radius) const
     {
         const auto cable = cablePath (source, target, centres, radius, read (routeId (target, source)) > 0.001f);
         const auto length = cable.getLength();
         const auto from = centres[(size_t) source], to = centres[(size_t) target];
         const auto boxGap = std::abs (to.y - from.y) - boxHalfHeight (radius) * 2.0f;
-        if (std::abs (to.x - from.x) < boxHalfWidth (radius) && boxGap < handleDisc + 4.0f)
-            return (from + to) * 0.5f - juce::Point<float> (boxHalfWidth (radius) * 0.5f + handleDisc * 0.5f + 6.0f, 0.0f);
-        return cable.getPointAlongPath (length * (length > radius * 6.0f ? 0.62f : 0.5f));
+        const auto tight = std::abs (to.x - from.x) < boxHalfWidth (radius) && boxGap < handleDisc + 4.0f;
+        const auto preferred = tight ? (from + to) * 0.5f - juce::Point<float> (boxHalfWidth (radius) * 0.5f + handleDisc * 0.5f + 6.0f, 0.0f)
+                                     : cable.getPointAlongPath (length * (length > radius * 6.0f ? 0.62f : 0.5f));
+        const auto bows = warpBows (centres, radius);
+        const auto disc = [] (juce::Point<float> centre) { return juce::Rectangle<float> (handleDisc, handleDisc).withCentre (centre); };
+        const auto onLabel = [&bows, &disc] (juce::Point<float> centre)
+        {
+            for (const auto& bow : bows)
+                if (disc (centre).intersects (bow.label))
+                    return true;
+            return false;
+        };
+        if (! onLabel (preferred))
+            return preferred;
+        // Along the cable first, then beside the label's far end, clear of every node and caption.
+        const auto shown = shownOscillators();
+        const auto clearOfNodes = [&] (juce::Point<float> centre)
+        {
+            if (! getLocalBounds().toFloat().reduced (2.0f).contains (disc (centre)))
+                return false;
+            for (const auto osc : shown)
+                if (disc (centre).intersects (nodeBox (centres[(size_t) osc], radius)) || disc (centre).intersects (getCaptionBounds (osc, centres, radius)))
+                    return false;
+            return true;
+        };
+        for (const auto along : { 0.5f, 0.35f, 0.65f, 0.25f, 0.75f })
+            if (const auto point = cable.getPointAlongPath (length * along); ! onLabel (point) && clearOfNodes (point))
+                return point;
+        for (const auto& bow : bows)
+            if (disc (preferred).intersects (bow.label))
+            {
+                for (const auto point : { juce::Point<float> (bow.label.getX() - handleDisc * 0.5f - 3.0f, preferred.y),
+                                          juce::Point<float> (preferred.x, bow.label.getY() - handleDisc * 0.5f - 3.0f),
+                                          juce::Point<float> (preferred.x, bow.label.getBottom() + handleDisc * 0.5f + 3.0f) })
+                    if (! onLabel (point) && clearOfNodes (point))
+                        return point;
+            }
+        return preferred;
+    }
+
+    // The OSC card's WARP FM and Ring drawn as a dashed bow: OSC 2 into OSC 1, OSC 1 into the others. The bow
+    // is on the left of the pair (the captions are on the right), its label beside its apex.
+    struct WarpBow
+    {
+        int source = 0, target = 0, warp = 0;
+        juce::Point<float> control;
+        juce::Rectangle<float> label;
+        bool sideways = false; // (the label ends at the apex, right-aligned)
+    };
+
+    std::vector<WarpBow> warpBows (const std::array<juce::Point<float>, OscillatorIds::count>& centres, float radius) const
+    {
+        std::vector<WarpBow> bows;
+        const auto shown = shownOscillators();
+        for (const auto target : shown)
+        {
+            const auto prefix = juce::String (OscillatorIds::prefixes[(size_t) target]);
+            const auto warp = juce::roundToInt (read (prefix + "_warp"));
+            const auto source = target == 0 ? 1 : 0;
+            if ((warp != Warp::Fm && warp != Warp::Ring) || read (prefix + "_warp_amt") < 0.001f
+                || std::find (shown.begin(), shown.end(), source) == shown.end())
+                continue;
+            const auto from = centres[(size_t) source], to = centres[(size_t) target];
+            const auto direction = (to - from) / juce::jmax (1.0f, from.getDistanceFrom (to));
+            auto normal = juce::Point<float> (-direction.y, direction.x);
+            // (Clear of any matrix route between them.)
+            if (normal.x > 0.0f || (normal.x == 0.0f && normal.y > 0.0f))
+                normal = -normal;
+            WarpBow bow;
+            bow.source = source;
+            bow.target = target;
+            bow.warp = warp;
+            bow.control = (from + to) * 0.5f + normal * radius * 2.2f;
+            const auto apex = (from + to) * 0.25f + bow.control * 0.5f;
+            const auto labelBox = juce::Rectangle<float> (60.0f, 12.0f);
+            bow.sideways = normal.x < -0.5f;
+            bow.label = bow.sideways ? labelBox.withRightX (apex.x - 9.0f).withY (apex.y - 6.0f) : labelBox.withCentre (apex + normal * 10.0f);
+            bows.push_back (bow);
+        }
+        return bows;
     }
 
     // How far a sounding node's halo reaches past its ring: up to 10 px,
@@ -1187,6 +1308,19 @@ private:
         return corners[0];
     }
 
+    // Where a node's OUT / MOD / OFF word is drawn, padded to a comfortable click target (paint's own sums).
+    juce::Rectangle<float> roleWordBounds (int osc) const
+    {
+        const auto centres = operatorCentres();
+        const auto radius = operatorRadius();
+        const auto circle = nodeBox (centres[(size_t) juce::jlimit (0, OscillatorIds::count - 1, osc)], radius);
+        auto text = circle.reduced (juce::jmin (10.0f, radius * 0.3f), 2.0f);
+        text.removeFromTop (text.getHeight() * 0.55f);
+        const auto font = juce::Font (IlanaTheme::font (radius < 40.0f ? IlanaTheme::TextSize::tiny : IlanaTheme::TextSize::label, true));
+        const auto wordW = juce::GlyphArrangement::getStringWidth (font, "MOD");
+        return juce::Rectangle<float> (text.getX() + 11.0f, text.getY(), wordW, font.getHeight()).expanded (5.0f, 3.0f).getIntersection (circle);
+    }
+
     int oscAt (juce::Point<float> position) const
     {
         const auto centres = operatorCentres();
@@ -1232,5 +1366,7 @@ private:
     IlanaSynthAudioProcessor& processorRef;
     int dragSource = -1;
     int hoverOsc = -1;
+    int selectedOsc = -1;
+    bool hoverWord = false;
     juce::Point<float> dragPosition;
 };
