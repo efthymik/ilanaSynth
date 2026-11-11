@@ -225,4 +225,45 @@ Twin, all 42 notes: 12.53 -> 10.40 (16384/14641; 65536/59049 scored 10.38, 8192/
   now jumps to a random place once a length, crossfading over 15 ms with equal power (the two places
   are uncorrelated): the autocorrelation there is near 0, the spectrum and the score unchanged.
 
+Round 12 (2026-11-11), the cello's: its own noise layers. Nothing reaches a violin's size (the violin renders bit
+for bit as round 11's) nor a pluck. New:
+- The cello's table gains `rs0_db`, `rs1_db`, `rs2_db` (19 notes): residual layers exactly as the violin's (same
+  generator and loops, built with the violin's on the same background thread: +7.1 MB, 22.7 MB in all, about 1 s).
+  `note_rows(..., layer=True)` weighs a table's layers w (1 - |t - u_table|): w (1 - t) for the violin's (as round 11)
+  and w t for the cello's. Played, they replace `rsc_cflr` of the low floor, `rsc_hf` of the string's top and `rsc_nfl`
+  of the release floor (all 1, by their level; those terms are by t already); `rsc_hiss` (0) is the twin's only.
+- Each table's own layer envelope (`rs_env` in the table's json over DEFAULT's: the cello's `rs0_rdb` 20, `rs0_att`
+  0.4): `ModalBowedNotes::Table::envelope`.
+- Per-note `sn_db` (the sine wander's depth) and `am_db` (the level vibrato's) in the cello's table, replacing the global.
+- `kn_on` / `kn_rl` refitted (a second frozen-bow pass with the layers in), and `lp_hz` 5590 -> 3000 at the cello's
+  size (blended by t; the layers come after the roll-off). The pizzicato keeps 5590 (`tiltHzPizz`).
+- The engine picks a note's layers once the tables' weights at its size are known (`pickLayers`: the residual table
+  weighing most, the first on a tie, as round 11 took the first); a note whose loops aren't built yet plays round 11's
+  floor, top and release floor.
+Twin, demo notes, 3 seeds: cello 11.39 -> 10.07 (sustain 1.75 -> 0.96); the engine alone, 3 takes: 11.83 -> 10.62, each
+term within 0.1 of the twin's change; about 1.5 dB louder on the demo notes, as the twin. Lessons:
+- What the cello's round 10 noise paths (low floor, string top, release floor) left was again each note's own noise
+  spectrum: the violin's layers carry over unchanged, with a slower, deeper let-go step on the sustain layer.
+- The plugin's demo render gains about 0.8 less than the engine alone: the plugin's Init-patch render is 1 to 10 dB
+  darker than the bare engine from about 9 kHz up (the same before and after); the layers, matched to Spitfire up
+  there, show it where the round 11 cello's too-bright top hid it. Judge engine changes on the engine alone (or the
+  twin) as well as on the demo.
+
+Round 12 (2026-11-11), the violin's: each partial's and each layer's level over time. All in the violin's table, by its
+weight (nothing reaches the cello: rendered alone it plays bit for bit as its round 12 above), never on a pluck. New:
+- `kv_su` [8 octaves][4 knots at `su_t` 1.0, 1.9, 2.8, 3.7 s]: dB on each partial's gain over the held note (its mean over
+  1.5-3.5 s 0), spread over the partials as the cello's knots, held before the first knot and after the last (through
+  the release too). Engine: `ModalBowedNotes::Row::knotSustain`, `knotSustainSeconds`.
+- `kv_on` [8][6] and `kv_rl` [8][5]: the cello's `kn_on` / `kn_rl` mechanism and knot times, in the same engine columns
+  (`knotOn`, `knotRelease`), now played without the cello's other terms (`levels<cello, knots>`).
+- `rk_on` [3 layers][6] and `rk_rl` [3][5]: the same knots (dB, amplitude) on each residual layer, from the note-on (0 from
+  0.9 s) and after the let-go (0 at the let-go, the last held). Engine: `Row::layerOn`, `layerRelease`.
+- The table's `slow_db` at 0.35 of round 11's.
+- In the twin only: `rk_su` (a hook, unused) and the frozen-bow fitting masks (`_mmask`, `_ymask`, `_rsmask`).
+Twin, demo notes, 3 seeds: violin 10.01 -> 9.29 (attack 4.57 -> 4.16, release 4.71 -> 4.13); the engine alone, 3 takes:
+10.30 -> 9.56, each term within 0.2 of the twin's change. CPU per held violin voice about 1.5 % more (the knots each block).
+All 42 notes (the fit's run): -0.66 (better on 40 of 42; held-out notes -0.77), from the attack (-0.36, all 42) and the release
+(-0.55, all 42). Lesson: as on the cello in round 11, what was left on the violin was the shape of the levels over time, of
+the partials and of the noise layers alike; knots fitted with the bow frozen carry it, held-out notes as much as fitted ones.
+
 Needs numpy, scipy, soundfile, numba, mido, matplotlib.
