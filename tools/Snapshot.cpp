@@ -2770,9 +2770,12 @@ int runUiTests()
                             badLabels << " [" << labels[i].toString() << "]";
                         labelsClear = labelsClear && clear;
                     }
+                    // (UI review 31, 17: the diagram is as tall as its rows need and the card takes the rest, so the card
+                    // now changes with the algorithm; it never gets shorter than its old fixed height.)
                     if (firstDiagramBounds.isEmpty())
                         firstDiagramBounds = diagram->getBounds();
-                    cardFixed = cardFixed && diagram->getBounds() == firstDiagramBounds;
+                    cardFixed = cardFixed && diagram->getHeight() >= juce::jmin (150, diagram->getPreferredHeight())
+                                && diagram->getHeight() <= juce::jmax (150, juce::jmax (diagram->getPreferredHeight(), firstDiagramBounds.getHeight()));
                 }
                 // Review 8 (V8-7): each stack stands straight, as a DX7
                 // chart (an operator driving only one that it alone drives
@@ -2827,7 +2830,74 @@ int runUiTests()
                 expect (apart, "DX7 algorithm " + juce::String (number) + "'s stack fits the diagram without overlaps");
                 expect (labelsClear, "DX7 algorithm " + juce::String (number) + "'s depth labels sit clear of nodes, captions and each other" + badLabels);
             }
-            expect (cardFixed, "the operator card keeps one height across DX7 algorithms 1-32");
+            // UI review 31, 4 and 34: a WARP FM label never sits under a route knob, however tight the stack; a click on
+            // a node selects its operator and leaves OUT / MOD alone, a click on that word switches it.
+            {
+                processor.loadFactoryPreset (names.indexOf ("Init"));
+                const auto setPlain = [&processor] (const char* id, float value)
+                {
+                    if (auto* parameter = processor.apvts.getParameter (id))
+                        parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
+                };
+                setPlain ("osc2_on", 1.0f);
+                setPlain ("osc2_out", 0.0f);
+                setPlain ("fm_amount", 0.35f);
+                setPlain ("osc2_warp", 8.0f);
+                setPlain ("osc2_warp_amt", 0.35f);
+                pages->showPage ("FM");
+                settle (200);
+                auto* diagram = findChild<FmDiagram> (*editor);
+                auto warpClear = diagram != nullptr;
+                juce::String warpBad;
+                if (warpClear)
+                {
+                    const auto before = diagram->getBounds();
+                    for (const auto height : { diagram->getMinimumHeight(), diagram->getMinimumHeight() + 30, 160, 200, 260 })
+                    {
+                        diagram->setSize (before.getWidth(), height);
+                        const auto labels = diagram->getWarpLabelBoundsList();
+                        const auto handle = diagram->getRouteHandle (1, 0);
+                        warpClear = warpClear && ! labels.empty() && handle.has_value();
+                        if (handle.has_value())
+                            for (const auto& label : labels)
+                                if (juce::Rectangle<float> (FmDiagram::getHandleDisc(), FmDiagram::getHandleDisc()).withCentre (*handle).intersects (label))
+                                {
+                                    warpClear = false;
+                                    warpBad << " " << height << ": " << label.toString() << " / " << handle->toString();
+                                }
+                    }
+                    diagram->setBounds (before);
+                }
+                expect (warpClear, "the WARP FM label never sits under a route's depth knob (" + warpBad + ")");
+
+                auto clickSelects = diagram != nullptr && diagram->onSelectOperator != nullptr;
+                if (clickSelects)
+                {
+                    diagram->onSelectOperator (0);
+                    auto source = juce::Desktop::getInstance().getMainMouseSource();
+                    const auto click = [&] (juce::Point<float> at)
+                    {
+                        const auto now = juce::Time::getCurrentTime();
+                        const auto make = [&] (bool up)
+                        {
+                            return juce::MouseEvent (source, at, up ? juce::ModifierKeys() : juce::ModifierKeys::leftButtonModifier, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                                     diagram, diagram, now, at, now, 1, false);
+                        };
+                        diagram->mouseDown (make (false));
+                        diagram->mouseUp (make (true));
+                    };
+                    const auto outBefore = processor.apvts.getRawParameterValue ("osc2_out")->load();
+                    const auto nodes = diagram->getNodeBounds(); // (OSC 1, OSC 2)
+                    click (nodes.size() > 1 ? nodes[1].getCentre().translated (0.0f, -nodes[1].getHeight() * 0.3f) : juce::Point<float>());
+                    clickSelects = diagram->getSelectedOperator() == 1 && processor.apvts.getRawParameterValue ("osc2_out")->load() == outBefore;
+                    click (diagram->getRoleWordBounds (1).getCentre());
+                    clickSelects = clickSelects && processor.apvts.getRawParameterValue ("osc2_out")->load() != outBefore;
+                    processor.getUndoManager().undo();
+                }
+                expect (clickSelects, "a click on an FM node selects its operator; a click on its OUT / MOD word switches whether it is heard");
+            }
+
+            expect (cardFixed, "across DX7 algorithms 1-32 the diagram is as tall as its rows need, or the old height, the card the rest");
 
             // One node style in every layout: "OSC n" inside the circle,
             // also for a three-oscillator patch (V7-13).
