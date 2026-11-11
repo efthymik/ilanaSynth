@@ -357,4 +357,20 @@ Lessons:
 - Judge a global that moves the partials' mean levels after moving the gains back (a recentred table, seeds 1-3): the level
   shift otherwise hides or fakes its effect on the movement terms.
 
+SIZE's loudness (2026-11-11). Between the violin (size 1, u 0) and the cello (2.1, u 1) the two fits blend and neither
+is whole: the tables weigh nothing from u 0.25 to 0.75, the layers by w (1 - |u - u_table|), and the body, direct path
+and room move with SIZE. A held bowed note fell 5-14 dB under the line (in dB, by u) between its levels at the two ends,
+deepest near u 0.75-0.85 (size 1.75-1.85), and the cello's fit is itself 4-18 dB under the violin's on the same note:
+turning SIZE toward the cello only ever got quieter. `size_level.cpp` measures the engine (without the correction,
+`setSizeLevel (false)`) note by note, MIDI 24-108, at 25 sizes (u = k / 24, three seeds, 1.0-3.5 s of a held note at
+the card's defaults) and writes `src/dsp/ModalBowedSizeLevel.h`: the dB at each knot that keeps the note at one level,
+its anchor. The anchor is the violin's level from MIDI 55 up (its table's notes); under that, where size 1 plays notes
+no violin has (and is up to 10 dB louder than its lowest real notes), it is the cello's level plus the violin-cello gap
+smoothed over 9 notes, so the cello keeps its own note-to-note levels, eased in from the violin's own level over u
+0-0.25. The engine adds it, linear between knots and held past the cello, to the note's `outputDb` (so on everything
+`outputScale` scales), set with the fit: at note-on and once a block only when SIZE moves, no per-sample cost. It is 0
+at size 1 and under, so the violin (and the pizzicato) play bit for bit as before; the cello is its fit raised by a
+constant per note (4-18 dB): the score is taken against each note's own sustain, so that is free on it. Rerun
+`size_level.cpp` after any round that moves a note's level.
+
 Needs numpy, scipy, soundfile, numba, mido, matplotlib.

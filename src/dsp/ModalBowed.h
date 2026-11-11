@@ -141,6 +141,7 @@
 #include "ModalBowedBodies.h"
 #include "ModalBowedNotes.h"
 #include "ModalBowedLayers.h"
+#include "ModalBowedSizeLevel.h"
 
 class ModalBowed
 {
@@ -285,6 +286,8 @@ public:
             noteRow[i] = plucked || weight <= 0.0 ? nullptr : table.rows + (note - table.first);
             noteWeight[i] = weight;
         }
+        // (SIZE's loudness, bowed only) This note's row of ModalBowedSizeLevel.
+        sizeLevelRow = plucked ? nullptr : ModalBowedSizeLevel::db[juce::jlimit (ModalBowedSizeLevel::first, ModalBowedSizeLevel::last, midi) - ModalBowedSizeLevel::first];
         // (Round 11, the violin's) The residual layers: the note's loops if
         // they are built yet (if not, the note plays as round 10 did).
         // (Round 12: picked in updateFit, pickLayers, once the tables' weights
@@ -1326,6 +1329,35 @@ private:
     // toCello. A per-note table weighs 1 at the size it was fitted at and
     // nothing a quarter of the way (log size) to the other instrument; its
     // scalars replace the value at this size before the size powers.
+    // (SIZE's loudness) Between the violin (u 0) and the cello (u 1) the two
+    // fits blend and neither instrument's tables, layers and size terms are
+    // whole: a bowed note fell 5-14 dB under the line between its levels at
+    // the two ends, and the cello's fit is 4-18 dB under the violin's on the
+    // same note. This is the dB that keeps the note at one level along SIZE:
+    // the violin's (a smoothed one under the violin's table, MIDI 55, eased
+    // in over u 0-0.25), measured note by note with the engine
+    // (tools/modal_bowed_refit/size_level.cpp), linear between its knots and
+    // held past the cello. Exactly 0 at the violin's size and under it, so
+    // the violin plays bit for bit as before; the cello is its fit raised by
+    // a constant (the score is relative to each note's sustain). Set with the
+    // fit: note-on, and once a block only when SIZE moves.
+    double sizeLevelDb (double u) const
+    {
+        if (! sizeLevelOn || sizeLevelRow == nullptr || ! (u > 0.0))
+            return 0.0;
+        using L = ModalBowedSizeLevel;
+        const auto x = juce::jmin (1.0, u) * L::knots;
+        const auto k = juce::jlimit (0, L::knots - 1, (int) x);
+        const auto a = k == 0 ? 0.0 : (double) sizeLevelRow[k - 1];
+        const auto b = (double) sizeLevelRow[k];
+        return a + (b - a) * (x - k);
+    }
+
+public:
+    // (For size_level.cpp's measurement: the engine without sizeLevelDb.)
+    void setSizeLevel (bool on) { sizeLevelOn = on; modesDirty = true; }
+
+private:
     void updateFit()
     {
         const auto size = fittedSize();
@@ -1374,7 +1406,9 @@ private:
         // their weights; bowed only), as the twin's out_db on its output: on
         // the bridge and body's sum (outputGain), the hiss, the floors, the
         // rumble and the layers; the room and the roll-off are linear after them.
-        const auto outputScale = plucked ? 1.0 : std::pow (10.0, noteSum (S::outputDb) / 20.0);
+        // (SIZE's loudness) and, past the violin's size, the dB that keeps the
+        // note at the violin's level: sizeLevelDb (0 at the violin's size).
+        const auto outputScale = plucked ? 1.0 : std::pow (10.0, (noteSum (S::outputDb) + sizeLevelDb (u)) / 20.0);
         outputNow = (float) (outputGain * outputScale);
         layerAmp = (float) (layerAmp * outputScale);
         const auto swellTime = note (S::swellSeconds, at (swellSeconds, swellSecondsCello));
@@ -1871,6 +1905,8 @@ private:
     float vibratoNote = 1.0f;
     const ModalBowedNotes::Row* noteRow[ModalBowedNotes::tableCount] {};
     double noteWeight[ModalBowedNotes::tableCount] {}, tableWeight[ModalBowedNotes::tableCount] {};
+    const float* sizeLevelRow = nullptr;   // (SIZE's loudness: the note's row, trigger)
+    bool sizeLevelOn = true;
     std::uint32_t floorSeed = 1;
     float floorGain = 0.0f, floorLowPole = 0.0f, floorHighPole = 0.0f, floorRise = 0.0f;
     float pink0 = 0.0f, pink1 = 0.0f, pink2 = 0.0f, floorLow = 0.0f, floorHigh = 0.0f, floorLast = 0.0f, floorEnvelope = 0.0f, floorStep = 0.0f;
