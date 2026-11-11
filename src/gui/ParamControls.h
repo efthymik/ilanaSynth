@@ -227,6 +227,55 @@ inline int& pinnedModSource()
     return source;
 }
 
+// Click to assign (UI review 31, item 26): + ASSIGN on a macro, or "Assign
+// by clicking a knob" on any chip, arms a source; the next knob clicked gets
+// the route at the drop's depth, as if the chip had been dragged there. Esc,
+// or a click anywhere else, disarms (the editor shows the hint while armed).
+// Message thread only. 0: nothing armed.
+inline int& armedModSource()
+{
+    static int source = 0;
+    return source;
+}
+
+// Called when a source is armed or disarmed (the editor shows its hint).
+inline std::function<void()>& armedModSourceChanged()
+{
+    static std::function<void()> callback;
+    return callback;
+}
+
+// While armed, a press anywhere but on a knob (a component marked
+// "takesArmedClick", or inside one) disarms.
+struct ArmedClickCanceller : public juce::MouseListener
+{
+    void mouseDown (const juce::MouseEvent& event) override;
+};
+
+inline void setArmedModSource (int source)
+{
+    static ArmedClickCanceller canceller;
+    auto& armed = armedModSource();
+    if (armed == source)
+        return;
+    if (armed == 0)
+        juce::Desktop::getInstance().addGlobalMouseListener (&canceller);
+    else if (source == 0)
+        juce::Desktop::getInstance().removeGlobalMouseListener (&canceller);
+    armed = source;
+    if (armedModSourceChanged() != nullptr)
+        armedModSourceChanged()();
+}
+
+inline void ArmedClickCanceller::mouseDown (const juce::MouseEvent& event)
+{
+    for (auto* component = event.originalComponent; component != nullptr; component = component->getParentComponent())
+        if (component->getProperties().contains ("takesArmedClick"))
+            return;
+    // (Not from inside the global listener's own call.)
+    juce::MessageManager::callAsync ([] { setArmedModSource (0); });
+}
+
 // The source a drag under way carries ("modsource:N" from a chip, a macro,
 // an LFO or envelope card), 0 while none is dragged. Knobs poll it to show
 // every drop target as soon as a drag starts (review 8, V8-10).
@@ -905,6 +954,12 @@ public:
 
     void mouseDown (const juce::MouseEvent& event) override
     {
+        // A press the knob takes for itself (click to assign, Alt-drag a new
+        // route: UI review 31, item 26): the value doesn't move.
+        claimed = claimPress != nullptr && claimPress (event);
+        if (claimed)
+            return;
+
         juce::Slider::mouseDown (event);
 
         // (a popup-menu press or a ctrl-click reset is not the start of a drag)
@@ -928,6 +983,8 @@ public:
     // moves by itself (the look-and-feel glides while this is recent).
     void mouseDoubleClick (const juce::MouseEvent& event) override
     {
+        if (claimed)
+            return;
         getProperties().set ("resetGlideAt", juce::Time::getMillisecondCounterHiRes());
         juce::Slider::mouseDoubleClick (event);
     }
@@ -941,7 +998,7 @@ public:
 
     void mouseDrag (const juce::MouseEvent& event) override
     {
-        if (! dragging)
+        if (claimed || ! dragging)
             return;
 
         setFine (wantsFine (event.mods));
@@ -965,6 +1022,12 @@ public:
 
     void mouseUp (const juce::MouseEvent& event) override
     {
+        if (claimed)
+        {
+            claimed = false;
+            return;
+        }
+
         if (dragging && getProperties().contains ("dragGhostPos"))
         {
             getProperties().set ("dragGhostRelease", juce::Time::getMillisecondCounterHiRes());
@@ -990,8 +1053,13 @@ public:
     std::function<void (int end)> onEndHit;
     // Each step of a drag, and once more on the release (isGrabbed false).
     std::function<void()> onDragValue;
+    // Asked on each press: true takes it (no turn, no reset; the owner
+    // follows the drag as the slider's mouse listener).
+    std::function<bool (const juce::MouseEvent&)> claimPress;
 
 private:
+    bool claimed = false;
+
     void setFine (bool shouldBeFine)
     {
         if (shouldBeFine == fine)
@@ -1029,6 +1097,8 @@ public:
         slider.setColour (juce::Slider::rotarySliderFillColourId, accent);
         addAndMakeVisible (slider);
         slider.addMouseListener (this, false);
+        slider.claimPress = [this] (const juce::MouseEvent& event) { return claimPress (event); };
+        getProperties().set ("takesArmedClick", true);
 
         label.setText (labelText, juce::dontSendNotification);
         label.setJustificationType (juce::Justification::centred);
@@ -1159,11 +1229,96 @@ public:
     {
         closeModCard();
 
+        if (altDragSlot >= 0)
+            return; // (the slider's press, taken by claimPress)
+
+        // A press on the name or around the dial while a source is armed.
+        if (! event.mods.isPopupMenu() && event.originalComponent == this && takeArmedClick())
+            return;
+
         if (event.mods.isPopupMenu())
         {
             startPulse (IlanaTheme::accent());
             showModMenu();
         }
+    }
+
+    // Alt-drag with a source pinned and no ring from it yet: the route is
+    // made on the press and the drag sets its depth (UI review 31, item 26).
+    void mouseDrag (const juce::MouseEvent& event) override
+    {
+        if (altDragSlot < 0 || processorRef == nullptr)
+            return;
+        const auto fine = event.mods.isShiftDown() ? 0.2f : 1.0f;
+        const auto travel = (float) (event.getDistanceFromDragStartX() - event.getDistanceFromDragStartY());
+        const auto depth = juce::jlimit (-1.0f, 1.0f, travel * 0.006f * fine);
+        processorRef->setModSlotValue (altDragSlot, "amt", Mod::storedDepth (processorRef->readModSlot (altDragSlot), depth));
+        refreshRoutings();
+        repaint();
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (altDragSlot < 0)
+            return;
+        altDragSlot = -1;
+        if (processorRef != nullptr)
+            processorRef->endEdit();
+        refreshRoutings();
+        updateNameInk();
+        repaint();
+    }
+
+    // Click to assign: the armed source goes to this knob, as a drop would
+    // put it (one route per source and knob). True when the click was taken.
+    bool takeArmedClick()
+    {
+        const auto source = armedModSource();
+        if (source == 0 || processorRef == nullptr)
+            return false;
+
+        if (! isModulatable())
+        {
+            FloatingNote::show (*this, refusalText());
+            repaint();
+            return true; // (still armed: pick a knob that takes it)
+        }
+
+        setArmedModSource (0);
+        if (! showExistingRouting (source))
+        {
+            processorRef->performEdit ("Add modulation", [this, source] { processorRef->assignModSlot (source, ringConfig.destination, 0.35f); });
+            startPulse (modSourceColour (source));
+        }
+        refreshRoutings();
+        repaint();
+        return true;
+    }
+
+    // The slider's presses the knob takes: an armed source's click, and
+    // Alt-drag making a route from the pinned source.
+    bool claimPress (const juce::MouseEvent& event)
+    {
+        if (event.mods.isPopupMenu())
+            return false;
+        if (armedModSource() != 0)
+            return takeArmedClick();
+
+        const auto pinned = pinnedModSource();
+        if (! event.mods.isAltDown() || pinned == 0 || processorRef == nullptr || ! isModulatable() || routesFrom (pinned))
+            return false;
+
+        processorRef->beginEdit ("Add " + ModNames::source (pinned, processorRef) + " modulation");
+        altDragSlot = processorRef->assignModSlot (pinned, ringConfig.destination, 0.0f);
+        if (altDragSlot < 0)
+        {
+            processorRef->endEdit();
+            return false;
+        }
+        startPulse (modSourceColour (pinned));
+        refreshRoutings();
+        repaint();
+        return true;
     }
 
     juce::Slider& getSlider() { return slider; }
@@ -1433,7 +1588,7 @@ public:
     float packedNameDevicePx() const { return IlanaTheme::font (packedNameUnits(), true).getHeight() * IlanaTheme::uiScaleRef(); }
     // The packed number's height on screen in device pixels, and the dial's (a layout test's measure:
     // the number keeps its share of the dial at every zoom).
-    float packedNumberDevicePx() const { return IlanaTheme::font (packedD * kPackedValueScale, true, true).getHeight() * IlanaTheme::uiScaleRef(); }
+    float packedNumberDevicePx() const { return IlanaTheme::font (packedValueUnits(), true, true).getHeight() * IlanaTheme::uiScaleRef(); }
     float packedDialDevicePx() const { return packedD * IlanaTheme::uiScaleRef(); }
     // A packed name too wide for its cell breaks at its first space onto a second line ("KEY" over "TRACK"),
     // in full words; the cell the page gives the knob must leave the room (about 9 px under the name).
@@ -1449,6 +1604,14 @@ public:
         packedNameSize = size;
         repaint();
     }
+    // The packed number's size in units, when a page wants it apart from the dial's own share (the FX
+    // rack's: a bigger ring round the same number keeps it clear of the ring, UI review 31); 0: the dial's.
+    void setPackedValueSize (float units)
+    {
+        packedValueSize = units;
+        repaint();
+    }
+    float packedValueUnits() const { return packedValueSize > 0.0f ? packedValueSize : packedD * kPackedValueScale; }
     // Pixels a packed value may run past the dial's width before its unit is dropped ("1.20 kHz").
     void setPackedValueRoom (int pixels)
     {
@@ -1839,6 +2002,9 @@ public:
             if (unit.length() > 3)
                 unit = {};
         }
+        // (A zero needs no sign: "+0.0" is "0.0", UI review 31.)
+        if ((value.startsWithChar ('+') || value.startsWithChar ('-')) && value.length() > 1 && value.substring (1).containsOnly ("0."))
+            value = value.substring (1);
         if (value.length() > 4 && value.containsChar ('.'))
             value = value.dropLastCharacters (value.length() - 4).trimCharactersAtEnd (".");
         // ("5.00" is "5.0": two decimals in one digit's dial came within 2 px of the ring, UI review 25.)
@@ -1847,7 +2013,7 @@ public:
 
         // A small dial (the wave card's AMT knobs, 19 units) has no room for two lines: the number
         // came to sit on the ring (UI review 30). A % there goes without saying, so the number stands alone.
-        if (packedD < 22.0f && unit == "%")
+        if (packedValueUnits() < 22.0f * kPackedValueScale && unit == "%")
             unit = {};
 
         // (While a value is typed over the dial, the box is the value.)
@@ -1860,14 +2026,14 @@ public:
         if (hot != nullptr)
         {
             value = hotDepthText (*hot);
-            unit = packedD < 22.0f ? "" : "%";
+            unit = packedValueUnits() < 22.0f * kPackedValueScale ? "" : "%";
             hotColour = modSourceColour (hot->source);
         }
 
         // Grabbed, the number grows a little and the name turns white; released, both settle back (~150 ms).
         const auto grab = IlanaTheme::fade (const_cast<KnobControl&> (*this), 77, slider.isGrabbed() ? 1.0f : 0.0f, 24.0f);
         g.setColour ((hot != nullptr ? hotColour : IlanaTheme::Ui::text).withMultipliedAlpha (on));
-        const auto drawn = IlanaTheme::font (packedD * kPackedValueScale * (1.0f + 0.07f * grab), true, true);
+        const auto drawn = IlanaTheme::font (packedValueUnits() * (1.0f + 0.07f * grab), true, true);
         g.setFont (drawn);
         if (unit.isNotEmpty())
         {
@@ -2431,6 +2597,8 @@ private:
         void mouseDown (const juce::MouseEvent& event) override
         {
             owner.closeModCard();
+            if (! event.mods.isPopupMenu() && owner.takeArmedClick())
+                return;
             const auto ring = ringUnder (event);
 
             if (! juce::isPositiveAndBelow (ring, (int) owner.routings.size()))
@@ -3013,7 +3181,7 @@ private:
             repaint();
         }
 
-        if (const auto dragged = modSourceBeingDragged (*this); dragged != dragSource)
+        if (const auto dragged = modSourceBeingDragged (*this) != 0 ? modSourceBeingDragged (*this) : armedModSource(); dragged != dragSource)
         {
             dragSource = dragged;
             repaint();
@@ -3180,6 +3348,7 @@ private:
     float activity = 0.0f;
     double lastSliderValue = 0.0;
     bool dragHover = false;
+    int altDragSlot = -1; // the route an Alt-drag is making (-1: none)
     int dragSource = 0; // the source being dragged anywhere (V8-10)
     float pulse = 0.0f; // the right-click / assign ring, 1 to 0
     std::unique_ptr<juce::TextEditor> amountEditor;
@@ -3190,6 +3359,7 @@ private:
     int packedValueRoom = 0;
     bool packedNameWrap = false, packedNameAlwaysWraps = false;
     float packedNameSize = 0.0f;
+    float packedValueSize = 0.0f; // (0: the dial's share)
     juce::Rectangle<int> packedNameArea;
     std::unique_ptr<juce::TextEditor> valueEditor;
     juce::Rectangle<int> inlineValueArea;
@@ -3755,6 +3925,8 @@ public:
         juce::String name, tip;
         // The glyph in an 18 x 16 box: SVG path data, each with its stroke width (0 fills).
         std::vector<std::pair<juce::String, float>> paths;
+        // Its family's tint (the exciters: pluck, strike, bow...); transparent draws it in the label grey.
+        juce::Colour tint {};
     };
 
     std::function<int()> getChosen;
@@ -3805,12 +3977,20 @@ public:
             const auto r = tile (i).reduced (0.5f);
             const auto lit = i == chosen;
             const auto hover = i == hovered && isMouseOver();
-            g.setColour ((lit ? IlanaTheme::Ui::well.interpolatedWith (colour, 0.2f) : IlanaTheme::Ui::well).withMultipliedAlpha (on));
+            // (A tinted set fills the chosen tile in the colour and draws its glyph dark on it, UI review 31, item 42;
+            // the others keep the well, their glyph in the family's tint.)
+            const auto tint = items[(size_t) i].tint;
+            const auto tinted = ! tint.isTransparent();
+            const auto fill = lit ? (tinted ? colour.withAlpha (0.92f) : IlanaTheme::Ui::well.interpolatedWith (colour, 0.2f))
+                                  : (tinted ? IlanaTheme::Ui::well.interpolatedWith (tint, 0.1f) : IlanaTheme::Ui::well);
+            g.setColour (fill.withMultipliedAlpha (on));
             g.fillRoundedRectangle (r, 3.0f);
             g.setColour ((lit ? colour : hover ? IlanaTheme::Ui::text3 : IlanaTheme::Ui::line).withMultipliedAlpha (on));
             g.drawRoundedRectangle (r, 3.0f, 1.0f);
 
-            const auto ink = (lit ? colour : hover ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2).withMultipliedAlpha (on);
+            const auto ink = (lit ? (tinted ? IlanaTheme::Ui::well : colour)
+                              : tinted ? (hover ? tint.brighter (0.3f) : tint)
+                              : hover ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2).withMultipliedAlpha (on);
             const auto transform = juce::AffineTransform::scale (tileScale())
                                        .translated (r.getX() + 1.5f * tileScale(), r.getY() + 0.5f * tileScale());
             g.setColour (ink);

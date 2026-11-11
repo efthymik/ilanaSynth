@@ -1636,10 +1636,10 @@ private:
         for (int n = 0; n < modes; ++n)
         {
             const auto octaves = std::abs (std::log2 ((double) modeHz[n] / wolfHz));
-            const auto near = octaves < 1.0 ? 0.5 + 0.5 * std::cos (juce::MathConstants<double>::pi * octaves) : 0.0;
+            const auto nearWolf = octaves < 1.0 ? 0.5 + 0.5 * std::cos (juce::MathConstants<double>::pi * octaves) : 0.0;
             // (the mode's slope at the bridge, (n + 1) / modes: without the per-note tables' gains)
-            wolfPush[n] = (float) (kappa * perSlope * (double) (float) ((double) (n + 1) / (double) modes) * near);
-            if (near > 0.0)
+            wolfPush[n] = (float) (kappa * perSlope * (double) (float) ((double) (n + 1) / (double) modes) * nearWolf);
+            if (nearWolf > 0.0)
             {
                 wolfFirst = juce::jmin (wolfFirst, n);
                 wolfEnd = n + 1;

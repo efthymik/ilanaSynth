@@ -549,6 +549,8 @@ public:
     }
 
     static constexpr float compactDial = 28.0f;
+    // The FM card's knobs (UI review 31, 17): PLAY's rings, the value inside, one dial size across the card.
+    static constexpr int ringDial = 36, ringRowHeight = 62;
     static constexpr int compactPitch = 46, compactRow = 39, compactGap = 10, compactLine = 20, compactLineGap = 4;
     static constexpr int compactColumn = 4 * compactPitch, compactHeight = compactLine + compactLineGap + 2 * compactRow;
 
@@ -652,7 +654,10 @@ public:
                         // (A menu's name on the knobs' name line: the menu at the cell's top, as the dials fill theirs.)
                         if (dynamic_cast<ComboControl*> (rows[(size_t) i]) != nullptr)
                             cell = cell.removeFromTop (preferredControlHeight (rows[(size_t) i], cell.getWidth()));
-                        layoutRow (cell, { rows[(size_t) i] }, true);
+                        if (auto* knob = dynamic_cast<KnobControl*> (rows[(size_t) i]))
+                            knob->placeAsRing (cell.reduced (2, 0).withSizeKeepingCentre (cell.getWidth() - 4, juce::jmin (cell.getHeight(), ringRowHeight)), ringDial);
+                        else
+                            layoutRow (cell, { rows[(size_t) i] }, true);
                         x += width;
                     }
                 };
@@ -662,10 +667,20 @@ public:
                 return;
             }
             graph.setVisible (true);
-            auto row = area.removeFromBottom (juce::jlimit (66, 78, area.getHeight() * 45 / 100));
-            area.removeFromBottom (6);
+            // (The value inside the ring: the row is one line shorter, and the graph gets it.)
+            auto row = area.removeFromBottom (ringRowHeight);
+            area.removeFromBottom (4);
             graph.setBounds (area);
-            layoutKnobs (row, rows, false);
+            const auto allKnobs = std::all_of (rows.begin(), rows.end(), [] (juce::Component* c) { return dynamic_cast<KnobControl*> (c) != nullptr; });
+            if (! allKnobs)
+            {
+                layoutKnobs (row, rows, false);
+                return;
+            }
+            const auto width = row.getWidth() / juce::jmax (1, (int) rows.size());
+            for (size_t i = 0; i < rows.size(); ++i)
+                static_cast<KnobControl*> (rows[i])->placeAsRing (juce::Rectangle<int> (row.getX() + (int) i * width, row.getY(), width, row.getHeight()).reduced (1, 0),
+                                                                  juce::jmin (ringDial, width - 10));
             return;
         }
 

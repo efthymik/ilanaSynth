@@ -220,6 +220,7 @@ public:
             }
         }
 
+        paintGradientFill (g, path, plot, centreY, halfHeight);
         IlanaTrace::paintTrace (g, path, traceColour);
 
         auto phase = (double) phaseSmoother.get (processorRef.getLfoPhase (index), currentRate());
@@ -771,6 +772,29 @@ private:
 
     // One cycle's ruler under the graph: its time at RATE in Hz, or note
     // values while SYNC is on, at the quarters.
+    // (UI review 31, 38) A soft gradient under the line in the LFO's colour: strongest at the wave's peaks, gone at
+    // the zero line, mirrored below it, so the shape reads as a body of light and not a bare 2 px line.
+    void paintGradientFill (juce::Graphics& g, const juce::Path& path, juce::Rectangle<float> plot, float centreY, float halfHeight) const
+    {
+        if (path.isEmpty())
+            return;
+        auto filled = path;
+        const auto end = path.getCurrentPosition();
+        filled.lineTo (end.x, centreY);
+        filled.lineTo (plot.getX(), centreY);
+        filled.closeSubPath();
+        for (const auto above : { true, false })
+        {
+            const juce::Graphics::ScopedSaveState state (g);
+            const auto whole = getLocalBounds().toFloat();
+            g.reduceClipRegion ((above ? whole.withBottom (centreY) : whole.withTop (centreY)).toNearestIntEdges());
+            const auto peakY = above ? centreY - halfHeight : centreY + halfHeight;
+            g.setGradientFill (juce::ColourGradient (traceColour.withAlpha (0.24f), plot.getX(), peakY,
+                                                     traceColour.withAlpha (0.0f), plot.getX(), centreY, false));
+            g.fillPath (filled);
+        }
+    }
+
     void paintTimeRuler (juce::Graphics& g, juce::Rectangle<float> plot) const
     {
         if (minimal)

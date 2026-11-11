@@ -534,7 +534,6 @@ public:
         const auto bounds = getLocalBounds().toFloat().reduced (0.5f, 2.5f);
         IlanaTheme::paintWell (g, bounds, 5.0f);
         const auto lit = choice == 3 ? 1 : isEffectivelyBipolar() ? 2 : 0;
-        const juce::String names[] { "+", juce::String::fromUTF8 ("\xe2\x88\x92"), juce::String::fromUTF8 ("\xc2\xb1") };
 
         for (int segment = 0; segment < 3; ++segment)
         {
@@ -550,9 +549,41 @@ public:
                     g.fillRoundedRectangle (area.reduced (1.0f), 4.0f);
             }
 
-            g.setColour (segment == lit ? (choice == 0 ? IlanaTheme::Ui::text : IlanaTheme::Ui::bg) : IlanaTheme::Ui::text3);
-            g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true));
-            g.drawText (names[segment], area, juce::Justification::centred);
+            // The signs as strokes as tall as the row's text, not the font's
+            // small + - glyphs (UI review 31, item 10: they were 4 px).
+            g.setColour (segment == lit ? (choice == 0 ? IlanaTheme::Ui::text : IlanaTheme::Ui::bg) : IlanaTheme::Ui::text2);
+            paintSign (g, segment, area);
+        }
+    }
+
+    // The arms of + and - are this long (design px); one stroke weight.
+    static constexpr float signSize = 8.0f, signStroke = 1.6f;
+
+    static void paintSign (juce::Graphics& g, int segment, juce::Rectangle<float> area)
+    {
+        const auto c = area.getCentre();
+        const auto half = signSize * 0.5f;
+        const auto bar = [&g] (float x, float y, float w, float h)
+        {
+            g.fillRoundedRectangle (juce::Rectangle<float> (w, h).withCentre ({ x, y }), signStroke * 0.5f);
+        };
+
+        if (segment == 0) // +
+        {
+            bar (c.x, c.y, signSize, signStroke);
+            bar (c.x, c.y, signStroke, signSize);
+        }
+        else if (segment == 1) // -
+        {
+            bar (c.x, c.y, signSize, signStroke);
+        }
+        else // +/-: a smaller plus over a bar, the pair as tall as the plus
+        {
+            const auto small = signSize * 0.75f;
+            const auto top = c.y - half + small * 0.5f - 0.5f;
+            bar (c.x, top, small, signStroke);
+            bar (c.x, top, signStroke, small);
+            bar (c.x, c.y + half, small, signStroke);
         }
     }
 
@@ -734,6 +765,15 @@ public:
 
     // The "!" of a repeated routing: the page offers to merge it.
     std::function<void (int slot)> onDuplicateClicked;
+    // A right-click on the row (not on a control): the page's row menu.
+    std::function<void (int slot)> onRowMenu;
+    // The menu's items without the menu (1 duplicate, 2 show destination,
+    // 3 solo, 4 remove); the page sets it, the tests call it.
+    std::function<void (int choice)> onRowMenuChoice;
+    juce::Button& getBypassButton() { return bypass; }
+    juce::Button& getStereoButton() { return stereo; }
+    // Opens the destination list (a duplicated row picks its new target).
+    void showDestinationList() { destination.showPopup(); }
 
     // The row whose remap the dock shows is outlined.
     void setSelected (bool shouldBeSelected)
@@ -798,13 +838,23 @@ public:
             polarity.setColour (IlanaTheme::Ui::text2);
         }
 
-        // STEREO only where a destination can split left and right: elsewhere the chip is greyed and
-        // can't be pressed (it was lit on every row, UI review 27).
+        // STEREO only where a destination can split left and right: elsewhere the cell is left
+        // empty, so the chips that do something stand out (UI review 31, item 42; it was a greyed
+        // chip on most rows, and lit on every row before UI review 27).
         const auto stereoAllowed = slot.destination >= 0 && Mod::canBeStereoAnywhere (slot.destination);
-        if (stereo.isEnabled() != stereoAllowed)
+        if (stereo.isVisible() != stereoAllowed)
         {
             stereo.setEnabled (stereoAllowed);
-            stereo.setAlpha (stereoAllowed ? 1.0f : 0.35f);
+            stereo.setVisible (stereoAllowed);
+        }
+
+        // A route with no source does nothing: its switch is drawn off and
+        // can't be pressed until a source is picked (UI review 31, item 5).
+        const auto sourceless = slot.source == Mod::Source::None;
+        if (const auto lit = ! sourceless && ! slot.bypass; bypass.getToggleState() != lit || bypass.isEnabled() == sourceless)
+        {
+            bypass.setToggleState (lit, juce::dontSendNotification);
+            bypass.setEnabled (! sourceless);
         }
 
         curve.refresh();
@@ -893,6 +943,15 @@ public:
 
     void mouseDown (const juce::MouseEvent& event) override
     {
+        // The row's own menu: a right-click on its number or between its
+        // controls (UI review 31, item 33).
+        if (event.mods.isPopupMenu() && event.originalComponent == this)
+        {
+            if (onRowMenu != nullptr)
+                onRowMenu (slotIndex);
+            return;
+        }
+
         if (! event.mods.isPopupMenu() || ! (event.originalComponent == &amount || amount.isParentOf (event.originalComponent)))
             return;
 

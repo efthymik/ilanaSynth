@@ -45,7 +45,160 @@ inline void switchOnIfOff (IlanaSynthAudioProcessor& processor, const juce::Stri
     if (read (processor, id) < 0.5f)
         write (processor, id, 1.0f);
 }
+
+// The tools on a step lane's right-click (UI review 31, item 32): what one
+// does to a 16-step lane every time, in one undo step each. They work on the
+// loop's steps (Reset on all 16), in the parameter's own 0..1, so a lane
+// copied from VEL pastes onto PITCH or CHANCE by shape.
+enum class LaneTool { reset = 1, randomise, shiftLeft, shiftRight, rampUp, rampDown, copy, paste };
+
+struct LaneClipboard
+{
+    std::array<float, 16> units {};
+    bool full = false;
+};
+
+inline LaneClipboard& laneClipboard()
+{
+    static LaneClipboard clipboard;
+    return clipboard;
+}
+
+// Its own generator: a lane's dice never move a patch's random sequences.
+inline juce::Random& laneRandom()
+{
+    static juce::Random random;
+    return random;
+}
+
+inline void applyLaneTool (IlanaSynthAudioProcessor& processor, const std::function<juce::String (int)>& idFor, int loopLength,
+                           LaneTool tool, const juce::String& laneName)
+{
+    std::array<juce::RangedAudioParameter*, 16> parameters {};
+    for (int step = 0; step < 16; ++step)
+        parameters[(size_t) step] = processor.apvts.getParameter (idFor (step));
+
+    const auto length = juce::jlimit (1, 16, loopLength);
+    std::array<float, 16> units {};
+    for (int step = 0; step < 16; ++step)
+        units[(size_t) step] = parameters[(size_t) step] != nullptr ? parameters[(size_t) step]->getValue() : 0.0f;
+
+    if (tool == LaneTool::copy)
+    {
+        laneClipboard().units = units;
+        laneClipboard().full = true;
+        return;
+    }
+
+    auto next = units;
+    switch (tool)
+    {
+        case LaneTool::reset:
+            for (int step = 0; step < 16; ++step)
+                if (parameters[(size_t) step] != nullptr)
+                    next[(size_t) step] = parameters[(size_t) step]->getDefaultValue();
+            break;
+        case LaneTool::randomise:
+            for (int step = 0; step < length; ++step)
+                next[(size_t) step] = laneRandom().nextFloat();
+            break;
+        case LaneTool::shiftLeft:
+            for (int step = 0; step < length; ++step)
+                next[(size_t) step] = units[(size_t) ((step + 1) % length)];
+            break;
+        case LaneTool::shiftRight:
+            for (int step = 0; step < length; ++step)
+                next[(size_t) step] = units[(size_t) ((step + length - 1) % length)];
+            break;
+        case LaneTool::rampUp:
+        case LaneTool::rampDown:
+            for (int step = 0; step < length; ++step)
+            {
+                const auto t = length > 1 ? (float) step / (float) (length - 1) : 1.0f;
+                next[(size_t) step] = tool == LaneTool::rampUp ? t : 1.0f - t;
+            }
+            break;
+        case LaneTool::paste:
+            if (! laneClipboard().full)
+                return;
+            next = laneClipboard().units;
+            break;
+        case LaneTool::copy:
+            break;
+    }
+
+    const char* const names[] { "", "Reset", "Randomise", "Shift left", "Shift right", "Ramp up", "Ramp down", "Copy", "Paste" };
+    processor.performEdit (juce::String (names[(int) tool]) + " " + laneName + " lane", [&parameters, &next, &units]
+    {
+        for (size_t step = 0; step < 16; ++step)
+            if (auto* parameter = parameters[step]; parameter != nullptr && std::abs (next[step] - units[step]) > 1.0e-6f)
+            {
+                parameter->beginChangeGesture();
+                parameter->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, next[step]));
+                parameter->endChangeGesture();
+            }
+    });
+}
+
+// The UI test's hook: while set, a lane's menu is only noted (its name), not shown.
+inline juce::String*& laneMenuProbe()
+{
+    static juce::String* probe = nullptr;
+    return probe;
+}
+
+// The lane's menu, at the pointer.
+inline void showLaneMenu (IlanaSynthAudioProcessor& processor, juce::Component& lanes, std::function<juce::String (int)> idFor,
+                          int loopLength, const juce::String& laneName)
+{
+    if (auto* probe = laneMenuProbe())
+    {
+        *probe = laneName;
+        return;
+    }
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader (laneName);
+    menu.addItem ((int) LaneTool::reset, "Reset");
+    menu.addItem ((int) LaneTool::randomise, "Randomise");
+    menu.addItem ((int) LaneTool::shiftLeft, "Shift left");
+    menu.addItem ((int) LaneTool::shiftRight, "Shift right");
+    menu.addItem ((int) LaneTool::rampUp, "Ramp up");
+    menu.addItem ((int) LaneTool::rampDown, "Ramp down");
+    menu.addSeparator();
+    menu.addItem ((int) LaneTool::copy, "Copy");
+    menu.addItem ((int) LaneTool::paste, "Paste", laneClipboard().full);
+    juce::Component::SafePointer<juce::Component> safe (&lanes);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&lanes).withMousePosition(),
+                        [&processor, safe, idFor, loopLength, laneName] (int result)
+                        {
+                            if (result <= 0 || safe == nullptr)
+                                return;
+                            applyLaneTool (processor, idFor, loopLength, (LaneTool) result, laneName);
+                            safe->repaint();
+                        });
+}
 } // namespace GenerativeWidgets
+
+// SEQ's fixed colours (UI review 31, item 40): each lane its own, used for
+// its name, bars and the knobs that belong to it, and each GENERATE box its
+// own, as the FX rows have theirs. Taken from the section colour swatches
+// (SectionColours::swatches), not a new palette; the skin's accent stays for
+// what is lit or playing.
+namespace SeqColours
+{
+inline juce::Colour swatch (int index) { return juce::Colour (SectionColours::swatches[(size_t) index]); }
+inline juce::Colour velocity()   { return swatch (10); } // copper
+inline juce::Colour stepLength() { return swatch (1); }  // gold
+inline juce::Colour pitch()      { return swatch (4); }  // ice
+inline juce::Colour euclid()     { return swatch (3); }  // green
+inline juce::Colour chance()     { return swatch (2); }  // lime
+inline juce::Colour range()      { return swatch (6); }  // periwinkle
+inline juce::Colour ratchet()    { return swatch (8); }  // violet
+inline juce::Colour snap()       { return swatch (5); }  // blue
+inline juce::Colour strum()      { return swatch (7); }  // purple
+inline juce::Colour spray()      { return swatch (9); }  // rose
+} // namespace SeqColours
 
 // An on switch for a part whose off is a choice (review 6, I6-30):
 // GENERATE's SNAP TO KEY (SCALE Off) and STRUM (DIRECTION Off). Off sets
@@ -247,10 +400,14 @@ public:
         // their steps, every fourth stronger (every fourth only when the
         // steps are narrow), the step playing in the colour.
         // (The gap row below it (N16-8) is part of the block, so the block stands in the well's middle.)
-        const auto strip = area.withSizeKeepingCentre (area.getWidth(), juce::jlimit (juce::jmin (area.getHeight(), 46.0f),
-                                                                                     juce::jmax (0.0f, area.getHeight() - 22.0f),
-                                                                                     area.getHeight() * 0.5f))
-                               .translated (0.0f, area.getHeight() >= 200.0f ? -30.0f : 0.0f);
+        // (In a tall pane the bars take its height: the step numbers above them at the pane's top, the gaps under
+        // them at its foot, no empty band above or below; they used half of it, UI review 31, item 22.)
+        constexpr float numbersAbove = 17.0f, gapsBelow = 62.0f;
+        const auto strip = area.getHeight() >= 200.0f
+                               ? area.withTrimmedTop (numbersAbove).withTrimmedBottom (gapsBelow)
+                               : area.withSizeKeepingCentre (area.getWidth(), juce::jlimit (juce::jmin (area.getHeight(), 46.0f),
+                                                                                            juce::jmax (0.0f, area.getHeight() - 22.0f),
+                                                                                            area.getHeight() * 0.5f));
         const auto width = strip.getWidth() / (float) steps;
 
         if (strip.getY() - 17.0f >= area.getY())
@@ -374,7 +531,8 @@ private:
 
 // The probability sequencer's 16 steps in three lanes: CHANCE (bars),
 // RANGE (how far above the key a step may land) and RATCHET (1-4 dots).
-// Drag in a lane to draw values across steps; double-click resets a step.
+// Drag in a lane to draw values across steps (Shift-drag draws a straight
+// line); double-click resets a step; right-click a lane for its tools.
 class ProbSeqEditor : public juce::Component,
                       public juce::SettableTooltipClient,
                       private IlanaAnim::FrameTimer
@@ -383,9 +541,24 @@ public:
     ProbSeqEditor (IlanaSynthAudioProcessor& processor, juce::Colour colourIn)
         : processorRef (processor), colour (colourIn)
     {
-        setTooltip ("Probability sequencer. Drag in CHANCE and RANGE to draw; click RATCHET to cycle 1-4 repeats. "
-                    "Double-click a step to reset it. Click a step number to set how many steps loop.");
+        setTooltip ("Probability sequencer. Drag in CHANCE and RANGE to draw (Shift-drag for a straight line); click RATCHET to "
+                    "cycle 1-4 repeats. Double-click a step to reset it. Click a step number to set how many steps loop. "
+                    "Right-click a lane for Reset, Randomise, Shift, Ramp, Copy and Paste.");
         startTimerHz (30);
+    }
+
+    enum Lane { chance, range, ratchet, numLanes };
+
+    static juce::String idFor (int lane, int step)
+    {
+        const auto n = juce::String (step + 1);
+        return lane == chance ? "pseq_chance" + n : lane == range ? "pseq_range" + n : "pseq_ratchet" + n;
+    }
+
+    // Each lane its own colour (UI review 31, item 40).
+    static juce::Colour laneColour (int lane)
+    {
+        return lane == chance ? SeqColours::chance() : lane == range ? SeqColours::range() : SeqColours::ratchet();
     }
 
     void paint (juce::Graphics& g) override
@@ -395,27 +568,41 @@ public:
         IlanaTheme::paintWell (g, bounds, 6.0f);
 
         const auto on = read (processorRef, "pseq_on") > 0.5f;
-        const auto length = juce::jlimit (1, 16, juce::roundToInt (read (processorRef, "pseq_length")));
+        const auto length = loopLength();
         const auto current = on ? processorRef.getEngineDisplayStep() : -1;
         const auto playingStep = current >= 0 ? current % length : -1;
+        const auto mouse = getMouseXYRelative().toFloat();
+        const auto hoverLane = isMouseOver() && dragLane < 0 ? laneAt (mouse) : -1;
+        const auto hoverStep = hoverLane >= 0 ? stepAt (mouse.x) : -1;
 
         const auto lanes = laneBounds();
-        // RANGE's numbers are semitones above the held note, printed inside
-        // their own lane.
+        // RANGE's numbers are semitones above the held note.
         const char* const names[] { "CHANCE", "RANGE  +st", "RATCHET" };
 
-        for (int lane = 0; lane < 3; ++lane)
+        for (int lane = 0; lane < numLanes; ++lane)
         {
-            g.setColour (IlanaTheme::Ui::text3);
+            g.setColour (laneColour (lane).withAlpha (on ? 0.9f : 0.6f));
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
             g.drawText (names[lane], labelArea (lanes[(size_t) lane]), juce::Justification::centredLeft);
         }
+
+        // A value off its default, under the pointer or being drawn reads out in
+        // the strip under its bars, as the ARP's lanes do (never on a bar: UI
+        // review 31, item 3).
+        const auto readout = [&] (juce::Rectangle<float> full, juce::Rectangle<float> bars, const juce::String& text,
+                                  bool lit, float alpha)
+        {
+            const auto strip = bars.getHeight() < full.getHeight() ? full.withTrimmedTop (bars.getHeight())
+                                                                   : full.withTrimmedTop (full.getHeight() - 15.0f);
+            g.setColour (juce::Colours::white.withAlpha ((lit ? 1.0f : 0.85f) * juce::jmax (alpha, 0.5f)));
+            g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
+            g.drawText (text, strip.toNearestInt(), juce::Justification::centred, false);
+        };
 
         for (int step = 0; step < 16; ++step)
         {
             const auto active = step < length;
             const auto alpha = (active ? 1.0f : 0.25f) * (on ? 1.0f : 0.55f);
-            const auto n = juce::String (step + 1);
             const auto playing = step == playingStep;
 
             if (playing)
@@ -426,41 +613,50 @@ public:
 
             // Chance: a bar from the bottom of its lane.
             {
-                const auto cell = columnFor (step, lanes[0]).reduced (1.5f, 0.0f);
-                const auto chance = juce::jlimit (0.0f, 1.0f, read (processorRef, "pseq_chance" + n));
-                g.setColour (juce::Colours::white.withAlpha (0.05f * alpha));
-                g.fillRoundedRectangle (cell, 2.0f);
-                g.setColour (colour.withAlpha ((playing ? 1.0f : 0.8f) * alpha));
-                g.fillRoundedRectangle (cell.withTrimmedTop (cell.getHeight() * (1.0f - chance)), 2.0f);
+                const auto full = columnFor (step, lanes[chance]).reduced (1.5f, 0.0f);
+                const auto cell = barsOf (full);
+                const auto value = juce::jlimit (0.0f, 1.0f, read (processorRef, idFor (chance, step)));
+                const auto hovered = hoverLane == chance && hoverStep == step;
+                const auto dragging = dragLane == chance && dragStep == step;
+                g.setColour (juce::Colours::white.withAlpha ((hovered ? 0.1f : 0.05f) * alpha));
+                g.fillRoundedRectangle (full, 2.0f);
+                g.setColour (laneColour (chance).withAlpha ((playing ? 1.0f : 0.8f) * alpha));
+                g.fillRoundedRectangle (cell.withTrimmedTop (cell.getHeight() * (1.0f - value)), 2.0f);
+
+                if (value < 0.995f || hovered || dragging)
+                    readout (full, cell, juce::String (juce::roundToInt (value * 100.0f)) + "%", hovered || dragging, alpha);
             }
 
-            // Range: a thinner bar, with the semitones printed when set.
+            // Range: a bar, its semitones in the strip under it.
             {
-                const auto cell = columnFor (step, lanes[1]).reduced (1.5f, 0.0f);
-                const auto range = juce::jlimit (0, 24, juce::roundToInt (read (processorRef, "pseq_range" + n)));
-                g.setColour (juce::Colours::white.withAlpha (0.05f * alpha));
-                g.fillRoundedRectangle (cell, 2.0f);
+                const auto full = columnFor (step, lanes[range]).reduced (1.5f, 0.0f);
+                const auto cell = barsOf (full);
+                const auto value = juce::jlimit (0, 24, juce::roundToInt (read (processorRef, idFor (range, step))));
+                const auto hovered = hoverLane == range && hoverStep == step;
+                const auto dragging = dragLane == range && dragStep == step;
+                g.setColour (juce::Colours::white.withAlpha ((hovered ? 0.1f : 0.05f) * alpha));
+                g.fillRoundedRectangle (full, 2.0f);
 
-                if (range > 0)
+                if (value > 0)
                 {
-                    g.setColour (colour.withMultipliedSaturation (0.6f).withAlpha (0.55f * alpha));
-                    g.fillRoundedRectangle (cell.withTrimmedTop (cell.getHeight() * (1.0f - (float) range / 24.0f)), 2.0f);
-                    g.setColour (juce::Colours::white.withAlpha (0.85f * alpha));
-                    g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
-                    g.drawText ("+" + juce::String (range), cell.toNearestInt(), juce::Justification::centred);
+                    g.setColour (laneColour (range).withAlpha ((playing ? 1.0f : 0.8f) * alpha));
+                    g.fillRoundedRectangle (cell.withTrimmedTop (cell.getHeight() * (1.0f - (float) value / 24.0f)), 2.0f);
                 }
+
+                if (value > 0 || hovered || dragging)
+                    readout (full, cell, value > 0 ? "+" + juce::String (value) : juce::String ("0"), hovered || dragging, alpha);
             }
 
             // Ratchet: 1-4 dots.
             {
-                const auto cell = columnFor (step, lanes[2]);
-                const auto ratchet = juce::jlimit (1, 4, juce::roundToInt (read (processorRef, "pseq_ratchet" + n)));
+                const auto cell = columnFor (step, lanes[ratchet]);
+                const auto value = juce::jlimit (1, 4, juce::roundToInt (read (processorRef, idFor (ratchet, step))));
                 const auto size = juce::jmin (4.0f, cell.getWidth() * 0.22f);
 
-                for (int r = 0; r < ratchet; ++r)
+                for (int r = 0; r < value; ++r)
                 {
-                    const auto x = cell.getCentreX() + ((float) r - (float) (ratchet - 1) * 0.5f) * (size + 1.5f);
-                    g.setColour (colour.withAlpha ((ratchet > 1 ? 0.9f : 0.35f) * alpha));
+                    const auto x = cell.getCentreX() + ((float) r - (float) (value - 1) * 0.5f) * (size + 1.5f);
+                    g.setColour (laneColour (ratchet).withAlpha ((value > 1 ? 0.9f : 0.35f) * alpha));
                     g.fillEllipse (juce::Rectangle<float> (size, size).withCentre ({ x, cell.getCentreY() }));
                 }
             }
@@ -488,8 +684,24 @@ public:
 
     void mouseDown (const juce::MouseEvent& event) override
     {
+        // Right-click: the lane's tools, never a stroke (UI review 31, item 32).
+        if (event.mods.isPopupMenu())
+        {
+            if (const auto lane = laneAt (event.position); lane >= 0)
+                showLaneMenu (lane);
+            return;
+        }
+
         processorRef.getUndoManager().beginNewTransaction ("Probability sequencer");
         dragLane = laneAt (event.position);
+        dragStep = -1;
+
+        // (A click on a lane's name draws nothing.)
+        if (dragLane >= 0 && stepAt (event.position.x) < 0)
+        {
+            dragLane = -1;
+            return;
+        }
 
         if (dragLane >= 0)
             GenerativeWidgets::switchOnIfOff (processorRef, "pseq_on");
@@ -503,42 +715,88 @@ public:
             return;
         }
 
-        if (dragLane == 2)
+        if (dragLane == ratchet)
         {
             if (const auto step = stepAt (event.position.x); step >= 0)
             {
-                const auto id = "pseq_ratchet" + juce::String (step + 1);
-                const auto ratchet = juce::roundToInt (GenerativeWidgets::read (processorRef, id));
-                GenerativeWidgets::write (processorRef, id, (float) (ratchet % 4 + 1));
+                const auto id = idFor (ratchet, step);
+                const auto value = juce::roundToInt (GenerativeWidgets::read (processorRef, id));
+                GenerativeWidgets::write (processorRef, id, (float) (value % 4 + 1));
             }
 
+            dragLane = -1;
             return;
         }
 
-        drawAt (event.position);
+        // Shift-drag draws a straight line from here (the steps it leaves go back as they were).
+        lineMode = event.mods.isShiftDown();
+        lineStart = event.position;
+        for (int step = 0; step < 16; ++step)
+            before[(size_t) step] = GenerativeWidgets::read (processorRef, idFor (dragLane, step));
+        drawBetween (event.position, event.position);
     }
 
     void mouseDrag (const juce::MouseEvent& event) override
     {
-        if (dragLane == 0 || dragLane == 1)
-            drawAt (event.position);
+        if (dragLane != chance && dragLane != range)
+            return;
+
+        if (lineMode)
+        {
+            restoreOutside (lineStart.x, event.position.x);
+            drawBetween (lineStart, event.position);
+        }
+        else
+        {
+            drawBetween (lastPosition, event.position);
+        }
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        dragLane = dragStep = -1;
+        lineMode = false;
+        repaint();
     }
 
     void mouseDoubleClick (const juce::MouseEvent& event) override
     {
         if (const auto step = stepAt (event.position.x); step >= 0)
         {
-            const auto n = juce::String (step + 1);
-            GenerativeWidgets::write (processorRef, "pseq_chance" + n, 1.0f);
-            GenerativeWidgets::write (processorRef, "pseq_range" + n, 0.0f);
-            GenerativeWidgets::write (processorRef, "pseq_ratchet" + n, 1.0f);
+            GenerativeWidgets::write (processorRef, idFor (chance, step), 1.0f);
+            GenerativeWidgets::write (processorRef, idFor (range, step), 0.0f);
+            GenerativeWidgets::write (processorRef, idFor (ratchet, step), 1.0f);
         }
     }
 
+    // A lane's tool, as its right-click menu runs it (the UI test calls it too).
+    void applyLaneTool (int lane, GenerativeWidgets::LaneTool tool)
+    {
+        const auto which = juce::jlimit (0, (int) numLanes - 1, lane);
+        GenerativeWidgets::applyLaneTool (processorRef, [which] (int step) { return idFor (which, step); }, loopLength(), tool, laneName (which));
+        repaint();
+    }
+
+    // The UI test reaches the lanes through these.
+    juce::Point<float> cellCentre (int lane, int step) const
+    {
+        return columnFor (step, lane < 0 ? rulerBounds() : laneBounds()[(size_t) juce::jlimit (0, 2, lane)]).getCentre();
+    }
+    juce::Rectangle<float> laneArea (int lane) const { return laneBounds()[(size_t) juce::jlimit (0, 2, lane)]; }
+    juce::Rectangle<float> barsArea (int lane) const { return barsOf (laneArea (lane)); }
+
 private:
     static constexpr float labelWidth = 66.0f;
+    static constexpr float rulerHeight = 15.0f, readoutHeight = 14.0f;
 
-    static constexpr float rulerHeight = 15.0f;
+    static juce::String laneName (int lane) { return lane == chance ? "CHANCE" : lane == range ? "RANGE" : "RATCHET"; }
+
+    int loopLength() const { return juce::jlimit (1, 16, juce::roundToInt (GenerativeWidgets::read (processorRef, "pseq_length"))); }
+
+    void showLaneMenu (int lane)
+    {
+        GenerativeWidgets::showLaneMenu (processorRef, *this, [lane] (int step) { return idFor (lane, step); }, loopLength(), laneName (lane));
+    }
 
     juce::Rectangle<float> rulerBounds() const
     {
@@ -555,6 +813,12 @@ private:
         lanes[1] = area.removeFromTop (height * 0.3f).withTrimmedBottom (3.0f);
         lanes[2] = area;
         return lanes;
+    }
+
+    // The bars' part of CHANCE and RANGE: the readout strip at their foot, as the arp's lanes have.
+    static juce::Rectangle<float> barsOf (juce::Rectangle<float> lane)
+    {
+        return lane.getHeight() >= 36.0f ? lane.withTrimmedBottom (readoutHeight) : lane;
     }
 
     static juce::Rectangle<float> labelArea (juce::Rectangle<float> lane) { return lane.withWidth (labelWidth); }
@@ -590,21 +854,45 @@ private:
         return 2;
     }
 
-    void drawAt (juce::Point<float> position)
+    // The value at `y` in the dragged lane.
+    float valueAt (float y) const
     {
-        const auto step = stepAt (position.x);
+        const auto bars = barsOf (laneBounds()[(size_t) dragLane]);
+        const auto unit = juce::jlimit (0.0f, 1.0f, (bars.getBottom() - y) / juce::jmax (1.0f, bars.getHeight()));
+        return dragLane == chance ? unit : (float) juce::roundToInt (unit * 24.0f);
+    }
 
-        if (step < 0 || dragLane < 0 || dragLane > 1)
+    // Draws the dragged lane between two points, so a fast stroke leaves no step out.
+    void drawBetween (juce::Point<float> from, juce::Point<float> to)
+    {
+        if (dragLane != chance && dragLane != range)
             return;
 
-        const auto lane = laneBounds()[(size_t) dragLane];
-        const auto value = juce::jlimit (0.0f, 1.0f, (lane.getBottom() - position.y) / juce::jmax (1.0f, lane.getHeight()));
-        const auto n = juce::String (step + 1);
+        const auto grid = laneBounds()[0].withTrimmedLeft (labelWidth);
+        const auto first = stepAt (juce::jlimit (grid.getX(), grid.getRight(), juce::jmin (from.x, to.x)));
+        const auto last = stepAt (juce::jlimit (grid.getX(), grid.getRight(), juce::jmax (from.x, to.x)));
 
-        if (dragLane == 0)
-            GenerativeWidgets::write (processorRef, "pseq_chance" + n, value);
-        else
-            GenerativeWidgets::write (processorRef, "pseq_range" + n, (float) juce::roundToInt (value * 24.0f));
+        for (auto step = first; step >= 0 && step <= last; ++step)
+        {
+            const auto centreX = columnFor (step, laneBounds()[0]).getCentreX();
+            const auto t = std::abs (to.x - from.x) < 1.0f ? 1.0f : juce::jlimit (0.0f, 1.0f, (centreX - from.x) / (to.x - from.x));
+            GenerativeWidgets::write (processorRef, idFor (dragLane, step), valueAt (from.y + (to.y - from.y) * t));
+        }
+
+        dragStep = stepAt (juce::jlimit (grid.getX(), grid.getRight(), to.x));
+        lastPosition = to;
+        repaint();
+    }
+
+    // A straight line's steps outside [a, b] go back to what they were.
+    void restoreOutside (float a, float b)
+    {
+        const auto grid = laneBounds()[0].withTrimmedLeft (labelWidth);
+        const auto first = stepAt (juce::jlimit (grid.getX(), grid.getRight(), juce::jmin (a, b)));
+        const auto last = stepAt (juce::jlimit (grid.getX(), grid.getRight(), juce::jmax (a, b)));
+        for (int step = 0; step < 16; ++step)
+            if (step < first || step > last)
+                GenerativeWidgets::write (processorRef, idFor (dragLane, step), before[(size_t) step]);
     }
 
     void timerCallback() override
@@ -617,7 +905,10 @@ private:
 
     IlanaSynthAudioProcessor& processorRef;
     juce::Colour colour;
-    int dragLane = -1;
+    int dragLane = -1, dragStep = -1;
+    bool lineMode = false;
+    juce::Point<float> lineStart, lastPosition;
+    std::array<float, 16> before {};
 };
 
 // The arp's step lanes (review 6, S6-23): VELOCITY, GATE (a share of the
@@ -637,8 +928,9 @@ public:
     ArpLanesEditor (IlanaSynthAudioProcessor& processor, juce::Colour colourIn)
         : processorRef (processor), colour (colourIn)
     {
-        setTooltip (juce::String::fromUTF8 ("Arp step lanes. Drag in VEL (velocity), STEP LEN (times the GATE knob's length; 0 rests the step) and PITCH to draw; "
-                                            "drawing switches the arp on. Double-click a step to reset it. Click a step number to set how many steps loop."));
+        setTooltip (juce::String::fromUTF8 ("Arp step lanes. Drag in VEL (velocity), STEP LEN (times the GATE knob's length; 0 rests the step) and PITCH to draw "
+                                            "(Shift-drag for a straight line); drawing switches the arp on. Double-click a step to reset it. Click a step number "
+                                            "to set how many steps loop. Right-click a lane for Reset, Randomise, Shift, Ramp, Copy and Paste."));
         startTimerHz (30);
     }
 
@@ -927,17 +1219,32 @@ public:
     void mouseMove (const juce::MouseEvent&) override { repaint(); }
     void mouseExit (const juce::MouseEvent&) override { repaint(); }
 
-    // Each lane in its own shade of the arp's colour: VELOCITY the colour,
-    // GATE warmer and lighter, PITCH pale.
+    // Each lane its own fixed colour for its name, bars and knobs (UI review 31,
+    // item 40; they were three shades of the accent).
     juce::Colour laneColour (int lane) const
     {
-        return lane == velocity ? colour
-             : lane == gate     ? colour.withRotatedHue (0.07f).brighter (0.15f)
-                                : colour.interpolatedWith (juce::Colours::white, 0.5f);
+        return lane == velocity ? SeqColours::velocity() : lane == gate ? SeqColours::stepLength() : SeqColours::pitch();
+    }
+
+    // A lane's tool, as its right-click menu runs it (the UI test calls it too).
+    void applyLaneTool (int lane, GenerativeWidgets::LaneTool tool)
+    {
+        const auto which = juce::jlimit (0, (int) numLanes - 1, lane);
+        GenerativeWidgets::applyLaneTool (processorRef, [which] (int step) { return idFor (which, step); }, numSteps(), tool, laneName (which));
+        repaint();
     }
 
     void mouseDown (const juce::MouseEvent& event) override
     {
+        // Right-click on a lane (its name or its bars): the lane's tools, never a
+        // stroke (UI review 31, item 32).
+        if (event.mods.isPopupMenu())
+        {
+            if (const auto lane = laneAtY (event.position.y); lane >= 0)
+                GenerativeWidgets::showLaneMenu (processorRef, *this, [lane] (int step) { return idFor (lane, step); }, numSteps(), laneName (lane));
+            return;
+        }
+
         dragLane = laneAt (event.position);
         dragStep = -1;
 
@@ -953,7 +1260,11 @@ public:
         processorRef.beginEdit (juce::String ("Arp ") + (dragLane == velocity ? "velocity" : dragLane == gate ? "step length" : "transpose"));
         editOpen = true;
         GenerativeWidgets::switchOnIfOff (processorRef, "arp_on");
-        lastPosition = event.position;
+        lastPosition = lineStart = event.position;
+        // Shift-drag draws a straight line from here; the steps it leaves go back as they were.
+        lineMode = event.mods.isShiftDown();
+        for (int step = 0; step < 16; ++step)
+            before[(size_t) step] = GenerativeWidgets::read (processorRef, idFor (dragLane, step));
         drawAt (event.position, event.position);
     }
 
@@ -962,7 +1273,20 @@ public:
         if (! editOpen)
             return;
 
-        drawAt (lastPosition, event.position);
+        if (lineMode)
+        {
+            const auto lane = laneBounds()[(size_t) dragLane];
+            const auto first = stepAt (juce::jlimit (lane.getX() + labelWidth, lane.getRight(), juce::jmin (lineStart.x, event.position.x)));
+            const auto last = stepAt (juce::jlimit (lane.getX() + labelWidth, lane.getRight(), juce::jmax (lineStart.x, event.position.x)));
+            for (int step = 0; step < 16; ++step)
+                if (step < first || step > last)
+                    GenerativeWidgets::write (processorRef, idFor (dragLane, step), before[(size_t) step]);
+            drawAt (lineStart, event.position);
+        }
+        else
+        {
+            drawAt (lastPosition, event.position);
+        }
         lastPosition = event.position;
     }
 
@@ -972,6 +1296,7 @@ public:
             processorRef.endEdit();
 
         editOpen = false;
+        lineMode = false;
         dragLane = dragStep = -1;
         repaint();
     }
@@ -1003,6 +1328,22 @@ private:
     static constexpr float rulerHeight = 15.0f, readoutHeight = 14.0f;
 
     int numSteps() const { return juce::jlimit (1, 16, juce::roundToInt (GenerativeWidgets::read (processorRef, "arp_steps"))); }
+
+    static juce::String laneName (int lane) { return lane == velocity ? "VEL" : lane == gate ? "STEP LEN" : "PITCH"; }
+
+    // The lane at `y`, its name column included (-1 on the ruler).
+    int laneAtY (float y) const
+    {
+        if (y < rulerBounds().getBottom() + 1.0f)
+            return -1;
+
+        const auto lanes = laneBounds();
+        for (int lane = 0; lane < numLanes; ++lane)
+            if (y <= lanes[(size_t) lane].getBottom() + 2.0f)
+                return lane;
+
+        return pitch;
+    }
 
     juce::Rectangle<float> rulerBounds() const
     {
@@ -1098,8 +1439,9 @@ private:
     IlanaSynthAudioProcessor& processorRef;
     juce::Colour colour;
     int dragLane = -1, dragStep = -1;
-    bool editOpen = false;
-    juce::Point<float> lastPosition;
+    bool editOpen = false, lineMode = false;
+    juce::Point<float> lastPosition, lineStart;
+    std::array<float, 16> before {};
 };
 
 // The note path at a glance (review 6, I6-15): which note stages are on and
