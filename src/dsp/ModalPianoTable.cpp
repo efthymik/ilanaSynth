@@ -26,6 +26,74 @@ namespace
         }
     };
 
+    void buildBodyCurve (ModalPianoTable& table)
+    {
+        constexpr int bins = ModalPianoTable::curveBins;
+        const auto t = juce::jmin (1, (int) table.times.size() - 1);
+        const auto times = (int) table.times.size();
+        std::vector<double> sum (bins, 0.0), weight (bins, 0.0);
+        for (const auto& e : table.entries)
+        {
+            const auto hz = 440.0 * std::exp2 ((e.note - 69) / 12.0);
+            auto power = 1.0e-30;
+            for (int k = 0; k < e.partials; ++k)
+                power += std::pow (10.0, e.levels[(size_t) (k * times + t)] / 10.0);
+            const auto total = 10.0 * std::log10 (power);
+            for (int k = 0; k < e.partials; ++k)
+            {
+                const auto f = (double) e.ratios[(size_t) k] * hz;
+                if (! (f > ModalPianoTable::curveLowHz))
+                    continue;
+                const auto x = ModalPianoTable::curveBinsPerOctave * std::log2 (f / ModalPianoTable::curveLowHz);
+                if (x >= bins - 1)
+                    continue;
+                const auto i = (int) x;
+                const auto a = x - i;
+                const auto level = e.levels[(size_t) (k * times + t)] - total;
+                sum[(size_t) i] += (1.0 - a) * level;
+                weight[(size_t) i] += 1.0 - a;
+                sum[(size_t) i + 1] += a * level;
+                weight[(size_t) i + 1] += a;
+            }
+        }
+        // Empty bins take their nearest filled neighbours' line (flat past the ends).
+        std::vector<double> curve (bins, 0.0);
+        std::vector<int> filled;
+        for (int i = 0; i < bins; ++i)
+            if (weight[(size_t) i] > 0.5)
+                filled.push_back (i);
+        if (filled.empty())
+            return;
+        for (int i = 0; i < bins; ++i)
+        {
+            const auto next = std::lower_bound (filled.begin(), filled.end(), i);
+            const auto value = [&] (int j) { return sum[(size_t) j] / weight[(size_t) j]; };
+            if (next == filled.end())
+                curve[(size_t) i] = value (filled.back());
+            else if (*next == i || next == filled.begin())
+                curve[(size_t) i] = value (*next);
+            else
+            {
+                const auto hi = *next, lo = *(next - 1);
+                curve[(size_t) i] = value (lo) + (value (hi) - value (lo)) * (i - lo) / (double) (hi - lo);
+            }
+        }
+        // An octave-wide triangle (edges held).
+        constexpr int reach = ModalPianoTable::curveBinsPerOctave;
+        table.bodyCurve.assign (bins, 0.0f);
+        for (int i = 0; i < bins; ++i)
+        {
+            double total = 0.0, norm = 0.0;
+            for (int j = -reach; j <= reach; ++j)
+            {
+                const auto w = (double) (reach + 1 - std::abs (j));
+                total += w * curve[(size_t) juce::jlimit (0, bins - 1, i + j)];
+                norm += w;
+            }
+            table.bodyCurve[(size_t) i] = (float) (total / norm);
+        }
+    }
+
     ModalPianoTable parse (const char* data, int size)
     {
         ModalPianoTable table;
@@ -129,6 +197,7 @@ namespace
         }
         if (std::find (filled.begin(), filled.end(), false) != filled.end())
             return {};
+        buildBodyCurve (table);
         return table;
     }
 }

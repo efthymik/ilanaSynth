@@ -3450,15 +3450,16 @@ private:
             pieces.routeBar.setBounds ({ mixPanel.getX() + 6 + labelW, filterY, mixPanel.getWidth() - 12 - labelW + 3, filterH });
         }
 
-        // UNISON: the mode menu, then VOICES, DETUNE, BLEND and SPREAD in 44 px cells.
-        osc.uniMode.setBounds (inPanel (unisonPanel, 8, 27, 77, menuH));
+        // UNISON: VOICES, DETUNE, BLEND and SPREAD in 44 px cells centred in the panel, the mode menu under them across the
+        // panel's width (as CHORD sits under PITCH's dials and FILTER under MIX's).
         {
-            auto x = unisonPanel.getX() + 89;
+            auto x = unisonPanel.getX() + (unisonPanel.getWidth() - 4 * 44) / 2;
             for (auto* knob : { &osc.unison, &osc.detune, &osc.uniBlend, &osc.spread })
             {
                 placeKnob (*knob, x, unisonPanel.getY() + 19, 44, mainDial);
                 x += 44;
             }
+            osc.uniMode.setBounds (inPanel (unisonPanel, 8, 66, unisonPanel.getWidth() - 16, menuH));
             pieces.spreadView.setBounds ({});
         }
 

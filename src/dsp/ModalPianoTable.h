@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cmath>
 #include <vector>
+#include <juce_core/juce_core.h>
 
 // The Modal Piano's data (content/piano/modal-piano.bin, from
 // tools/build_modal_piano.py): for each recorded note and velocity, the
@@ -39,6 +41,25 @@ struct ModalPianoTable
     float rate = 44100.0f;
     std::vector<int> notes, velocities; // sorted, each listed once
     std::vector<Entry> entries;     // velocity-major: entries[v * notes.size() + n]
+
+    // The instrument's average tone (2026-11-11, for SIZE): every partial's
+    // level 0.08 s in, against its own note's total, averaged over the
+    // whole table in sixth-octave bins from curveLowHz and smoothed over an
+    // octave. SIZE moves this curve down (a bigger body) or up (a smaller one).
+    static constexpr int curveBins = 60, curveBinsPerOctave = 6;
+    static constexpr float curveLowHz = 40.0f;
+    std::vector<float> bodyCurve; // [curveBins], dB
+
+    // The curve at a frequency (flat past its ends).
+    float curveAt (float hz) const
+    {
+        if (bodyCurve.empty() || ! (hz > 0.0f))
+            return 0.0f;
+        const auto x = juce::jlimit (0.0f, (float) (curveBins - 1), (float) curveBinsPerOctave * std::log2 (hz / curveLowHz));
+        const auto i = juce::jmin ((int) x, curveBins - 2);
+        const auto a = x - (float) i;
+        return bodyCurve[(size_t) i] + a * (bodyCurve[(size_t) i + 1] - bodyCurve[(size_t) i]);
+    }
 
     const Entry& at (int noteIndex, int velocityIndex) const
     {

@@ -989,6 +989,29 @@ void Voice::advanceVoiceLfos (int sampleIndex)
     }
 }
 
+float Voice::bowedNoiseWeight() const noexcept
+{
+    if (! isVoiceActive())
+        return 0.0f;
+    auto bow = 0.0f;
+    for (int osc = 0; osc < VoiceParams::numOscillators; ++osc)
+        if (params.oscillatorEnabled[osc] && params.oscillators[osc].stringMode
+            && params.oscillators[osc].stringExcite == (int) KarplusStrong::Excite::ModalBowed)
+            for (int u = 0; u < stringsPlaying (osc); ++u)
+                bow = juce::jmax (bow, stringFor (osc, u).bowedNoiseWeight());
+    if (bow <= 0.0f)
+        return 0.0f;
+    const auto ampVelScale = 1.0f - params.ampVelocity + params.ampVelocity * velocityLevel;
+    return bow * juce::jmax (0.0f, ampVelScale) * juce::jlimit (0.0f, 1.0f, lastAmpValue);
+}
+
+void Voice::setBowedNoiseShare (float share) noexcept
+{
+    for (int osc = 0; osc < VoiceParams::numOscillators; ++osc)
+        for (int u = 0; u < VoiceParams::maxBufferedUnison; ++u)
+            stringFor (osc, u).setBowedNoiseShare (share);
+}
+
 void Voice::reExcite (float level)
 {
     if (! isVoiceActive() || ! isKeyDown())
