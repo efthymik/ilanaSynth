@@ -3174,7 +3174,7 @@ private:
             // FRAME BLEND: how the table reads between frames, beside the table it reads.
             // (4 px after the steps, as the steps sit 4 px after the table's menu.)
             osc.frameBlend.setBounds (juce::Rectangle<int> (juce::jlimit (0, 138, right.getRight() - x - 4), menuH).withPosition (x, centre - menuH / 2));
-            x = osc.frameBlend.getRight() + 8;
+            x = osc.frameBlend.getRight() + 4;
             // The frame playing now, in the header's free run (the card's picture shows only a slim bar).
             const auto frameW = juce::jlimit (0, 84, right.getRight() - x - 4);
             pieces.frameTag.setBounds ({ x, centre - 8, frameW, 16 });
