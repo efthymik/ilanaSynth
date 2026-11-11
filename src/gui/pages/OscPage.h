@@ -3407,20 +3407,18 @@ private:
 
         // EXCITER: the chosen exciter's name by the title, SLAP at the title's right, the icons, then the knobs centred.
         {
-            // (2026-11-11, ilana: "pack em tighter", "integrate the picker in the exciter section": the engine switch
-            // by the title, the six type icons packed 3 px apart under it, the type's name beside them.)
+            // (2026-11-11, ilana: "pack em tighter", "integrate the picker in the exciter section", then "the off center of
+            // it all is bad": the engine switch centred in the title row between EXCITER and SLAP, the six type icons packed
+            // 3 px apart and centred under it, the knobs centred below: one centre line. The lit icon names the type.)
             syncExciterSwitch (index);
+            const auto centreX = exciterPanel.getCentreX();
             const auto switchW = pieces.exciterSwitch.size() > 1 ? pieces.exciterSwitch.idealWidth() : 0;
-            pieces.exciterSwitch.setBounds (switchW > 0 ? inPanel (exciterPanel, 54, 3, juce::jmin (switchW, exciterPanel.getWidth() - 54 - 7), 16)
+            pieces.exciterSwitch.setBounds (switchW > 0 ? juce::Rectangle<int> (centreX - switchW / 2, exciterPanel.getY() + 3, switchW, 16)
                                                         : juce::Rectangle<int>());
             if (slap != nullptr)
                 slap->setBounds ({ exciterPanel.getRight() - 55, exciterPanel.getY() + 5, 48, 12 });
             const auto iconsW = pieces.exciterPills.size() * 22 + (pieces.exciterPills.size() - 1) * 3;
-            pieces.exciterPills.setBounds (inPanel (exciterPanel, 6, 21, iconsW, 18));
-            CardGeometry::Label name { inPanel (exciterPanel, 6 + iconsW + 13, 24, exciterPanel.getWidth() - iconsW - 26, 12),
-                                       Exciters::types()[(size_t) Exciters::typeOf (excite)].name };
-            name.bright = true;
-            card.labels.push_back (name);
+            pieces.exciterPills.setBounds ({ centreX - iconsW / 2, exciterPanel.getY() + 21, iconsW, 18 });
             const auto n = (int) exciterKnobs.size();
             const auto cell = n > 0 ? juce::jmin (52, (exciterPanel.getWidth() - 14) / n) : 52;
             auto x = exciterPanel.getX() + (exciterPanel.getWidth() - n * cell) / 2;
