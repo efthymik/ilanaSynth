@@ -277,6 +277,7 @@ protected:
     {
         if (sustainVoiceCap > 0)
             capSustainedVoices();
+        updateBowedNoiseShare (numSamples);
 
         int sounding[64] {};
         auto numSounding = 0;
@@ -378,6 +379,49 @@ protected:
     }
 
 private:
+    // (Modal Bowed, chords) Each bowed note makes its own noise (the bow
+    // hair's, the hall's floor, the residual layers), so N notes stacked N
+    // noise beds, sqrt (N) louder than one, while the tone adds as notes do.
+    // Every bowed voice plays 1 / sqrt (n) of its noise, n the sounding
+    // notes weighed by their bow envelope and amp level against the loudest
+    // (sum (w / w max)^2: a releasing tail or a quiet note counts less), so
+    // the noises' power sums to about one note's. Smoothed over
+    // bowedNoiseSeconds, set before the sub-block renders (here on the
+    // audio thread, so the MULTI-CORE workers only read it). One note (or
+    // none) is exactly 1: a single note plays bit for bit as before.
+    static constexpr double bowedNoiseSeconds = 0.08;
+    float bowedNoiseShare = 1.0f, bowedNoisePushed = 1.0f;
+
+    void updateBowedNoiseShare (int numSamples)
+    {
+        auto loudest = 0.0f, power = 0.0f;
+        auto counted = 0;
+        for (auto* voice : voices)
+        {
+            const auto w = static_cast<Voice*> (voice)->bowedNoiseWeight();
+            if (w > 0.0f)
+            {
+                ++counted;
+                loudest = juce::jmax (loudest, w);
+                power += w * w;
+            }
+        }
+        const auto target = counted <= 1 ? 1.0f : juce::jlimit (0.0f, 1.0f, loudest / std::sqrt (power));
+        if (bowedNoiseShare != target)
+        {
+            const auto keep = (float) std::exp (-(double) numSamples / (bowedNoiseSeconds * juce::jmax (1.0, getSampleRate())));
+            bowedNoiseShare = target + (bowedNoiseShare - target) * keep;
+            if (std::abs (bowedNoiseShare - target) < 1.0e-5f)
+                bowedNoiseShare = target;
+        }
+        if (bowedNoiseShare != bowedNoisePushed)
+        {
+            bowedNoisePushed = bowedNoiseShare;
+            for (auto* voice : voices)
+                static_cast<Voice*> (voice)->setBowedNoiseShare (bowedNoiseShare);
+        }
+    }
+
     void capSustainedVoices()
     {
         while (true)

@@ -255,8 +255,23 @@ public:
         }
     }
 
+    // (Chords) The share of its own noise this voice plays: the bow hair's
+    // noise (and so its hiss, its body and air-mode noise), the string's
+    // top, the hall's floor and rumble and the residual layers; the string
+    // and body's tone are untouched. IlanaSynth sets 1 / sqrt (the sounding
+    // bowed notes, weighed by noiseWeight), smoothed, once a sub-block; this
+    // voice glides to it over its next 32-sample block. 1 (one note) plays
+    // bit for bit as before.
+    void setNoiseShare (float share) noexcept { noiseShareTarget = share; }
+
+    // How much this voice's noise counts toward a chord's: the bow's
+    // pressure envelope (0 bowless and on a pluck, falls on the let-go).
+    float noiseWeight() const noexcept { return silent || plucked ? 0.0f : envelope; }
+
     void trigger (float velocity, float randomUnit)
     {
+        noiseShare = noiseShareLanding = noiseShareTarget;   // (a new note starts at the chord's share, no glide)
+        noiseShareStep = 0.0f;
         velocityLevel = juce::jlimit (0.0f, 1.0f, velocity);
         seed = (std::uint32_t) (randomUnit * 4294967040.0f) | 1u;
         vibratoPhase = randomUnit * juce::MathConstants<float>::twoPi;
@@ -421,6 +436,7 @@ private:
             bowVelocity += wolfShape * wolfMove;
         }
         bowVelocity *= halfRate;
+        noiseShare += noiseShareStep;   // (0 but while a chord's share moves)
 
         auto force = 0.0f;
         if (! plucked)
@@ -456,7 +472,7 @@ private:
                     noiseHeld = noiseStroke;
                 else
                     noiseStroke = juce::jmax (noiseStroke, noiseFloorNow);
-                hairNoise = ((float) (seed >> 8) * (2.0f / 16777216.0f) - 1.0f) * bowSpeed * bowWander * noiseStroke;
+                hairNoise = ((float) (seed >> 8) * (2.0f / 16777216.0f) - 1.0f) * bowSpeed * bowWander * noiseStroke * noiseShare;
                 const auto bite = 1.0f + 0.6f * velocityLevel * biteEnvelope;
                 auto bow = speed * bite * (1.0f + rosin * rosinJitter * jitterRatio);
                 if constexpr (wolf)
@@ -568,7 +584,7 @@ private:
             // (Round 10, the violin's) The body's air mode rings on its own:
             // the hair's noise and airFloor of the hall's floor (its last
             // pink sample) through one resonator at airHz.
-            const auto in = hairNoise + airFloorShare * floorEnvelope * floorPinkLast;
+            const auto in = hairNoise + airFloorShare * noiseShare * floorEnvelope * floorPinkLast;
             const auto y = airB0 * (in - airX2) - airA1 * airY1 - airA2 * airY2;
             airX2 = airX1;
             airX1 = in;
@@ -595,7 +611,7 @@ private:
                 topY[k][0] = y;
                 x = y;
             }
-            sound += stringTopGain * x * level;
+            sound += stringTopGain * noiseShare * x * level;
         }
         peakBody = juce::jmax (peakBody, std::abs (sound));
         sound *= outputNow;   // (round 13: outputGain by the note's outputDb)
@@ -651,7 +667,7 @@ private:
                 floorHighLast = floorHigh;
                 const auto shaped = floorSecond >= 1.0f ? floorHigh2 : floorSecond > 0.0f ? floorHigh + (floorHigh2 - floorHigh) * floorSecond : floorHigh;
                 floorEnvelope += floorStep;
-                sound += floorGain * floorEnvelope * (shaped + floorWhiteNow * white);
+                sound += floorGain * noiseShare * floorEnvelope * (shaped + floorWhiteNow * white);
                 floorPinkLast = pink;
                 if (rumbleGain > 0.0f)
                 {
@@ -660,7 +676,7 @@ private:
                     rumbleX1 = pink;
                     rumbleY2 = rumbleY1;
                     rumbleY1 = rumble;
-                    sound += rumbleGain * floorEnvelope * rumble;
+                    sound += rumbleGain * noiseShare * floorEnvelope * rumble;
                 }
             }
         }
@@ -679,7 +695,7 @@ private:
                 {
                     const auto l = layerActive[k];
                     layerGain[l] += layerStep[l];
-                    sound += layerGain[l] * (layerLoopA[l][layerRead[0].at] + layerLoopB[l][layerRead[1].at]);
+                    sound += layerGain[l] * noiseShare * (layerLoopA[l][layerRead[0].at] + layerLoopB[l][layerRead[1].at]);
                 }
             else
             {
@@ -693,7 +709,7 @@ private:
                 {
                     const auto l = layerActive[k];
                     layerGain[l] += layerStep[l];
-                    sound += layerGain[l] * (layerLoopA[l][a.at] * outA + layerLoopA[l][a.next] * inA
+                    sound += layerGain[l] * noiseShare * (layerLoopA[l][a.at] * outA + layerLoopA[l][a.next] * inA
                                              + layerLoopB[l][b.at] * outB + layerLoopB[l][b.next] * inB);
                 }
             }
@@ -706,6 +722,15 @@ private:
     void nextBlock (bool noteHeld)
     {
         untilBlock = blockSize;
+        // (Chords) Glide to the chord's noise share over this block, landing on it exactly.
+        if (noiseShareStep != 0.0f || noiseShare != noiseShareTarget)
+        {
+            noiseShare = noiseShareLanding;
+            noiseShareStep = (noiseShareTarget - noiseShare) * (1.0f / (float) blockSize);
+            noiseShareLanding = noiseShareTarget;
+            if (noiseShareStep == 0.0f)
+                noiseShare = noiseShareTarget;
+        }
         if (modesDirty)
             updateModes();
         if (bodyDirty)
@@ -1881,6 +1906,8 @@ private:
     float envelope = 0.0f, attackCoefficient = 0.001f, releaseCoefficient = 0.001f;
     float biteEnvelope = 1.0f, biteFall = 0.999f, level = 1.0f, levelFall = 1.0f;
     float halfRate = 22050.0f, forceScale = 1.0f, pluckScale = 1.0f, peakBridge = 0.0f, peakBody = 0.0f;
+    // (Chords: the share of this voice's noise, setNoiseShare)
+    float noiseShare = 1.0f, noiseShareStep = 0.0f, noiseShareTarget = 1.0f, noiseShareLanding = 1.0f;
     float swell = 0.0f, swellCoefficient = 0.0001f, swellOnCoefficient = 0.0001f, hairNoise = 0.0f, hissState = 0.0f, hissLast = 0.0f, hissPole = 0.35f, tilt = 0.0f, tiltPole = 0.6f;
     float vibratoCents = 9.0f, vibratoPhase = 0.0f;
     float wanderPole = 0.01f, wanderGain = 0.0f, bowDriftGain = 0.0f, vibratoPole = 0.01f, rateDriftGain = 0.0f, depthDriftGain = 0.0f;

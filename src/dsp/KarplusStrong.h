@@ -55,6 +55,10 @@ public:
     bool isPiano() const { return excite == Excite::Piano; }
     bool isModal() const { return excite == Excite::ModalPiano || excite == Excite::ModalGuitar; }
     bool isBowedModal() const { return excite == Excite::ModalBowed; }
+    // (Modal Bowed, chords) The share of its noise a bowed voice plays and
+    // how much it counts toward the chord's (ModalBowed::setNoiseShare).
+    void setBowedNoiseShare (float share) noexcept { bowedModal.setNoiseShare (share); }
+    float bowedNoiseWeight() const noexcept { return isBowedModal() ? bowedModal.noiseWeight() : 0.0f; }
     // Stereo exciters (the Modal Piano): (left - right) / 2 of the sample
     // process() last returned, which is their middle. 0 for the rest.
     float side() const { return isModal() ? modal.side() : 0.0f; }

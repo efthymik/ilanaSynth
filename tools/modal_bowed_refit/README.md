@@ -373,4 +373,19 @@ at size 1 and under, so the violin (and the pizzicato) play bit for bit as befor
 constant per note (4-18 dB): the score is taken against each note's own sustain, so that is free on it. Rerun
 `size_level.cpp` after any round that moves a note's level.
 
+Chords' noise (2026-11-11; ilana: "the bowed modal noise is a bit much when playing chords"). Each bowed note makes its own
+noise (the bow hair's, so its hiss, body and air-mode noise; the cello's string top; the hall's floor and rumble; the
+residual layers), so four notes stacked four independent noise beds, 6 dB over one note's, while the tone adds as notes
+do. `IlanaSynth::updateBowedNoiseShare`, once a sub-block on the audio thread before the voices render (the MULTI-CORE
+workers only read it), sets every bowed voice's noise to 1 / sqrt (n), n = sum (w / w max)^2 over the sounding voices,
+w = the voice's loudest Modal Bowed string's bow envelope by its amp level and velocity scale (`Voice::bowedNoiseWeight`):
+a releasing tail or a quiet note counts less, unison and twin strings and several bowed oscillators are one note, a pluck
+counts 0. Smoothed with a one-pole of 80 ms on the sub-block; each voice glides to it over its next 32-sample block,
+sample by sample (`ModalBowed::setNoiseShare`); a new note starts at the current share. One note (or none) is exactly 1,
+so a single note plays bit for bit as before (the scores are unchanged); the pizzicato has none of these noises. The
+string and body's tone (and the rosin's jitter, which drives the string) are untouched. Init patch, held 1-4 s, noise =
+the render less a render with the share 0 (the noise paths are linear, their random streams unmoved): cello C3 E3 G3 C4
+noise to tone -16.4 -> -22.4 dB (its noise -32.1 -> -38.1 dB, one note's -34.8 to -46.6), violin G4 B4 D5 G5 -12.1 ->
+-18.0 dB (-28.6 -> -34.6, one note's -31.4 to -43.2). Staggered entries and exits glide (largest 20 ms step 0.4 dB).
+
 Needs numpy, scipy, soundfile, numba, mido, matplotlib.
