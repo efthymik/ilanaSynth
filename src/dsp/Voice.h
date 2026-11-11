@@ -684,6 +684,14 @@ public:
     float getMasterBendRange() const noexcept { return params.masterBendRange; }
     void renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSample, int numSamples) override;
 
+    // (Modal Bowed, chords) How much this note's bowed noise counts toward
+    // a chord's (its loudest Modal Bowed string's bow envelope by the amp's
+    // level and velocity; unison and twin strings are one note), and the
+    // share of their noise its Modal Bowed strings play (IlanaSynth sets it
+    // before each sub-block renders; KarplusStrong::setBowedNoiseShare).
+    float bowedNoiseWeight() const noexcept;
+    void setBowedNoiseShare (float share) noexcept;
+
 private:
     void syncSamplePlayers();
     const SampleData* stretchCopyFor (int osc, const SampleData* origin);
@@ -776,6 +784,10 @@ private:
     };
     ExtraStringBank extraStringUnison[3] { ExtraStringBank (3), ExtraStringBank (4), ExtraStringBank (5) };
     KarplusStrong& stringFor (int osc, int unison)
+    {
+        return osc < 3 ? stringUnison[osc][unison] : extraStringUnison[osc - 3].voices[unison];
+    }
+    const KarplusStrong& stringFor (int osc, int unison) const
     {
         return osc < 3 ? stringUnison[osc][unison] : extraStringUnison[osc - 3].voices[unison];
     }
