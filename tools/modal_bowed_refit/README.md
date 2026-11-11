@@ -225,4 +225,152 @@ Twin, all 42 notes: 12.53 -> 10.40 (16384/14641; 65536/59049 scored 10.38, 8192/
   now jumps to a random place once a length, crossfading over 15 ms with equal power (the two places
   are uncorrelated): the autocorrelation there is near 0, the spectrum and the score unchanged.
 
+Round 12 (2026-11-11), the cello's: its own noise layers. Nothing reaches a violin's size (the violin renders bit
+for bit as round 11's) nor a pluck. New:
+- The cello's table gains `rs0_db`, `rs1_db`, `rs2_db` (19 notes): residual layers exactly as the violin's (same
+  generator and loops, built with the violin's on the same background thread: +7.1 MB, 22.7 MB in all, about 1 s).
+  `note_rows(..., layer=True)` weighs a table's layers w (1 - |t - u_table|): w (1 - t) for the violin's (as round 11)
+  and w t for the cello's. Played, they replace `rsc_cflr` of the low floor, `rsc_hf` of the string's top and `rsc_nfl`
+  of the release floor (all 1, by their level; those terms are by t already); `rsc_hiss` (0) is the twin's only.
+- Each table's own layer envelope (`rs_env` in the table's json over DEFAULT's: the cello's `rs0_rdb` 20, `rs0_att`
+  0.4): `ModalBowedNotes::Table::envelope`.
+- Per-note `sn_db` (the sine wander's depth) and `am_db` (the level vibrato's) in the cello's table, replacing the global.
+- `kn_on` / `kn_rl` refitted (a second frozen-bow pass with the layers in), and `lp_hz` 5590 -> 3000 at the cello's
+  size (blended by t; the layers come after the roll-off). The pizzicato keeps 5590 (`tiltHzPizz`).
+- The engine picks a note's layers once the tables' weights at its size are known (`pickLayers`: the residual table
+  weighing most, the first on a tie, as round 11 took the first); a note whose loops aren't built yet plays round 11's
+  floor, top and release floor.
+Twin, demo notes, 3 seeds: cello 11.39 -> 10.07 (sustain 1.75 -> 0.96); the engine alone, 3 takes: 11.83 -> 10.62, each
+term within 0.1 of the twin's change; about 1.5 dB louder on the demo notes, as the twin. Lessons:
+- What the cello's round 10 noise paths (low floor, string top, release floor) left was again each note's own noise
+  spectrum: the violin's layers carry over unchanged, with a slower, deeper let-go step on the sustain layer.
+- The plugin's demo render gains about 0.8 less than the engine alone: the plugin's Init-patch render is 1 to 10 dB
+  darker than the bare engine from about 9 kHz up (the same before and after); the layers, matched to Spitfire up
+  there, show it where the round 11 cello's too-bright top hid it. Judge engine changes on the engine alone (or the
+  twin) as well as on the demo.
+
+Round 12 (2026-11-11), the violin's: each partial's and each layer's level over time. All in the violin's table, by its
+weight (nothing reaches the cello: rendered alone it plays bit for bit as its round 12 above), never on a pluck. New:
+- `kv_su` [8 octaves][4 knots at `su_t` 1.0, 1.9, 2.8, 3.7 s]: dB on each partial's gain over the held note (its mean over
+  1.5-3.5 s 0), spread over the partials as the cello's knots, held before the first knot and after the last (through
+  the release too). Engine: `ModalBowedNotes::Row::knotSustain`, `knotSustainSeconds`.
+- `kv_on` [8][6] and `kv_rl` [8][5]: the cello's `kn_on` / `kn_rl` mechanism and knot times, in the same engine columns
+  (`knotOn`, `knotRelease`), now played without the cello's other terms (`levels<cello, knots>`).
+- `rk_on` [3 layers][6] and `rk_rl` [3][5]: the same knots (dB, amplitude) on each residual layer, from the note-on (0 from
+  0.9 s) and after the let-go (0 at the let-go, the last held). Engine: `Row::layerOn`, `layerRelease`.
+- The table's `slow_db` at 0.35 of round 11's.
+- In the twin only: `rk_su` (a hook, unused) and the frozen-bow fitting masks (`_mmask`, `_ymask`, `_rsmask`).
+Twin, demo notes, 3 seeds: violin 10.01 -> 9.29 (attack 4.57 -> 4.16, release 4.71 -> 4.13); the engine alone, 3 takes:
+10.30 -> 9.56, each term within 0.2 of the twin's change. CPU per held violin voice about 1.5 % more (the knots each block).
+All 42 notes (the fit's run): -0.66 (better on 40 of 42; held-out notes -0.77), from the attack (-0.36, all 42) and the release
+(-0.55, all 42). Lesson: as on the cello in round 11, what was left on the violin was the shape of the levels over time, of
+the partials and of the noise layers alike; knots fitted with the bow frozen carry it, held-out notes as much as fitted ones.
+
+Round 13 (2026-11-11), both instruments: every linear output part refitted at once. All in the tables, by their weight,
+never on a pluck. New:
+- A joint frozen-bow refit (two passes, 6 + 6 takes, validated on seeds 4-6) of each note's linear columns together on
+  the whole picture score: `gain_db` (one per partial now, up to 64), the partials' onset / release knots (`kv_on`,
+  `kv_rl`; the cello's `kn_on`, `kn_rl`), the held note's knots `kv_su` on 10 knots (`su_t` every 0.3 s from 1.0 to
+  3.7 s, was 4 every 0.9 s), the three layers' 45 band levels (`rs0_db`, `rs1_db`, `rs2_db`) and their knots `rk_on`,
+  `rk_rl` and the new `rk_su` [3 layers][10] (dB on each layer at `su_t`, held before the first knot and after the last,
+  through the release). Engine: `Row::layerSustain`, played in `layerKnots` beside the onset and release knots.
+- The cello's table has `kv_su`, `rk_on`, `rk_rl`, `rk_su` too: the twin now plays them from any table by its weight,
+  as the engine already did (round 12 kept them to the violin's size in the twin only).
+- `out_db` per note: dB on the note's whole output (`ModalBowedNotes::outputDb`; the engine's `outputNow` and the hiss,
+  floors, rumble and layers at note-on), keeping each note's loudness at round 12's: the picture score is blind to
+  level, so the joint fit moved it (violin -8.4 to +2.8 dB, cello -5.4 to +1.8).
+- The released bowed note's fade (`releaseFadeAtSize`) goes a sample at a time (`levelFall`), as the twin's: a step
+  every 32-sample block amplitude-modulated the ringing string at the block rate, a buzz of lines at 1.5 kHz and its
+  multiples around each partial in a cello's tail. A pluck still steps a block (pizzicato bit for bit).
+Twin, all notes, seeds 4-6: violin 9.75 -> 8.68 (better on 41 of 42), cello 9.20 -> 7.88 (19 of 19). Demo notes:
+violin 9.29 -> 8.32, cello 10.07 -> 8.08 (3 seeds). The engine alone, 3 takes: violin 9.56 -> 8.42, cello 10.62 ->
+8.78, each term within 0.1 of the twin's change but the violin's plevel (-0.39 against the twin's -0.13); loudness
+within 0.5 dB of round 12's on the demo notes. CPU per held voice +0.3 to +0.4 % (violin) and +0.7 % (cello) in
+callgrind; the tables +19 KB (Row +79 floats), each voice +1.8 KB (`knotSustain` 10 columns), the layer loops
+unchanged (22.7 MB). Lessons:
+- The separate rounds' fits (each part fitted with the others fixed) left gains in their interplay: fitting every
+  linear part at once with the bow frozen, by exact gradient on the whole score, improved 41 of 42 violin notes and all
+  19 cello notes, every term better on average.
+- A fit on a level-blind score drifts the level: keep a per-note output gain (`out_db`) to put the loudness back.
+- The engine's block-rate steps show once the rest matches: the release fade's 32-sample step was a visible buzz in the
+  cello's tail spectrum; anything that ramps a level over the note should go per sample.
+- The plugin's Init patch is not the engine: its F1 (12 kHz, 12 dB low-pass, reso 0.25) is what makes the plugin's
+  render 1 to 10 dB darker than the engine from about 9 kHz up (round 12's lesson), and its AMP (sustain 0.8, release
+  0.8 s in `score_render.py`, 2.5 s in the demo renders) reshapes the release. For scoring a plugin render against the
+  twin, render with `ILANA_SET="osc1_excite=Modal Bowed,amp_release=5,amp_sustain=1,f1_cutoff=20000"` (and
+  `osc1_modal_size=2.1` for the cello): the demo with the Init patch scores violin 10.26 -> 9.64, cello 11.44 -> 9.77; rendered so, violin 9.69 -> 8.76, cello 10.53 -> 8.75 (both
+  rounds better by 0.6 to 1.0 there, the change itself close to the engine alone's).
+
+Round 14 (2026-11-11), both instruments: the take to take.
+What two takes of the twin differ by (its seed against its seed, "t2t") the score counts as error. Measured stream by stream
+(the twin's kw `_sd` gives each random stream its own seed: 0 the bow's noise, 1 the slow wander (each partial's, the
+loudness's, the vibrato's rate and depth), 2 the flutter and pitch drift, 3 the floor, 4 the sine wander's phases, 5 the
+string top's noise, 6 the layers' start, 7 their jumps), and Spitfire's own steadiness measured where one take allows
+(wobble.py's measures on all notes, the whole note's level drift, each partial's roughness in the attack and release):
+- About 60 % of the violin's attack and release cells (27 % of the cello's) hold no partial: there two takes differ by
+  4.2-4.6 dB, and the twin differs from Spitfire by 4.7-4.8: noise against noise. Spitfire's noise wobbles over time as
+  much as the twin's (sustain wobble by band within 0.3 dB), so that part of the grey is honest; it stays.
+- The bow's chaotic onset is not where the attack's take to take comes from: the rosin's jitter brought in over 0.3 s
+  (the string's onset then noise-free) left the attack's scatter in the partials' bands unchanged (2.18 -> 2.20 dB) and
+  the score with it. The slow wander (1.5 dB of it alone) and the flutter (1.3) are.
+- Spitfire's whole note is steadier in level than the twin's (its level's drift under 2 Hz: violin 1.72 against 1.94 dB,
+  cello 1.45 against 2.01) and its partials drift less together (their slow correlation 0.10 against 0.21); its vibrato
+  depth varies cycle to cycle at least as much as the twin's (violin 0.44 against 0.38, cello 0.58 against 0.32), and its
+  pitch drifts as much (violin 3.6 cents against 3.6).
+So, in sim.py's DEFAULT and CELLO (zero CPU: four constants):
+- The vibrato's depth wander half as deep (vib_depth_dev 0.4561 -> 0.22805, the cello's 0.31309 -> 0.156545) and the
+  vibrato's wanders three times quicker (vib_drift_hz 0.8 -> 2.4 Hz, both sizes): the depth still varies cycle to cycle
+  (violin 0.41 against Spitfire's 0.35 on 9 notes), but no longer drifts a whole note's partial levels over a take; the
+  depth's spread take to take halved (1.9 -> 1.0 cents).
+- The cello's loudness wander half as deep (CELLO loud_db 0.77633 -> 0.388165).
+- Each note's partial gains moved back to round 13's mean levels (the wanders' depth shifts them), then round 13's joint
+  frozen-bow refit run once more on top (fit seeds 1, 2, 3, 7, 8, 9; validated on 4-6), out_db relevelled (each note's
+  loudness round 13's).
+Twin, all notes, seeds 4-6 (paired by note, se over notes):
+  violin 8.520 -> 8.034 (-0.486 se 0.041, better on 41 of 42; held-out pairs -0.423, 16 of 16); globals alone -0.242
+  (39/42), the refit on top -0.245 (39/42). Take to take (8 seeds, 28 pairs) 6.58 -> 5.92.
+  cello 7.798 -> 7.491 (-0.306 se 0.035, 19 of 19; held-out pairs -0.374, 6 of 6); globals alone -0.128 (17/19), the refit
+  on top -0.178 (19/19). Take to take 5.68 -> 5.27.
+  Demo notes, seeds 1-3: violin 8.32 -> 7.78, cello 8.08 -> 7.68.
+  Control (cello): the same refit pass on round 13's cello alone gains -0.177 (18/19, take to take 5.66 -> 5.63): the refit's
+  share is another pass's, not the calming's. Against that control round 14's cello is -0.129 (15/19, held-out 5/6), the
+  globals' own share, and its take to take 0.39 lower. (No violin control: the refit's -0.245 there is likely the same kind.)
+Tried and left out: no loudness wander on the violin (attack and release better, wobble and vibam worse: even), the pitch
+drift off (Spitfire drifts as much; worse on the cello), the rate wander off, the violin's per-partial noise wander as the
+cello's sines (-0.016, 28/42: not worth the cello path's CPU on every violin voice), the flutter halved (+0.43 / +0.41:
+Spitfire's upper partials flutter), the ripple halved (+0.24 violin), the rosin's jitter halved (even / +0.05), the rosin's
+jitter faded in at the onset (even).
+Engine: `depthWander`, `vibratoWanderHz`, `depthWanderCello`, `bowDriftDbCello` and the tables; `write_engine.py` now writes
+`vibratoWanderHz` too (from `vib_drift_hz`, one value at every size). The engine alone, 3 takes: violin 8.42 -> 8.10, cello
+8.78 -> 8.42, each term within 0.1 of the twin's change but the violin's plevel (-0.03 against the twin's -0.33 on seeds 1-3:
+take luck, round 13's twin was 0.31 worse there than on other seeds; on 6 more takes / seeds the engine moves 8.43 -> 7.99,
+plevel -0.09, the twin 8.56 -> 8.02, plevel -0.13). The plugin (demo, Init patch) violin 9.64 -> 9.21, cello 9.77 -> 9.23;
+rendered with the AMP open and F1 at 20 kHz, violin 8.76 -> 8.28, cello 8.75 -> 8.23. Loudness of the held part within
+0.4 dB of round 13's; the cello's G2 (43) starts about 2 dB softer and ends 0.7 dB louder in the twin and the engine
+alike (the refit's onset and release knots; the relevel holds 1-4 s), -0.8 dB over the whole note. Pizzicato bit for bit,
+CPU per held voice unchanged (callgrind within 0.04 %), memory unchanged.
+Lessons:
+- Measure what two takes differ by, stream by stream, before calming anything: most of it is noise cells the recording
+  shares, and the rest (wander, flutter) is where the twin is less steady than one take of Spitfire, not the bow's onset.
+- A random process whose slow part moves a whole take (a 0.8 Hz vibrato-depth drift over a 2.8 s window) costs the score
+  through its spread; the same randomness moved quicker (cycle to cycle) keeps the character and averages out.
+- Judge a global that moves the partials' mean levels after moving the gains back (a recentred table, seeds 1-3): the level
+  shift otherwise hides or fakes its effect on the movement terms.
+
+SIZE's loudness (2026-11-11). Between the violin (size 1, u 0) and the cello (2.1, u 1) the two fits blend and neither
+is whole: the tables weigh nothing from u 0.25 to 0.75, the layers by w (1 - |u - u_table|), and the body, direct path
+and room move with SIZE. A held bowed note fell 5-14 dB under the line (in dB, by u) between its levels at the two ends,
+deepest near u 0.75-0.85 (size 1.75-1.85), and the cello's fit is itself 4-18 dB under the violin's on the same note:
+turning SIZE toward the cello only ever got quieter. `size_level.cpp` measures the engine (without the correction,
+`setSizeLevel (false)`) note by note, MIDI 24-108, at 25 sizes (u = k / 24, three seeds, 1.0-3.5 s of a held note at
+the card's defaults) and writes `src/dsp/ModalBowedSizeLevel.h`: the dB at each knot that keeps the note at one level,
+its anchor. The anchor is the violin's level from MIDI 55 up (its table's notes); under that, where size 1 plays notes
+no violin has (and is up to 10 dB louder than its lowest real notes), it is the cello's level plus the violin-cello gap
+smoothed over 9 notes, so the cello keeps its own note-to-note levels, eased in from the violin's own level over u
+0-0.25. The engine adds it, linear between knots and held past the cello, to the note's `outputDb` (so on everything
+`outputScale` scales), set with the fit: at note-on and once a block only when SIZE moves, no per-sample cost. It is 0
+at size 1 and under, so the violin (and the pizzicato) play bit for bit as before; the cello is its fit raised by a
+constant per note (4-18 dB): the score is taken against each note's own sustain, so that is free on it. Rerun
+`size_level.cpp` after any round that moves a note's level.
+
 Needs numpy, scipy, soundfile, numba, mido, matplotlib.
