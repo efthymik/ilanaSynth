@@ -30,7 +30,14 @@ struct ModalPianoTable
         // left, radians), the same for every velocity of a note.
         std::vector<float> balance, phase;         // [partials]
         std::vector<float> modeBalance, modePhase; // [modes]
+        float attackDb = -200.0f; // the attack's level over its first 80 ms (both channels), dB
     };
+
+    // The guitar's attacks are separate takes per velocity, not one
+    // instrument's strikes: mixed sample by sample their plucks partly
+    // cancel (2026-11-11), so it plays the nearer layer's at the blended
+    // level. (The grand keeps its mix: its layers line up.)
+    bool nearestAttack = false;
 
     static constexpr int noiseBandCount = 6;
     static constexpr float noiseBands[noiseBandCount][2] { { 0, 500 }, { 500, 1000 }, { 1000, 2000 },

@@ -198,6 +198,14 @@ namespace
         if (std::find (filled.begin(), filled.end(), false) != filled.end())
             return {};
         buildBodyCurve (table);
+        for (auto& e : table.entries)
+        {
+            const auto n = juce::jmin (e.attack.size(), e.attackRight.size(), (size_t) (0.08 * table.rate));
+            auto power = 1.0e-20;
+            for (size_t i = 0; i < n; ++i)
+                power += 0.5 * ((double) e.attack[i] * e.attack[i] + (double) e.attackRight[i] * e.attackRight[i]);
+            e.attackDb = (float) (10.0 * std::log10 (power / (double) juce::jmax ((size_t) 1, n)));
+        }
         return table;
     }
 }
@@ -210,6 +218,11 @@ const ModalPianoTable& ModalPianoTable::get()
 
 const ModalPianoTable& ModalPianoTable::guitar()
 {
-    static const ModalPianoTable table = parse (WavetableData::modalguitar_bin, WavetableData::modalguitar_binSize);
+    static const ModalPianoTable table = []
+    {
+        auto t = parse (WavetableData::modalguitar_bin, WavetableData::modalguitar_binSize);
+        t.nearestAttack = true;
+        return t;
+    }();
     return table;
 }
