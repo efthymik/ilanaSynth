@@ -2747,8 +2747,8 @@ private:
         filled.lineTo (plot.getX() + plot.getWidth() - 1.0f, centreY);
         filled.lineTo (plot.getX(), centreY);
         filled.closeSubPath();
-        juce::ColourGradient fade (colour.withMultipliedAlpha (0.26f), plot.getX(), centreY - halfHeight,
-                                   colour.withMultipliedAlpha (0.26f), plot.getX(), centreY + halfHeight, false);
+        juce::ColourGradient fade (colour.withMultipliedAlpha (0.32f), plot.getX(), centreY - halfHeight,
+                                   colour.withMultipliedAlpha (0.32f), plot.getX(), centreY + halfHeight, false);
         fade.addColour (0.5, colour.withAlpha (0.0f));
         const juce::Graphics::ScopedSaveState state (g);
         g.setGradientFill (fade);
