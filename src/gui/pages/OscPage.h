@@ -1585,9 +1585,27 @@ public:
             card.nextTable.onClick = [this, i] { stepHeader (i, 1); };
             card.exciterPills.setColour (family);
             card.exciterPills.setItems (tintedExciterIcons());
-            card.exciterPills.getChosen = [this, i] { return readChoice (juce::String (OscillatorIds::prefixes[(size_t) i]) + "_excite"); };
-            card.exciterPills.onChoose = [this, i] (int choice) { chooseExciter (i, choice); };
+            // (The six types, 2026-11-11: an icon picks its type's first engine, the modal one where there is one;
+            // a click on the type in use keeps its engine.)
+            card.exciterPills.getChosen = [this, i] { return Exciters::typeOf (readChoice (juce::String (OscillatorIds::prefixes[(size_t) i]) + "_excite")); };
+            card.exciterPills.onChoose = [this, i] (int type)
+            {
+                const auto now = readChoice (juce::String (OscillatorIds::prefixes[(size_t) i]) + "_excite");
+                if (Exciters::typeOf (now) != type)
+                    chooseExciter (i, Exciters::types()[(size_t) type].engines.front());
+            };
             addChildComponent (card.exciterPills);
+            // The type's engine switch (MODAL / the older waveguide ones), minilogue style.
+            card.exciterSwitch.setColour (family);
+            card.exciterSwitch.setTooltip ("Which engine plays this exciter type: MODAL is the measured instrument, the others the older waveguide models");
+            card.exciterSwitch.getChosen = [this, i] { return Exciters::positionOf (readChoice (juce::String (OscillatorIds::prefixes[(size_t) i]) + "_excite")); };
+            card.exciterSwitch.onChoose = [this, i] (int position)
+            {
+                const auto& engines = Exciters::types()[(size_t) Exciters::typeOf (readChoice (juce::String (OscillatorIds::prefixes[(size_t) i]) + "_excite"))].engines;
+                if (position >= 0 && position < (int) engines.size())
+                    chooseExciter (i, engines[(size_t) position]);
+            };
+            addChildComponent (card.exciterSwitch);
             addChildComponent (card.typeBar);
             addChildComponent (card.routeBar);
             addChildComponent (card.outBar);
@@ -2656,19 +2674,29 @@ private:
                 { "M9 0.8V5", 1.7f }, { "M1 13.5L17 6.5", 1.2f } } } };
     }
 
-    // The exciter icons tinted by family (UI review 31, item 42), the groups the EXCITER menu lists.
+    // The picker's six type icons (2026-11-11), each tinted by its family (UI review 31, item 42): a type wears
+    // its main engine's glyph, and its tooltip names the switch's engines.
     static std::vector<IconPicker::Item> tintedExciterIcons()
     {
-        auto items = exciterIcons();
-        static const juce::uint32 tints[] { 0xffe9b45c, 0xffff7a5c, 0xffb48cff, 0xff5fc6e8, 0xff7fd68a }; // pluck, strike, bow, e-piano, driven
-        auto group = 0;
-        for (const auto& [name, members] : Exciters::groups())
+        const auto engines = exciterIcons();
+        static const int glyphOf[] { 9, 12, 13, 7, 2, 10 }; // piano, guitar, bowed, e-piano, driven, feedback
+        static const juce::uint32 tints[] { 0xffff7a5c, 0xffe9b45c, 0xffb48cff, 0xff5fc6e8, 0xff7fd68a, 0xffff6fae };
+        static const char* const tips[] {
+            "MODAL a measured grand, partial by partial; HAMMER the waveguide piano; BRIGHT its first, harder hammer.",
+            "MODAL a measured nylon guitar (SIZE the box, SCALE the neck); BURST and NOISE pluck the waveguide string.",
+            "MODAL a bowed string's modes in a body (SIZE flows violin, viola, cello); LEGACY the waveguide bow.",
+            "TINE a struck tine and its pickup; REED a struck reed and its pickup.",
+            "A wave drives the string: SAW, PULSE, or OSC IN (another oscillator).",
+            "The amp pushes sound back at the string." };
+        std::vector<IconPicker::Item> items;
+        for (int t = 0; t < (int) Exciters::types().size(); ++t)
         {
-            juce::ignoreUnused (name);
-            for (const auto excite : members)
-                if (excite >= 0 && excite < (int) items.size())
-                    items[(size_t) excite].tint = juce::Colour (tints[(size_t) juce::jmin (group, 4)]);
-            ++group;
+            auto item = engines[(size_t) glyphOf[t]];
+            item.name = juce::String (Exciters::types()[(size_t) t].name).toLowerCase();
+            item.name = item.name.substring (0, 1).toUpperCase() + item.name.substring (1);
+            item.tip = tips[t];
+            item.tint = juce::Colour (tints[t]);
+            items.push_back (item);
         }
         return items;
     }
@@ -3169,6 +3197,20 @@ private:
             x += 55;
         }
 
+        // A Physical card's engine switch (2026-11-11): the exciter type's MODAL and older engines, beside the steps.
+        if (card.kind == Kind::physical)
+            syncExciterSwitch (index);
+        if (card.kind == Kind::physical && pieces.exciterSwitch.size() > 1)
+        {
+            const auto width = juce::jlimit (0, pieces.exciterSwitch.idealWidth(), right.getRight() - x - 4);
+            pieces.exciterSwitch.setBounds ({ x, centre - 8, width, 16 });
+            x += width + 4;
+        }
+        else
+        {
+            pieces.exciterSwitch.setBounds ({});
+        }
+
         if (card.kind == Kind::wavetable)
         {
             // FRAME BLEND: how the table reads between frames, beside the table it reads.
@@ -3378,7 +3420,7 @@ private:
 
         // EXCITER: the chosen exciter's name by the title, SLAP at the title's right, the icons, then the knobs centred.
         {
-            CardGeometry::Label name { inPanel (exciterPanel, 65, 3, 140, 12), Exciters::name (excite).toUpperCase() };
+            CardGeometry::Label name { inPanel (exciterPanel, 65, 3, 140, 12), Exciters::types()[(size_t) Exciters::typeOf (excite)].name };
             name.bright = true;
             card.labels.push_back (name);
             if (slap != nullptr)
@@ -4230,6 +4272,7 @@ private:
         OscStatusView outBar;
         juce::TextButton prevTable { juce::String::fromUTF8 ("\xe2\x80\xb9") }, nextTable { juce::String::fromUTF8 ("\xe2\x80\xba") };
         IconPicker exciterPills; // (the exciter types as small icons, the name on hover)
+        PositionSwitch exciterSwitch; // (the type's engines: MODAL / the older waveguide ones)
         SampleNameBox sampleNameButton;
         BarSliderControl xfadeBar; // the sample's CROSSFADE, a row of the toggle list
         juce::TextButton opEnvButton, sampleLoadButton, sampleSliceButton, sampleExportButton, sampleZonesButton, sampleDetectButton;
@@ -4669,7 +4712,7 @@ private:
                  bounceButtons[(size_t) i].get(), &pieces.stringView, &pieces.opEnvGraph, &pieces.spreadView, &pieces.partials, &pieces.status,
                  &pieces.opEnvButton, &pieces.sampleLoadButton, &pieces.sampleSliceButton, &pieces.sampleExportButton, &pieces.sampleZonesButton, &pieces.sampleDetectButton, &pieces.sampleNameButton,
                  &pieces.removeButton, &pieces.moreButton, &pieces.octDown, &pieces.octUp, &pieces.frameTag,
-                 &pieces.typeBar, &pieces.routeBar, &pieces.outBar, &pieces.prevTable, &pieces.nextTable, &pieces.exciterPills,
+                 &pieces.typeBar, &pieces.routeBar, &pieces.outBar, &pieces.prevTable, &pieces.nextTable, &pieces.exciterPills, &pieces.exciterSwitch,
                  &phys.resAmount, &phys.resOn, &phys.resBoard };
     }
 
@@ -4833,7 +4876,11 @@ private:
             pieces.outBar.setPart (kind == Kind::physical ? OscStatusView::Part::meterCell : OscStatusView::Part::barOnly);
             pieces.exciterPills.setVisible (kind == Kind::physical);
             if (kind == Kind::physical)
+            {
                 pieces.exciterPills.refresh();
+                syncExciterSwitch (index);
+            }
+            pieces.exciterSwitch.setVisible (kind == Kind::physical && pieces.exciterSwitch.size() > 1);
             if (wavetableCard || kind == Kind::live || kind == Kind::fm || kind == Kind::sample || kind == Kind::grain)
                 pieces.routeBar.refresh();
             // An FM / DX7 oscillator plays a plain cycle: no table tools
@@ -5212,6 +5259,18 @@ public:
         updateEnabled();
     }
 
+    // The engine switch shows the positions of the type the exciter belongs to.
+    void syncExciterSwitch (int index)
+    {
+        auto& pieces = *aux[(size_t) index];
+        const auto& type = Exciters::types()[(size_t) Exciters::typeOf (readChoice (juce::String (OscillatorIds::prefixes[(size_t) index]) + "_excite"))];
+        juce::StringArray positions;
+        for (const auto* label : type.positions)
+            positions.add (label);
+        pieces.exciterSwitch.setPositions (positions);
+        pieces.exciterSwitch.refresh();
+    }
+
     // The header's ‹ ›: what the engine plays, the previous or next one (UI review 31, item 16): a table, FM's wave,
     // or a Physical card's exciter, in the icons' order (so a held note can be heard through them).
     void stepHeader (int index, int step)
@@ -5221,10 +5280,13 @@ public:
             stepTable (index, step);
             return;
         }
+        // (In the types' order, 2026-11-11: through each type's engines in turn.)
         const auto now = readChoice (juce::String (OscillatorIds::prefixes[(size_t) index]) + "_excite");
-        const auto next = juce::jlimit (0, Exciters::names().size() - 1, now + step);
-        if (next != now)
-            chooseExciter (index, next);
+        const auto& order = Exciters::order();
+        const auto at = (int) (std::find (order.begin(), order.end(), now) - order.begin());
+        const auto next = juce::jlimit (0, (int) order.size() - 1, at + step);
+        if (at < (int) order.size() && order[(size_t) next] != now)
+            chooseExciter (index, order[(size_t) next]);
     }
 
     // OCT - / OCT +: SEMI by twelve, inside its range (no parameter of its own; old patches untouched).
