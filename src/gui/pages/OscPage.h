@@ -2785,7 +2785,7 @@ private:
     static constexpr int wavetableWarpRows = 3;
     int waveContentHeight() const { return wavetableWarpRows * warpRowH() + (wavetableWarpRows - 1); }
 
-    static constexpr int physTopH = 80, physBottomH = 61, sampleTopH = 96, sampleBottomH = 65, grainH = 111;
+    static constexpr int physTopH = 84, physBottomH = 57, sampleTopH = 96, sampleBottomH = 65, grainH = 111;
 
     int panelCardHeight (int osc) const
     {
@@ -3197,19 +3197,6 @@ private:
             x += 55;
         }
 
-        // A Physical card's engine switch (2026-11-11): the exciter type's MODAL and older engines, beside the steps.
-        if (card.kind == Kind::physical)
-            syncExciterSwitch (index);
-        if (card.kind == Kind::physical && pieces.exciterSwitch.size() > 1)
-        {
-            const auto width = juce::jlimit (0, pieces.exciterSwitch.idealWidth(), right.getRight() - x - 4);
-            pieces.exciterSwitch.setBounds ({ x, centre - 8, width, 16 });
-            x += width + 4;
-        }
-        else
-        {
-            pieces.exciterSwitch.setBounds ({});
-        }
 
         if (card.kind == Kind::wavetable)
         {
@@ -3403,14 +3390,14 @@ private:
             for (auto* knob : toneKnobs)
             {
                 // (19, not 17: a modulated RING TIME's ring and live dot touched the TONE title, UI review 26.)
-                placeKnob (*knob, x, tonePanel.getY() + 19, 46, mainDial);
+                placeKnob (*knob, x, tonePanel.getY() + 20, 46, mainDial);
                 x += 46;
             }
             if (! electric)
             {
                 pieces.partials.setCompact (true);
-                pieces.partials.setBounds (inPanel (tonePanel, 55, 63, 93, 13));
-                card.labels.push_back ({ inPanel (tonePanel, 7, 63, 46, 13), "PARTIALS" });
+                pieces.partials.setBounds (inPanel (tonePanel, 55, 67, 93, 13));
+                card.labels.push_back ({ inPanel (tonePanel, 7, 67, 46, 13), "PARTIALS" });
             }
             else
             {
@@ -3420,31 +3407,39 @@ private:
 
         // EXCITER: the chosen exciter's name by the title, SLAP at the title's right, the icons, then the knobs centred.
         {
-            CardGeometry::Label name { inPanel (exciterPanel, 65, 3, 140, 12), Exciters::types()[(size_t) Exciters::typeOf (excite)].name };
+            // (2026-11-11, ilana: "pack em tighter", "integrate the picker in the exciter section": the engine switch
+            // by the title, the six type icons packed 3 px apart under it, the type's name beside them.)
+            syncExciterSwitch (index);
+            const auto switchW = pieces.exciterSwitch.size() > 1 ? pieces.exciterSwitch.idealWidth() : 0;
+            pieces.exciterSwitch.setBounds (switchW > 0 ? inPanel (exciterPanel, 54, 3, juce::jmin (switchW, exciterPanel.getWidth() - 54 - 7), 16)
+                                                        : juce::Rectangle<int>());
+            if (slap != nullptr)
+                slap->setBounds ({ exciterPanel.getRight() - 55, exciterPanel.getY() + 5, 48, 12 });
+            const auto iconsW = pieces.exciterPills.size() * 22 + (pieces.exciterPills.size() - 1) * 3;
+            pieces.exciterPills.setBounds (inPanel (exciterPanel, 6, 21, iconsW, 18));
+            CardGeometry::Label name { inPanel (exciterPanel, 6 + iconsW + 13, 24, exciterPanel.getWidth() - iconsW - 26, 12),
+                                       Exciters::types()[(size_t) Exciters::typeOf (excite)].name };
             name.bright = true;
             card.labels.push_back (name);
-            if (slap != nullptr)
-                slap->setBounds ({ exciterPanel.getRight() - 64, exciterPanel.getY() + 3, 55, 12 });
-            pieces.exciterPills.setBounds (inPanel (exciterPanel, 7, 15, exciterPanel.getWidth() - 14, 18));
             const auto n = (int) exciterKnobs.size();
             const auto cell = n > 0 ? juce::jmin (52, (exciterPanel.getWidth() - 14) / n) : 52;
             auto x = exciterPanel.getX() + (exciterPanel.getWidth() - n * cell) / 2;
             for (auto* knob : exciterKnobs)
             {
-                placeKnob (*knob, x, exciterPanel.getY() + 37, cell, mainDial); // (37: clear of the icon row)
+                placeKnob (*knob, x, exciterPanel.getY() + 42, cell, mainDial); // (42: clear of the icon row)
                 x += cell;
             }
         }
 
         // PITCH: SEMI and FINE centred, CHORD under them.
-        placeKnob (osc.semi, pitchPanel.getX() + 34, pitchPanel.getY() + 17, 46, mainDial);
-        placeKnob (osc.fine, pitchPanel.getX() + 80, pitchPanel.getY() + 17, 46, mainDial);
-        osc.chord.setBounds (inPanel (pitchPanel, 8, 62, pitchPanel.getWidth() - 16, menuH));
+        placeKnob (osc.semi, pitchPanel.getX() + 34, pitchPanel.getY() + 19, 46, mainDial);
+        placeKnob (osc.fine, pitchPanel.getX() + 80, pitchPanel.getY() + 19, 46, mainDial);
+        osc.chord.setBounds (inPanel (pitchPanel, 8, 66, pitchPanel.getWidth() - 16, menuH));
 
         // MIX: LEVEL, PAN and the OUT meter in one row of three cells, the FILTER route under them as on the wavetable
         // card (UI reviews 27 and 28).
         {
-            const auto x0 = mixPanel.getX() + (mixPanel.getWidth() - 3 * 48) / 2, y = mixPanel.getY() + 15;
+            const auto x0 = mixPanel.getX() + (mixPanel.getWidth() - 3 * 48) / 2, y = mixPanel.getY() + 17;
             placeKnob (osc.level, x0, y, 48, mainDial);
             placeKnob (osc.pan, x0 + 48, y, 48, mainDial);
             pieces.outBar.setBounds ({ x0 + 96, y, 48, mainDial + nameLine + 4 });
@@ -3458,12 +3453,12 @@ private:
         }
 
         // UNISON: the mode menu, then VOICES, DETUNE, BLEND and SPREAD in 44 px cells.
-        osc.uniMode.setBounds (inPanel (unisonPanel, 8, 25, 77, menuH));
+        osc.uniMode.setBounds (inPanel (unisonPanel, 8, 27, 77, menuH));
         {
             auto x = unisonPanel.getX() + 89;
             for (auto* knob : { &osc.unison, &osc.detune, &osc.uniBlend, &osc.spread })
             {
-                placeKnob (*knob, x, unisonPanel.getY() + 17, 44, mainDial);
+                placeKnob (*knob, x, unisonPanel.getY() + 19, 44, mainDial);
                 x += 44;
             }
             pieces.spreadView.setBounds ({});
@@ -3472,7 +3467,7 @@ private:
         // RESONANCE: AMOUNT, the SYMPATHETIC switch over the BOARD menu.
         placeKnob (phys.resAmount, resPanel.getX() + 5, resPanel.getY() + 16, 42, mainDial);
         phys.resOn.setBounds (inPanel (resPanel, 53, 17, 95, 12));
-        phys.resBoard.setBounds (inPanel (resPanel, 53, 39, 95, menuH));
+        phys.resBoard.setBounds (inPanel (resPanel, 53, 37, 95, menuH));
 
         // MORE: the string's other knobs from its left edge, in up to 46 px cells.
         {
