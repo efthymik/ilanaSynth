@@ -257,6 +257,15 @@ public:
         attackRightB = &modeB->attackRight;
         attackMix = at.velocityWeight;
         attackGain = std::pow (10.0f, gainDb / 20.0f);
+        if (table.nearestAttack && modeA != modeB)
+        {
+            const auto blendedDb = modeA->attackDb + attackMix * (modeB->attackDb - modeA->attackDb);
+            const auto* use = attackMix < 0.5f ? modeA : modeB;
+            attackA = attackB = &use->attack;
+            attackRightA = attackRightB = &use->attackRight;
+            attackGain *= std::pow (10.0f, juce::jlimit (-24.0f, 24.0f, blendedDb - use->attackDb) / 20.0f);
+            attackMix = 0.0f;
+        }
         const auto anchorHz = 440.0 * std::exp2 ((table.notes[(size_t) nearest] - 69) / 12.0);
         attackStep = frequency / anchorHz * table.rate / sampleRate;
         const auto usable = juce::jmin ((double) std::min ({ attackA->size(), attackB->size(), attackRightA->size(), attackRightB->size() }) - 2.0,

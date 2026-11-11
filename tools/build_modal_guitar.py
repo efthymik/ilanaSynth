@@ -166,6 +166,78 @@ def iowa_notes(folder):
     return found
 
 
+def tame_tails(entries, ref=1):
+    """Body modes and noise fall at least as fast as the note's partials
+    after `ref` (0.08 s). (2026-11-11: Iowa's takes are cut by the next
+    note and other strings ring on, so late in many notes the "modes"
+    and "noise" were 10-30 dB over the string itself: a hiss or a stray
+    pitch in some notes' tails.)"""
+    out = []
+    for note, vel, f0, ratios, levels, attack, bmodes, mlevels, nlevels, ppic, mpic in entries:
+        energy = 10 * np.log10(np.sum(10 ** (levels / 10), axis=0) + 1e-30)
+        fall = np.minimum(0.0, energy - energy[ref])
+        def tame(rows):
+            if len(rows) == 0:
+                return rows
+            cap = rows[:, ref:ref + 1] + fall[None, :]
+            out_rows = rows.copy()
+            out_rows[:, ref:] = np.minimum(rows[:, ref:], cap[:, ref:])
+            return np.maximum(-160.0, out_rows)
+        out.append((note, vel, f0, ratios, levels, attack, bmodes, tame(mlevels), tame(nlevels), ppic, mpic))
+    return out
+
+
+def even_clicks(entries, rate, reach=3, allowed=4.0, most=18.0, cross=3000.0):
+    """Each take's pluck click (its attack above `cross` Hz, first 15 ms,
+    against the note's partials) pulled to within `allowed` dB of its
+    neighbours' median per layer, and never under a softer layer's by more
+    than 2 dB (by at most `most` dB in all); the rest of the attack is untouched
+    (a zero-phase split: low + high = the take). (2026-11-11, ilana: "sometimes
+    has a transient and sometimes does not": Iowa's clicks vary 20-40 dB
+    from note to note.)"""
+    from scipy.signal import butter, sosfiltfilt
+    sos = butter(2, cross, "lowpass", fs=rate, output="sos")
+    head = int(0.015 * rate)
+
+    def split(x):
+        low = sosfiltfilt(sos, x)
+        return low, x - low
+
+    clicks = {}
+    for i, e in enumerate(entries):
+        _, high = split(np.asarray(e[5][0], dtype=float))
+        energy = 10 * np.log10(np.sum(10 ** (e[4][:, 1] / 10)) + 1e-30)
+        clicks[i] = 20 * np.log10(np.sqrt(np.mean(high[:head] ** 2)) + 1e-12) - energy
+    # Across notes: within `allowed` dB of the neighbours' median, per layer.
+    target = dict(clicks)
+    for velocity in sorted({e[1] for e in entries}):
+        index = sorted([i for i, e in enumerate(entries) if e[1] == velocity], key=lambda i: entries[i][0])
+        values = np.array([clicks[i] for i in index])
+        for j, i in enumerate(index):
+            near = np.median(values[max(0, j - reach):j + reach + 1])
+            target[i] = float(np.clip(values[j], near - allowed, near + allowed))
+    # Across velocities: a harder pluck never clicks less (within 2 dB).
+    for note in sorted({e[0] for e in entries}):
+        index = sorted([i for i, e in enumerate(entries) if e[0] == note], key=lambda i: entries[i][1])
+        for lower, upper in zip(index, index[1:]):
+            target[upper] = max(target[upper], target[lower] - 2.0)
+    out = list(entries)
+    for i, e in enumerate(entries):
+        shift = float(np.clip(target[i] - clicks[i], -most, most))
+        if abs(shift) < 1e-3:
+            continue
+        note, vel, f0, ratios, levels, (attack, attack_right), bmodes, mlevels, nlevels, ppic, mpic = e
+        # The click only: the change holds for 15 ms, then eases back by 40 ms
+        # (the string's own top in the rest of the attack stays as recorded).
+        t = np.arange(len(attack)) / rate
+        gain = 10 ** (np.interp(t, [0.0, 0.015, 0.04], [shift, shift, 0.0]) / 20)
+        parts = [split(np.asarray(a, dtype=float)) for a in (attack, attack_right)]
+        attack, attack_right = [low + gain * high for low, high in parts]
+        out[i] = (note, vel, f0, ratios, levels, (attack, attack_right), bmodes, mlevels, nlevels, ppic, mpic)
+        print("note %d v%d: click %+.1f dB" % (note, vel, shift), flush=True)
+    return out
+
+
 def sound_take(seg, rate, f0):
     """False for a take with a dropout (5 ms of digital silence) in its
     first second, or whose first partial is not near its pitch."""
@@ -275,6 +347,8 @@ def main():
 
     if args.iowa:
         entries = even_levels(entries)
+        entries = tame_tails(entries)
+        entries = even_clicks(entries, rate)
 
     out = bytearray(b"IMPT")
     out += struct.pack("<HHHf", 4, len(entries), len(TIMES), float(rate))
