@@ -1575,6 +1575,9 @@ int runUiTests()
 
             if (auto* cutoff = processor.apvts.getParameter ("f1_cutoff"))
             {
+                const auto presetName = processor.getCurrentPresetName();
+                const auto asked = pages->asksBeforeReplacingEdits();
+                pages->setAsksBeforeReplacingEdits (true); // (the settings may say "don't ask again")
                 const auto original = cutoff->getValue();
                 cutoff->setValueNotifyingHost (original > 0.5f ? 0.1f : 0.9f); // an edited patch
                 settle (400);
@@ -1591,8 +1594,15 @@ int runUiTests()
                 if (askedR)
                     confirm->keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
                 settle (150);
-                expect (n && askedN && r && askedR, "Ctrl+N and Ctrl+R ask first over an edited patch");
-                cutoff->setValueNotifyingHost (original);
+                expect (n && askedN && r && askedR, "Ctrl+N and Ctrl+R ask first over an edited patch (edited "
+                                                        + juce::String (pages->isPatchEdited() ? "yes" : "no") + ")");
+                pages->setAsksBeforeReplacingEdits (asked);
+                // (Whatever happened, the tests after this go on with the same preset.)
+                if (processor.getCurrentPresetName() != presetName)
+                    processor.loadFactoryPreset (processor.getFactoryPresetNames().indexOf (presetName));
+                else
+                    cutoff->setValueNotifyingHost (original);
+                settle (300);
             }
 
             // A text field keeps Ctrl+F: the editor leaves it.
@@ -1611,6 +1621,14 @@ int runUiTests()
         // effect in chain order; a click bypasses (one undo step).
         if (auto* chips = findChild<FxChainChips> (*editor))
         {
+            // (An effect in an empty slot for the test, taken out after.)
+            auto spare = -1;
+            for (int slot = IlanaSynthAudioProcessor::numFxSlots - 1; slot >= 0 && spare < 0; --slot)
+                if (processor.apvts.getRawParameterValue ("fx_slot" + juce::String (slot + 1))->load() < 0.5f)
+                    spare = slot;
+            auto* spareType = spare >= 0 ? processor.apvts.getParameter ("fx_slot" + juce::String (spare + 1)) : nullptr;
+            if (spareType != nullptr)
+                spareType->setValueNotifyingHost (spareType->convertTo0to1 (13.0f)); // Reverb
             settle (300);
             auto loaded = 0, firstSlot = -1;
             for (int slot = 0; slot < IlanaSynthAudioProcessor::numFxSlots; ++slot)
@@ -1639,7 +1657,10 @@ int runUiTests()
             }
             auto& hover = pages->getHoverLine();
             const auto chipsArea = chips->getBounds();
-            expect (! hover.getBounds().intersects (chipsArea) || ! chips->isVisible(), "the hover line never covers the FX chips");
+            expect (chips->isVisible() && ! hover.getBounds().intersects (chipsArea), "the hover line never covers the FX chips");
+            if (spareType != nullptr)
+                spareType->setValueNotifyingHost (0.0f);
+            settle (300);
         }
         else
         {
