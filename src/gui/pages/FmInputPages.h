@@ -73,6 +73,7 @@ public:
           effectRules (p)
     {
         addAll (*this, diagram, algorithms, pageTabs, mode, hardSync);
+        diagram.onSelectOperator = [this] (int op) { selectOperator (op); };
         addChildComponent (outputView);
         hardSync.showAsSwitch();
         ringMod = std::make_unique<KnobControl> (p.apvts, "ring_mod", "RING MOD", fmColour(), false);
@@ -246,6 +247,7 @@ public:
     {
         selectedOperator = juce::jlimit (0, OscillatorIds::count - 1, op);
         picker.setSelectedOsc (selectedOperator);
+        diagram.setSelectedOperator (selectedOperator);
         envelope.selectOperator (selectedOperator);
         updateOperatorVisibility();
         resized();
@@ -346,7 +348,7 @@ public:
         if (anyOperatorEnv() != lastAnyOperatorEnv)
             extrasOpen = ! anyOperatorEnv();
 
-        if (refreshShown() || tuneChanged || diagram.getMinimumHeight() != lastDiagramMinimum
+        if (refreshShown() || tuneChanged || diagram.getMinimumHeight() != lastDiagramMinimum || diagram.getPreferredHeight() != lastDiagramPreferred
             || anyOperatorEnv() != lastAnyOperatorEnv || matrixExtrasShown() != lastExtrasShown)
         {
             updateOperatorVisibility();
@@ -448,12 +450,16 @@ public:
         // so nothing above it ever moves (I7-10, I8-11); the diagram sizes
         // its nodes to what is left.
         lastDiagramMinimum = diagram.getMinimumHeight();
+        lastDiagramPreferred = diagram.getPreferredHeight();
         lastAnyOperatorEnv = anyOperatorEnv();
         lastExtrasShown = matrixExtrasShown();
         // (ilana, 2026-10-29: "osc + env section could prolly be smaller": a patch with no Operator Env gets the
         // one-row card; one height per patch, so switching operators never moves the picture.)
+        // (UI review 31, 17: the diagram as tall as its rows need, at least 150, and the card takes the rest, so a
+        // one-row algorithm gives its envelope the room; a deep stack keeps the card at its old height.)
         const auto cardHeight = anyOperatorEnv() ? operatorCardHeight : plainCardHeight;
-        operatorCard = area.removeFromBottom (juce::jmax (150, juce::jmin (cardHeight, area.getHeight() - 150)));
+        const auto diagramHeight = juce::jmax (150, diagram.getPreferredHeight());
+        operatorCard = area.removeFromBottom (juce::jmax (150, juce::jmax (juce::jmin (cardHeight, area.getHeight() - 150), area.getHeight() - 8 - diagramHeight)));
         area.removeFromBottom (8);
         diagram.setBounds (area);
 
@@ -714,11 +720,20 @@ private:
         layoutRow (left.removeFromTop (menuHeight), menus);
         left.removeFromTop (gap);
         ampHint = left.removeFromBottom (footHeight).withTrimmedLeft (2);
-        const auto columns = (int) knobsInRow.size();
+        // (UI review 31, 17: a one-row algorithm gives the card its room; with the height for it the knobs take two rows
+        // of three, bigger, rather than one row floating in the middle.)
+        const auto twoRows = left.getHeight() >= 140;
+        const auto count = (int) knobsInRow.size();
+        const auto columns = twoRows ? 3 : count;
+        const auto rowsHere = twoRows ? (count + 2) / 3 : 1;
         const auto cellWidth = left.getWidth() / juce::jmax (1, columns);
-        for (int i = 0; i < columns; ++i)
+        const auto cellHeight = left.getHeight() / juce::jmax (1, rowsHere);
+        for (int i = 0; i < count; ++i)
             if (auto* knob = dynamic_cast<KnobControl*> (knobsInRow[(size_t) i]))
-                knob->placeAsRing (juce::Rectangle<int> (left.getX() + i * cellWidth, left.getY(), cellWidth, left.getHeight()).reduced (2, 0), 40);
+                knob->placeAsRing (juce::Rectangle<int> (left.getX() + (i % columns) * cellWidth
+                                                             + (columns - juce::jmin (columns, count - (i / columns) * columns)) * cellWidth / 2, // (a short last row centred)
+                                                         left.getY() + (i / columns) * cellHeight, cellWidth, cellHeight)
+                                       .reduced (2, 0), twoRows ? 46 : 40);
         // Another type's way to the operator's controls, at the hint's end.
         if (makeOperator.isVisible())
         {
@@ -817,9 +832,23 @@ private:
         rowOne.resize (3, nullptr);
         rowTwo.resize (3, nullptr);
         // (Two equal bands under the menus: each row sits centred in its band, so the gaps are even.)
+        // (UI review 31, 17: PLAY's rings, the value inside, as the plain card and the stage knobs beside them.)
         const auto band = left.getHeight() / 2;
-        layoutRow (left.removeFromTop (band), rowOne, true);
-        layoutRow (left, rowTwo, true);
+        const auto placeRow = [] (juce::Rectangle<int> rowArea, const std::vector<juce::Component*>& items)
+        {
+            const auto width = rowArea.getWidth() / juce::jmax (1, (int) items.size());
+            for (size_t i = 0; i < items.size(); ++i)
+            {
+                const auto cellArea = juce::Rectangle<int> (rowArea.getX() + (int) i * width, rowArea.getY(), width, rowArea.getHeight());
+                if (auto* knob = dynamic_cast<KnobControl*> (items[i]))
+                    knob->placeAsRing (cellArea.reduced (2, 0).withSizeKeepingCentre (cellArea.getWidth() - 4, juce::jmin (cellArea.getHeight(), OperatorEnvEditor::ringRowHeight)),
+                                       OperatorEnvEditor::ringDial);
+                else if (items[i] != nullptr)
+                    layoutRow (cellArea, { items[i] }, true);
+            }
+        };
+        placeRow (left.removeFromTop (band), rowOne);
+        placeRow (left, rowTwo);
     }
 
     // One route of the ROUTES list: an oscillator into another, into itself (feedback), or the noise (-1) into one.
@@ -933,7 +962,9 @@ private:
 
         // From the top (as the mock-up ilana okayed): the list, + ADD ROUTE, FM MODE, then the extras.
         routeRows.clear();
-        constexpr int rowHeight = 40, extrasRowHeight = 58, titleHeight = 18;
+        // (UI review 31, 17: rows close to the MATRIX page's, 32 for PLAY's 28 ring with its value inside, so the OUTPUT graph
+        // under them keeps its height.)
+        constexpr int rowHeight = 32, routeDial = 28, extrasRowHeight = 58, titleHeight = 18;
         const auto routes = activeRoutes();
         const auto roomForRows = juce::jmax (0, (inner.getHeight() - 26 - 14 - 44 - 18 - titleHeight - extrasRowHeight) / rowHeight);
         for (size_t i = 0; i < routes.size() && (int) i < roomForRows; ++i)
@@ -944,12 +975,12 @@ private:
             auto& knob = cellKnob (route.source, route.target);
             knob.setVisible (true);
             knob.setCompact (false);
-            knob.setPackedDial (26.0f);
+            knob.setPackedDial ((float) routeDial);
             auto remove = row.removeFromRight (22);
             auto& button = removeButtonFor (route);
             button.setVisible (true);
             button.setBounds (remove.withSizeKeepingCentre (22, 22));
-            knob.setBounds (KnobControl::packedBoundsFor (row.removeFromRight (cell).withSizeKeepingCentre (cell, 26 + 10).translated (0, 5)));
+            knob.setBounds (KnobControl::packedBoundsFor (row.removeFromRight (cell).withSizeKeepingCentre (cell, routeDial + 10).translated (0, 5)));
         }
         inner.removeFromTop (4);
         addRouteButton.setBounds (inner.removeFromTop (26).withWidth (juce::jmin (inner.getWidth(), 130)));
@@ -1104,7 +1135,7 @@ private:
     std::vector<std::atomic<float>*> tuneValues;
     std::array<int, OscillatorIds::count * 4> lastTune {};
     std::vector<int> shown;
-    int selectedOperator = 0, tabsLeft = 0, lastDiagramMinimum = 0;
+    int selectedOperator = 0, tabsLeft = 0, lastDiagramMinimum = 0, lastDiagramPreferred = 0;
     bool lastAnyOperatorEnv = false;
     juce::String lastAlgorithmLabel, hoverAlgorithm;
 };
