@@ -1433,7 +1433,15 @@ public:
     float packedNameDevicePx() const { return IlanaTheme::font (packedNameUnits(), true).getHeight() * IlanaTheme::uiScaleRef(); }
     // The packed number's height on screen in device pixels, and the dial's (a layout test's measure:
     // the number keeps its share of the dial at every zoom).
-    float packedNumberDevicePx() const { return IlanaTheme::font (packedD * kPackedValueScale, true, true).getHeight() * IlanaTheme::uiScaleRef(); }
+    float packedNumberDevicePx() const { return IlanaTheme::font (packedValueUnits(), true, true).getHeight() * IlanaTheme::uiScaleRef(); }
+    // The number's size in units: the dial's share, or a fixed size when a row wants its rings wider than its numbers
+    // (the wave card's AMT dials, UI review 31: rings 4 wider, numbers as before, so "100" keeps 3 px from the ring).
+    float packedValueUnits() const { return packedValueSize > 0.0f ? packedValueSize : packedD * kPackedValueScale; }
+    void setPackedValueSize (float units)
+    {
+        packedValueSize = units;
+        repaint();
+    }
     float packedDialDevicePx() const { return packedD * IlanaTheme::uiScaleRef(); }
     // A packed name too wide for its cell breaks at its first space onto a second line ("KEY" over "TRACK"),
     // in full words; the cell the page gives the knob must leave the room (about 9 px under the name).
@@ -1847,7 +1855,7 @@ public:
 
         // A small dial (the wave card's AMT knobs, 19 units) has no room for two lines: the number
         // came to sit on the ring (UI review 30). A % there goes without saying, so the number stands alone.
-        if (packedD < 22.0f && unit == "%")
+        if (packedValueUnits() < 22.0f * kPackedValueScale && unit == "%")
             unit = {};
 
         // (While a value is typed over the dial, the box is the value.)
@@ -1860,14 +1868,14 @@ public:
         if (hot != nullptr)
         {
             value = hotDepthText (*hot);
-            unit = packedD < 22.0f ? "" : "%";
+            unit = packedValueUnits() < 22.0f * kPackedValueScale ? "" : "%";
             hotColour = modSourceColour (hot->source);
         }
 
         // Grabbed, the number grows a little and the name turns white; released, both settle back (~150 ms).
         const auto grab = IlanaTheme::fade (const_cast<KnobControl&> (*this), 77, slider.isGrabbed() ? 1.0f : 0.0f, 24.0f);
         g.setColour ((hot != nullptr ? hotColour : IlanaTheme::Ui::text).withMultipliedAlpha (on));
-        const auto drawn = IlanaTheme::font (packedD * kPackedValueScale * (1.0f + 0.07f * grab), true, true);
+        const auto drawn = IlanaTheme::font (packedValueUnits() * (1.0f + 0.07f * grab), true, true);
         g.setFont (drawn);
         if (unit.isNotEmpty())
         {
@@ -3190,6 +3198,7 @@ private:
     int packedValueRoom = 0;
     bool packedNameWrap = false, packedNameAlwaysWraps = false;
     float packedNameSize = 0.0f;
+    float packedValueSize = 0.0f; // (0: the dial's share)
     juce::Rectangle<int> packedNameArea;
     std::unique_ptr<juce::TextEditor> valueEditor;
     juce::Rectangle<int> inlineValueArea;
@@ -3755,6 +3764,8 @@ public:
         juce::String name, tip;
         // The glyph in an 18 x 16 box: SVG path data, each with its stroke width (0 fills).
         std::vector<std::pair<juce::String, float>> paths;
+        // Its family's tint (the exciters: pluck, strike, bow...); transparent draws it in the label grey.
+        juce::Colour tint {};
     };
 
     std::function<int()> getChosen;
@@ -3805,12 +3816,20 @@ public:
             const auto r = tile (i).reduced (0.5f);
             const auto lit = i == chosen;
             const auto hover = i == hovered && isMouseOver();
-            g.setColour ((lit ? IlanaTheme::Ui::well.interpolatedWith (colour, 0.2f) : IlanaTheme::Ui::well).withMultipliedAlpha (on));
+            // (A tinted set fills the chosen tile in the colour and draws its glyph dark on it, UI review 31, item 42;
+            // the others keep the well, their glyph in the family's tint.)
+            const auto tint = items[(size_t) i].tint;
+            const auto tinted = ! tint.isTransparent();
+            const auto fill = lit ? (tinted ? colour.withAlpha (0.92f) : IlanaTheme::Ui::well.interpolatedWith (colour, 0.2f))
+                                  : (tinted ? IlanaTheme::Ui::well.interpolatedWith (tint, 0.1f) : IlanaTheme::Ui::well);
+            g.setColour (fill.withMultipliedAlpha (on));
             g.fillRoundedRectangle (r, 3.0f);
             g.setColour ((lit ? colour : hover ? IlanaTheme::Ui::text3 : IlanaTheme::Ui::line).withMultipliedAlpha (on));
             g.drawRoundedRectangle (r, 3.0f, 1.0f);
 
-            const auto ink = (lit ? colour : hover ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2).withMultipliedAlpha (on);
+            const auto ink = (lit ? (tinted ? IlanaTheme::Ui::well : colour)
+                              : tinted ? (hover ? tint.brighter (0.3f) : tint)
+                              : hover ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2).withMultipliedAlpha (on);
             const auto transform = juce::AffineTransform::scale (tileScale())
                                        .translated (r.getX() + 1.5f * tileScale(), r.getY() + 0.5f * tileScale());
             g.setColour (ink);

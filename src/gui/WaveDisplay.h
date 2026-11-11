@@ -466,6 +466,22 @@ public:
         }
     }
 
+    // The frame playing now, from 1, and the table's frame count ({ 0, 0 } when the oscillator plays no table of
+    // several frames): an OSC card header's FRAME readout (UI review 31, item 16).
+    std::pair<int, int> getFramePlaying() const
+    {
+        if (! isTableMode() || isPhysicalString() || isElectricPiano())
+            return { 0, 0 };
+
+        const auto* table = processorRef.getWavetable (resolveTableIndex());
+
+        if (table == nullptr || isStaticTable (table) || table->getNumFrames() < 2)
+            return { 0, 0 };
+
+        const auto frames = table->getNumFrames();
+        return { juce::jlimit (0, frames - 1, juce::roundToInt (displayedFrame * (float) (frames - 1))) + 1, frames };
+    }
+
     // The frame readout under the plot ("FRAME 12 / 64"), empty when the
     // view shows no table, the table has one frame, or the view is SPEC (the
     // UI test reads it).
@@ -2713,7 +2729,30 @@ private:
                 path.lineTo ((float) plot.getX() + (float) x, y);
         }
 
+        // (The cycle's own trace gets the soft fill, the faint frame-0 and plain-frame copies under a warp do not.)
+        if (thickness >= 2.0f)
+            fillUnderTrace (g, path, plot, centreY, halfHeight, colour);
         IlanaTrace::paintTrace (g, path, colour, thickness);
+    }
+
+    // A soft fill between the cycle and the zero line, in the oscillator's colour (UI review 31, item 38): strongest
+    // at the peaks, nothing at zero, mirrored below it. Flat, no depth: the trace stays a 2D line.
+    static void fillUnderTrace (juce::Graphics& g, const juce::Path& trace, juce::Rectangle<float> plot, float centreY, float halfHeight,
+                                juce::Colour colour)
+    {
+        if (trace.isEmpty() || halfHeight < 2.0f)
+            return;
+
+        auto filled = trace;
+        filled.lineTo (plot.getX() + plot.getWidth() - 1.0f, centreY);
+        filled.lineTo (plot.getX(), centreY);
+        filled.closeSubPath();
+        juce::ColourGradient fade (colour.withMultipliedAlpha (0.26f), plot.getX(), centreY - halfHeight,
+                                   colour.withMultipliedAlpha (0.26f), plot.getX(), centreY + halfHeight, false);
+        fade.addColour (0.5, colour.withAlpha (0.0f));
+        const juce::Graphics::ScopedSaveState state (g);
+        g.setGradientFill (fade);
+        g.fillPath (filled);
     }
 
     // The warps on the card, for the preview: the phase warps the oscillator
@@ -2857,6 +2896,7 @@ private:
                 path.lineTo (plot.getX() + (float) x, y);
         }
 
+        fillUnderTrace (g, path, plot, centreY, halfHeight, traceColour);
         IlanaTrace::paintTrace (g, path, traceColour);
     }
 

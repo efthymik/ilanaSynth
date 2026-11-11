@@ -116,6 +116,9 @@ public:
 
         canvas.owner = this;
         addAndMakeVisible (canvas);
+        filmStrip.owner = this;
+        filmStrip.setTooltip ("Every frame of the table: click one, or drag across, to edit it");
+        addChildComponent (filmStrip);
 
         setMode (Mode::Draw);
         setWantsKeyboardFocus (true);
@@ -289,7 +292,11 @@ public:
             tools.removeFromLeft (10);
             smoothLabel.setBounds (tools.removeFromLeft (64));
             smoothing.setBounds (tools.removeFromLeft (200).reduced (2));
+            tools.removeFromLeft (14);
+            filmStrip.setBounds (tools.reduced (0, 2));
         }
+        else
+            filmStrip.setBounds ({});
         canvas.setBounds (area);
     }
 
@@ -353,6 +360,56 @@ private:
         {
             owner->grabKeyboardFocus(); // Esc and undo work from here on
             owner->selectFrame (event.y / rowHeight);
+        }
+    };
+
+    // The whole table at a glance under DRAW's tools (UI review 31, item 22): every frame a small cycle in its own
+    // column, the selected one lit; a click or a drag across picks the frame under the mouse.
+    struct FilmStrip : juce::Component, juce::SettableTooltipClient
+    {
+        WavetableEditor* owner = nullptr;
+
+        int frameAt (float x) const
+        {
+            const auto count = juce::jmax (1, (int) owner->doc.frames.size());
+            return juce::jlimit (0, count - 1, (int) (x / juce::jmax (1.0f, (float) getWidth() / (float) count)));
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto bounds = getLocalBounds().toFloat();
+            IlanaTheme::paintWell (g, bounds, 4.0f);
+            const auto& frames = owner->doc.frames;
+            const auto count = (int) frames.size();
+            if (count == 0)
+                return;
+            const auto inner = bounds.reduced (3.0f, 3.0f);
+            const auto cellW = inner.getWidth() / (float) count;
+            for (int i = 0; i < count; ++i)
+            {
+                const auto cell = juce::Rectangle<float> (inner.getX() + cellW * (float) i, inner.getY(), cellW, inner.getHeight());
+                const auto isSelected = i == owner->selected;
+                if (isSelected)
+                {
+                    g.setColour (owner->colour.withAlpha (0.25f));
+                    g.fillRoundedRectangle (cell.expanded (1.0f, 2.0f), 2.0f);
+                    g.setColour (owner->colour);
+                    g.drawRoundedRectangle (cell.expanded (1.0f, 2.0f), 2.0f, 1.0f);
+                }
+                owner->paintWave (g, frames[(size_t) i], cell.reduced (juce::jmin (1.0f, cellW * 0.1f), 2.0f),
+                                  isSelected ? owner->colour : owner->colour.withAlpha (0.55f), 1.0f, juce::jlimit (4, 24, (int) cellW));
+            }
+        }
+
+        void mouseDown (const juce::MouseEvent& event) override
+        {
+            owner->grabKeyboardFocus();
+            owner->selectFrame (frameAt (event.position.x));
+        }
+        void mouseDrag (const juce::MouseEvent& event) override
+        {
+            if (const auto frame = frameAt (event.position.x); frame != owner->selected)
+                owner->selectFrame (frame);
         }
     };
 
@@ -569,6 +626,7 @@ private:
         doc.renderFrame (selected);
         canvas.repaint();
         frameStrip.repaint();
+        filmStrip.repaint();
     }
 
     void canvasMouse (const juce::MouseEvent& event, bool down)
@@ -635,6 +693,7 @@ private:
             doc.renderFrame (selected);
             canvas.repaint();
             frameStrip.repaint();
+            filmStrip.repaint();
         }
     }
 
@@ -974,6 +1033,7 @@ private:
         snap.setVisible (mode == Mode::Draw);
         smoothing.setVisible (mode == Mode::Draw);
         smoothLabel.setVisible (mode == Mode::Draw);
+        filmStrip.setVisible (mode == Mode::Draw);
         resized();
         repaint();
     }
@@ -1082,6 +1142,7 @@ private:
         if (rowTop < frameView.getViewPositionY() || rowTop + FrameStrip::rowHeight > frameView.getViewPositionY() + frameView.getHeight())
             frameView.setViewPosition (0, juce::jmax (0, rowTop - frameView.getHeight() / 2));
         frameStrip.repaint();
+        filmStrip.repaint();
         canvas.repaint();
         repaint();
     }
@@ -1153,6 +1214,7 @@ private:
     juce::TextEditor formulaEditor;
     juce::Label formulaMessage;
     FrameStrip frameStrip;
+    FilmStrip filmStrip;
     juce::Viewport frameView;
     Canvas canvas;
 
