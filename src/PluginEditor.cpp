@@ -306,7 +306,7 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
 
     themeIndex = juce::jlimit (0, IlanaTheme::numPalettes - 1, settings->getIntValue ("themeIndex", 0));
     IlanaAnim::fullMotion() = settings->getBoolValue ("fullMotion", IlanaAnim::fullMotion()); // (the snapshot tool turns it off first: still pictures)
-    lookAndFeel.setAccent (juce::Colour (IlanaTheme::palette[themeIndex]));
+    lookAndFeel.setAccent (juce::Colour (IlanaTheme::palette[themeIndex]), juce::Colour (IlanaTheme::paletteSecond[themeIndex]));
 
     // The pages are built in this patch's colour coding.
     shownSectionColourVersion = processorRef.getSectionColourVersion();
@@ -413,6 +413,11 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
     };
     FilterFlow::openRouting() = [this] { showPage ("PATCH"); };
     fxPage->onShowPatcher = [this] { showPage ("PATCH"); };
+    openFxSlot = [this, fxPage] (int slot)
+    {
+        showPage ("FX");
+        fxPage->showSlot (slot);
+    };
     // M7.5: ilanaSynth FX adds its INPUT page (last, so tab shortcuts stay).
     if (IlanaSynthAudioProcessor::isEffectBuild)
         addSection ("INPUT", { { "INPUT", "INPUT", new InputPage (p) } });
@@ -643,6 +648,13 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
     voicesArea.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     voicesArea.onClick = [this] { showVoicePanel(); };
     content.addAndMakeVisible (voicesArea);
+    content.addAndMakeVisible (fxChips);
+    fxChips.onWidthChange = [this] { layoutTabRow(); };
+    fxChips.onOpen = [this] (int slot)
+    {
+        if (openFxSlot != nullptr)
+            openFxSlot (slot);
+    };
 
     // BPM and CPU are plain read-outs; VOICES opens the voice settings. All
     // three live in the tab bar now (tiny bold caps, label grey, value light).
@@ -669,14 +681,20 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
         };
         content.addAndMakeVisible (bpmArea);
 
-        cpuArea.setInterceptsMouseClicks (false, false);
-        cpuArea.onPaint = [this, paintReadout] (juce::Graphics& g, juce::Rectangle<int> area, bool)
+        // CPU is a small bar beside VOICES (UI review 31, item 21): grey while
+        // low, the accent from 30 %, red toward 100 %; the figure is in its tooltip.
+        cpuArea.setInterceptsMouseClicks (true, false); // (for the tooltip only)
+        cpuArea.onPaint = [this] (juce::Graphics& g, juce::Rectangle<int> area, bool)
         {
             const auto cpu = processorRef.getCpuUsage() * 100.0f;
             const auto colour = cpu < 30.0f ? IlanaTheme::Ui::text2
                                             : (cpu < 60.0f ? IlanaTheme::Ui::text2.interpolatedWith (IlanaTheme::accent(), (cpu - 30.0f) / 30.0f)
                                                            : IlanaTheme::accent().interpolatedWith (juce::Colours::red, juce::jlimit (0.0f, 1.0f, (cpu - 60.0f) / 40.0f)));
-            paintReadout (g, area, "CPU", juce::String (juce::roundToInt (cpu)) + "%", colour, IlanaTheme::Ui::text3);
+            const auto track = area.toFloat().withSizeKeepingCentre ((float) area.getWidth(), 6.0f);
+            g.setColour (IlanaTheme::Ui::track);
+            g.fillRoundedRectangle (track, 3.0f);
+            g.setColour (colour);
+            g.fillRoundedRectangle (track.withWidth (juce::jmax (track.getHeight(), track.getWidth() * juce::jlimit (0.0f, 1.0f, cpu / 100.0f))), 3.0f);
         };
         content.addAndMakeVisible (cpuArea);
 
@@ -708,26 +726,20 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
         };
     }
 
-    // TUNING while a Scala scale (or an MTS-ESP master) retunes the notes: a
-    // small accent pill with the scale's name in the free space of the header.
-    tuningArea.setMouseCursor (juce::MouseCursor::PointingHandCursor);
-    tuningArea.onClick = [this] { showSettingsMenu (true); };
-    tuningArea.onPaint = [this] (juce::Graphics& g, juce::Rectangle<int> area, bool hover)
-    {
-        const auto pill = area.toFloat().reduced (0.5f);
-        g.setColour (IlanaTheme::accent().withAlpha (hover ? 0.22f : 0.12f));
-        g.fillRoundedRectangle (pill, pill.getHeight() * 0.5f);
-        g.setColour (IlanaTheme::accent().withAlpha (0.7f));
-        g.drawRoundedRectangle (pill, pill.getHeight() * 0.5f, 1.0f);
-        g.setColour (hover ? IlanaTheme::Ui::text : IlanaTheme::accent().interpolatedWith (IlanaTheme::Ui::text, 0.4f));
-        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
-        g.drawText (tuningText.fromFirstOccurrenceOf ("TUNING: ", false, false), area.reduced (8, 0), juce::Justification::centred, true);
-    };
-    content.addChildComponent (tuningArea);
+    // TUNING while a Scala scale (or an MTS-ESP master) retunes the notes:
+    // the scale's name beside the category in the preset display (UI review
+    // 31, item 21: the header's own 97 px for it went to the preset box); a
+    // click on it opens the tuning menu.
+    presetDisplay.onTuningClick = [this] { showSettingsMenu (true); };
 
     content.addAndMakeVisible (*masterKnob);
 
     presetDisplay.onClick = [this] { togglePresetPanel(); };
+    presetDisplay.onWheelStep = [this] (int delta)
+    {
+        if (! confirmOverlay.isAsking())
+            stepPreset (delta);
+    };
     prevButton.setFlat (true);
     nextButton.setFlat (true);
 
@@ -746,8 +758,20 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
     redoButton.onClick = [this] { undoOrRedo (true); };
     historyButton.onClick = [this] { showHistoryMenu(); };
     abButton.setButtonText ("A");
-    abButton.setTooltip ("Compare A | B\nFlip between two versions of the patch to compare them; the lit letter is the one playing.");
+    abButton.setTooltip ("Compare A | B  (Ctrl+B)\nFlip between two versions of the patch to compare them; the lit letter is the one playing. Right-click to copy one side to the other.");
     abButton.onClick = [this] { toggleAB(); };
+    abButton.onMenu = [this]
+    {
+        juce::PopupMenu menu;
+        menu.addItem (1, "Copy A to B");
+        menu.addItem (2, "Copy B to A", ! showingA || slotB.isValid()); // (B is empty until the first flip)
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&abButton),
+                            [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)] (int result)
+                            {
+                                if (safeThis != nullptr && result > 0)
+                                    safeThis->copyAB (result == 1);
+                            });
+    };
     diceButton.onClick = [this] { showDiceMenu(); };
     settingsButton.onClick = [this] { showSettingsMenu(); };
 
@@ -844,7 +868,7 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
     }
     content.addAndMakeVisible (tutorial);
     content.addChildComponent (undoToast);
-    routeBadgeWatch.tick = [this] { updateRouteBadges(); updateEditedAndAbMarks(); updateOffSwitchGlow(); updatePresetArrowTips(); };
+    routeBadgeWatch.tick = [this] { updateRouteBadges(); updateEditedAndAbMarks(); updateOffSwitchGlow(); updatePresetArrowTips(); updateDragTabHover(); };
     routeBadgeWatch.startTimerHz (15);
     undoToast.onUndo = [this]
     {
@@ -1843,6 +1867,14 @@ void IlanaSynthAudioProcessorEditor::timerCallback()
             bpmArea.repaint();
             cpuArea.repaint();
             voicesArea.repaint();
+            cpuArea.setTooltip ("CPU " + juce::String (juce::roundToInt (processorRef.getCpuUsage() * 100.0f))
+                                + "%\nHow much of the audio thread's time the synth uses.");
+        }
+
+        if (const auto wanted = tempoInUse(); wanted != bpmWanted)
+        {
+            bpmWanted = wanted;
+            layoutTabRow();
         }
     }
 }
@@ -1956,11 +1988,10 @@ void IlanaSynthAudioProcessorEditor::updateTuningIndicator()
         return;
 
     tuningText = text;
-    tuningArea.setVisible (text.isNotEmpty());
-    tuningArea.setTooltip (text.isNotEmpty() ? "Tuning\nThe notes play " + text.fromFirstOccurrenceOf ("TUNING: ", false, false)
-                                                   + ", not 12-TET. Click to load another scale or switch back."
-                                             : juce::String());
-    tuningArea.repaint();
+    presetDisplay.setTuning (text.fromFirstOccurrenceOf ("TUNING: ", false, false),
+                             text.isNotEmpty() ? "Tuning\nThe notes play " + text.fromFirstOccurrenceOf ("TUNING: ", false, false)
+                                                     + ", not 12-TET. Click to load another scale or switch back."
+                                               : juce::String());
 }
 
 void IlanaSynthAudioProcessorEditor::resized()
@@ -2012,16 +2043,17 @@ void IlanaSynthAudioProcessorEditor::resized()
     placeFromRight (undoButton, key);
     headerSeparatorX[0] = 0;
 
-    presetDisplay.setBounds (180, 7, 330, 38);
-    prevButton.setBounds (180, 7, PresetDisplay::arrowWidth, 38);
-    nextButton.setBounds (180 + 330 - PresetDisplay::arrowWidth, 7, PresetDisplay::arrowWidth, 38);
-    headerScope.setBounds (330, 13, 150, 26);
-    favButton.setBounds (519, rowY, key, key);
-    saveButton.setBounds (559, rowY, 75, key);
-    moreButton.setBounds (644, rowY, key, key);
-    // TUNING (while a scale or MTS-ESP retunes the notes) in the free space between
-    // the file keys and the edit keys; its text is the scale's name.
-    tuningArea.setBounds (684, rowY + 4, juce::jmax (0, undoButton.getX() - step - 684), key - 8);
+    // The preset box takes the room the TUNING tag held (UI review 31, item
+    // 21: 330 to 420 px, the name 40 px more and the live wave 50); the
+    // tuning shows beside the category, and the file keys follow the box.
+    constexpr int presetX = 180, presetWidth = 420;
+    presetDisplay.setBounds (presetX, 7, presetWidth, 38);
+    prevButton.setBounds (presetX, 7, PresetDisplay::arrowWidth, 38);
+    nextButton.setBounds (presetX + presetWidth - PresetDisplay::arrowWidth, 7, PresetDisplay::arrowWidth, 38);
+    headerScope.setBounds (presetX + presetWidth - 30 - 200, 13, 200, 26);
+    favButton.setBounds (presetX + presetWidth + 9, rowY, key, key);
+    saveButton.setBounds (favButton.getRight() + step, rowY, 75, key);
+    moreButton.setBounds (saveButton.getRight() + step, rowY, key, key);
     area.removeFromTop (headerHeight);
 
     tutorial.setBounds (content.getLocalBounds());
@@ -2375,22 +2407,43 @@ void IlanaSynthAudioProcessorEditor::layoutTabRow()
     {
         return juce::GlyphArrangement::getStringWidthInt (juce::Font (IlanaTheme::font (13.2f, true, true).withKerningFactor (0.04f)), text) + 2;
     };
-    constexpr int readoutGap = 12;
-    place (cpuArea, textWidth ("CPU 100%"), readoutGap);
-    place (voicesArea, textWidth ("VOICES 32 / 32"), readoutGap);
+    constexpr int readoutGap = 12, cpuBarWidth = 24;
+    bpmWanted = tempoInUse();
 
     auto& tabBar = tabs.getTabbedButtonBar();
     auto* lastTab = visibleTabCount > 0 ? tabBar.getTabButton (visibleTabCount - 1) : nullptr; // (the last one with a button)
     const auto tabsRight = lastTab != nullptr ? tabs.getX() + tabBar.getX() + lastTab->getRight() : bar.getX();
 
-    // BPM gives way when the current tab's page switch would not fit
-    // whole beside the tabs (nine tabs and PLAY's OVERVIEW / VECTOR).
     auto switchWidth = 0;
     for (auto* section : sections)
         if (section == currentSection() && section->getNumPages() > 1)
             switchWidth = section->switcher.getIdealWidth();
+
+    // The FX chain's chips (UI review 31, item 35) beside SCOPE, with names
+    // while they fit beside the page switch and VOICES, else as dots.
+    const auto voicesWidth = textWidth ("VOICES 32 / 32");
     const auto bpmWidth = textWidth ("BPM 120.0");
-    const auto showBpm = switchWidth <= x - bpmWidth - 12 - (tabsRight + 12);
+    {
+        // (BPM keeps its room while something is synced: the chips turn to dots first.)
+        const auto fixed = (tabsRight + 12) + (switchWidth > 0 ? switchWidth + 12 : 0) + voicesWidth + 8 + cpuBarWidth + readoutGap
+                           + (bpmWanted ? bpmWidth + 12 : 0);
+        const auto chipsWidth = fxChips.widthFor (juce::jmax (0, x - fixed));
+        fxChips.setVisible (chipsWidth > 0);
+        if (chipsWidth > 0)
+        {
+            x -= chipsWidth;
+            fxChips.setBounds (x, bar.getY(), chipsWidth, tabBarHeight - 1);
+            x -= readoutGap + 2;
+        }
+    }
+
+    place (cpuArea, cpuBarWidth, 8);
+    place (voicesArea, voicesWidth, readoutGap);
+
+    // BPM only while something follows the tempo (a synced LFO, the arp or a
+    // sequence, a synced delay, a rhythm effect, a synced sample: item 21),
+    // and only when the current tab's page switch still fits whole beside the tabs.
+    const auto showBpm = bpmWanted && switchWidth <= x - bpmWidth - 12 - (tabsRight + 12);
     bpmArea.setVisible (showBpm);
     if (showBpm)
         place (bpmArea, bpmWidth, 0);
@@ -2410,12 +2463,77 @@ void IlanaSynthAudioProcessorEditor::layoutTabRow()
     }
 
     // The hover line (the dock is full since VOICE moved there, ilana 2026-10-22):
-    // the tab row from the last tab to SCOPE, two lines high, over the page
-    // switch and BPM, VOICES and CPU while it shows (it paints its own ground
-    // and shows only while a control is rested on).
-    infoStrip.setBounds (juce::Rectangle<int> (tabsRight + 12, bar.getY() + 1, juce::jmax (0, scopeButton.getX() - 14 - (tabsRight + 12)), tabBarHeight - 3));
+    // the tab row from the last tab to the FX chips (to SCOPE when there are
+    // none), two lines high, over the page switch and BPM, VOICES and CPU
+    // while it shows (it paints its own ground and shows only while a
+    // control is rested on). It never covers the chips (UI review 31, item 35).
+    const auto hintRight = fxChips.isVisible() ? fxChips.getX() - 12 : scopeButton.getX() - 14;
+    infoStrip.setBounds (juce::Rectangle<int> (tabsRight + 12, bar.getY() + 1, juce::jmax (0, hintRight - (tabsRight + 12)), tabBarHeight - 3));
     infoStrip.setVisible (true);
     infoStrip.toFront (false);
+}
+
+// A mod chip held over a tab for about half a second opens that tab's page,
+// and the drag goes on onto its knobs (UI review 31, item 27).
+void IlanaSynthAudioProcessorEditor::updateDragTabHover()
+{
+    auto index = -1;
+
+    if (isDragAndDropActive() && getCurrentDragDescription().toString().startsWith ("modsource:"))
+    {
+        auto& tabBar = tabs.getTabbedButtonBar();
+        const auto point = tabBar.getLocalPoint (nullptr, juce::Desktop::getMousePosition());
+
+        for (int i = 0; i < visibleTabCount; ++i)
+            if (auto* button = tabBar.getTabButton (i); button != nullptr && button->getBounds().contains (point))
+                index = i;
+    }
+
+    const auto now = juce::Time::getMillisecondCounter();
+
+    if (index != dragTabIndex)
+    {
+        dragTabIndex = index;
+        dragTabSince = now;
+        return;
+    }
+
+    if (index >= 0 && index != tabs.getCurrentTabIndex() && now - dragTabSince >= dragTabOpenMs)
+        tabs.setCurrentTabIndex (index);
+}
+
+// Whether the patch follows the host's tempo anywhere, so BPM means something
+// (UI review 31, item 21).
+bool IlanaSynthAudioProcessorEditor::tempoInUse() const
+{
+    const auto on = [this] (const juce::String& id)
+    {
+        const auto* value = processorRef.apvts.getRawParameterValue (id);
+        return value != nullptr && value->load() > 0.5f;
+    };
+
+    if (on ("arp_on") || on ("pseq_on") || on ("clip_on"))
+        return true;
+
+    for (int lfo = 1; lfo <= IlanaSynthAudioProcessor::numLfos; ++lfo)
+        if (on ("lfo" + juce::String (lfo) + "_sync"))
+            return true;
+
+    for (int osc = 0; osc < OscillatorIds::count; ++osc)
+        if (on (juce::String (OscillatorIds::prefixes[(size_t) osc]) + "_sample_sync"))
+            return true;
+
+    for (int slot = 1; slot <= IlanaSynthAudioProcessor::numFxSlots; ++slot)
+    {
+        const auto* typeValue = processorRef.apvts.getRawParameterValue ("fx_slot" + juce::String (slot));
+        const auto type = typeValue != nullptr ? juce::roundToInt (typeValue->load()) : 0;
+        // (Delay 9 and its Airwindows model 35 when synced; the rhythm family:
+        // Trance Gate 16, Stutter 10, Tape Stop 17.)
+        if (type == 16 || type == 10 || type == 17 || (type == 9 && on ("fx_delay_sync")) || (type == 35 && on ("fx_awdelay_sync")))
+            return true;
+    }
+
+    return false;
 }
 
 void IlanaSynthAudioProcessorEditor::setKeyboardVisible (bool shouldBeVisible)
@@ -2784,7 +2902,7 @@ void IlanaSynthAudioProcessorEditor::updateAbMarks()
     for (auto& section : sections)
         collect (*section);
 
-    const auto base = juce::String ("Compare A | B\nFlip between two versions of the patch to compare them; the lit letter is the one playing.");
+    const auto base = juce::String ("Compare A | B  (Ctrl+B)\nFlip between two versions of the patch to compare them; the lit letter is the one playing. Right-click to copy one side to the other.");
     if (! other.isValid() || ! abButton.isMouseOver())
         abButton.setTooltip (base);
     else if (differ.empty())
@@ -3371,10 +3489,39 @@ void IlanaSynthAudioProcessorEditor::toggleAB()
     updateHeaderButtons();
 }
 
+// The A|B button's right-click (UI review 31, item 24): one side becomes a
+// copy of the other, through the same whole-patch slots a flip uses. The
+// side playing stays the same; when it is the one overwritten, the copy
+// plays at once.
+void IlanaSynthAudioProcessorEditor::copyAB (bool aToB)
+{
+    const auto overwritesPlaying = aToB != showingA; // copying into the side you hear
+
+    if (overwritesPlaying)
+    {
+        auto& from = aToB ? slotA : slotB;
+
+        if (! from.isValid())
+            return;
+
+        closeWavetableEditor(); // the other patch has its own tables
+        processorRef.restoreWholePatch (from);
+        processorRef.easeNextBlock();
+        (aToB ? slotB : slotA) = from;
+    }
+    else
+    {
+        (aToB ? slotB : slotA) = processorRef.captureWholePatch();
+    }
+
+    updateHeaderButtons();
+    presetDisplay.showNotice (aToB ? "A COPIED TO B" : "B COPIED TO A");
+}
+
 void IlanaSynthAudioProcessorEditor::setTheme (int newThemeIndex)
 {
     themeIndex = juce::jlimit (0, IlanaTheme::numPalettes - 1, newThemeIndex);
-    lookAndFeel.setAccent (juce::Colour (IlanaTheme::palette[themeIndex]));
+    lookAndFeel.setAccent (juce::Colour (IlanaTheme::palette[themeIndex]), juce::Colour (IlanaTheme::paletteSecond[themeIndex]));
 
     if (settings != nullptr)
     {
@@ -3495,6 +3642,12 @@ void IlanaSynthAudioProcessorEditor::showDiceMenu()
                             // Each roll is one named undo step.
                             const juce::String names[] { {}, "Random patch", "Random oscillators", "Random filters",
                                                          "Random envelopes", "Random modulation", "Random effects" };
+                            if (result == 1)
+                            {
+                                safeThis->randomizeWholePatch();
+                                return;
+                            }
+
                             const auto name = result <= 6 ? names[result] : juce::String (result == 10 ? "Nudge" : "Shake");
                             const auto roll = [safeThis, result, name]
                             {
@@ -3504,9 +3657,7 @@ void IlanaSynthAudioProcessorEditor::showDiceMenu()
                                 auto& self = *safeThis;
                                 self.processorRef.performEdit (name, [&self, result]
                                 {
-                                    if (result == 1)
-                                        self.randomize();
-                                    else if (result == 6)
+                                    if (result == 6)
                                         self.processorRef.randomizeFxChain();
                                     else if (result == 10)
                                         self.mutate (0.06f);
@@ -3517,18 +3668,27 @@ void IlanaSynthAudioProcessorEditor::showDiceMenu()
                                 });
                             };
 
-                            // A whole new patch replaces the edited one: ask first.
-                            if (result == 1)
-                                safeThis->confirmReplacingPatch ("A random patch", "Roll anyway",
-                                                                 [roll] (bool confirmed) { if (confirmed) roll(); });
-                            else
-                                roll();
+                            roll();
                         });
+}
+
+// The dice's "Whole patch" (and Ctrl+R): one named undo step; a whole new
+// patch replaces the edited one, so it asks first.
+void IlanaSynthAudioProcessorEditor::randomizeWholePatch()
+{
+    confirmReplacingPatch ("A random patch", "Roll anyway",
+                           [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)] (bool confirmed)
+                           {
+                               if (safeThis == nullptr || ! confirmed)
+                                   return;
+                               auto& self = *safeThis;
+                               self.processorRef.performEdit ("Random patch", [&self] { self.randomize(); });
+                           });
 }
 
 void IlanaSynthAudioProcessorEditor::showSettingsMenu (bool tuningOnly)
 {
-    const char* const skinNames[] { "Ember", "Ice", "Acid", "Neon" };
+    const char* const skinNames[] { "Ember", "Ice", "Acid", "Neon", "Neon to Ice" };
     const float zoomChoices[] { 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f };
 
     juce::PopupMenu skins;
@@ -3615,7 +3775,7 @@ void IlanaSynthAudioProcessorEditor::showSettingsMenu (bool tuningOnly)
             menu.addItem (items.getItem());
     }
 
-    auto* target = tuningOnly ? static_cast<juce::Component*> (&tuningArea) : &settingsButton;
+    auto* target = tuningOnly ? static_cast<juce::Component*> (&presetDisplay) : &settingsButton;
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target),
                         [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)] (int result)
                         {
@@ -4318,6 +4478,25 @@ bool IlanaSynthAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
         {
             modifiers.isShiftDown() ? savePresetAs() : savePreset();
             return true;
+        }
+
+        // UI review 31, item 23: the browser, A / B, a new (Init) patch, the
+        // favourite star and a random patch, each the same call as its
+        // button or menu item (a new or random patch asks first over an
+        // edited one). Not while a text field has the keys: there Ctrl+F and
+        // friends belong to the field.
+        if (! modifiers.isShiftDown() && ! modifiers.isAltDown()
+            && dynamic_cast<juce::TextEditor*> (juce::Component::getCurrentlyFocusedComponent()) == nullptr)
+        {
+            switch (code)
+            {
+                case 'F': togglePresetPanel(); return true;
+                case 'B': toggleAB(); return true;
+                case 'N': loadPresetIndex (0); return true;
+                case 'L': toggleFavourite(); updateHeaderButtons(); return true;
+                case 'R': randomizeWholePatch(); return true;
+                default: break;
+            }
         }
 
         // Previous / next preset, asking first over an edited patch.

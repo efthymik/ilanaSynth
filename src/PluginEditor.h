@@ -26,6 +26,7 @@
 #include "PluginProcessor.h"
 #include "gui/HeaderWidgets.h"
 #include "gui/ConfirmOverlay.h"
+#include "gui/FxChainChips.h"
 #include "gui/IlanaLookAndFeel.h"
 #include "gui/InfoStrip.h"
 #include "gui/KeyboardStrip.h"
@@ -131,7 +132,7 @@ public:
     // The header's VOICES count as drawn ("3/32") and its tuning text ("" in
     // 12-TET), for the tests.
     juce::String getVoicesText() const;
-    juce::String getTuningIndicatorText() const { return tuningArea.isVisible() ? tuningText : juce::String(); }
+    juce::String getTuningIndicatorText() const { return tuningText; }
     // The preset's own level (output_trim, review 7): as MASTER's hover
     // reads it, and the preset menu's reset; MASTER's hover text.
     juce::String presetLevelText() const;
@@ -192,6 +193,7 @@ private:
     void showSettingsMenu (bool tuningOnly = false);
 
     void randomize();
+    void randomizeWholePatch();
     void randomizeGroup (int group);
     void mutate (float amount);
     // Asks first when the patch is edited (see isPatchEdited).
@@ -209,6 +211,11 @@ private:
     bool isFavourite (const juce::String& presetName) const;
     void toggleFavourite();
     void toggleAB();
+public:
+    // The A|B button's right-click: copy one side to the other (item 24; public for the UI test).
+    void copyAB (bool aToB);
+    bool isShowingA() const { return showingA; }
+private:
     void setTheme (int newThemeIndex);
     void setKeyboardVisible (bool shouldBeVisible);
     juce::int64 parameterFingerprint() const;
@@ -280,6 +287,15 @@ private:
     bool presetArrowsHovered = false;
     int presetArrowsTipIndex = -2;
     void updatePresetArrowTips();
+    // A mod chip dragged over a tab: which tab, since when (item 27).
+    int dragTabIndex = -1;
+    juce::uint32 dragTabSince = 0;
+    void updateDragTabHover();
+public:
+    static constexpr juce::uint32 dragTabOpenMs = 500;
+    // For the UI test: what the watch does now, without its timer.
+    void checkDragTabHover() { updateDragTabHover(); }
+private:
     std::map<juce::String, int> sectionKnobCounts (const std::set<juce::String>& parameterIds, bool markAb);
     juce::String undoToastKey;
     bool undoToastSkip = false;
@@ -316,14 +332,14 @@ private:
     PresetDisplay presetDisplay;
     IconButton prevButton { "prev", IlanaIcons::Icon::ChevronLeft, "Previous preset" };
     IconButton nextButton { "next", IlanaIcons::Icon::ChevronRight, "Next preset" };
-    IconButton favButton { "fav", IlanaIcons::Icon::Star, "Favourite\nMark this preset as a favourite." };
+    IconButton favButton { "fav", IlanaIcons::Icon::Star, "Favourite  (Ctrl+L)\nMark this preset as a favourite." };
     IconButton saveButton { "save", IlanaIcons::Icon::Save, "Save preset\nSave the current sound as a user preset." };
-    IconButton moreButton { "more", IlanaIcons::Icon::More, "Preset options\nInit, load from file, open the preset folder." };
+    IconButton moreButton { "more", IlanaIcons::Icon::More, "Preset options\nNew patch (Ctrl+N), load from file, open the preset folder." };
     IconButton undoButton { "undo", IlanaIcons::Icon::Undo, "Undo  (Ctrl+Z)" };
     IconButton redoButton { "redo", IlanaIcons::Icon::Redo, "Redo  (Ctrl+Shift+Z)" };
     IconButton historyButton { "history", IlanaIcons::Icon::History, "History\nJump back to any earlier change." };
     ABButton abButton;
-    IconButton diceButton { "dice", IlanaIcons::Icon::Dice, "Randomise\nRoll a new patch, or randomise one part of it." };
+    IconButton diceButton { "dice", IlanaIcons::Icon::Dice, "Randomise\nRoll a new patch (Ctrl+R), or randomise one part of it." };
     IconButton settingsButton { "settings", IlanaIcons::Icon::Gear, "Settings\nVoice mode, voices and pitch-bend range, skin, interface size, keyboard and the welcome tour." };
     GhostButton keysButton { "KEYBOARD" };
     GhostButton helpButton { "?" };
@@ -358,9 +374,8 @@ private:
     };
     ClickArea voicesArea;
     juce::String readoutSignature; // (what the BPM / CPU / VOICES readouts last said)
-    // TUNING in the status line while a Scala scale or MTS-ESP plays (a
-    // click opens the tuning menu).
-    ClickArea tuningArea;
+    // TUNING beside the preset's category while a Scala scale or MTS-ESP
+    // plays (a click on it opens the tuning menu).
     juce::String tuningText;
     void updateTuningIndicator();
     // After "Save and load": the load waiting for SAVE AS to finish.
@@ -379,6 +394,12 @@ private:
     // The tab bar's read-outs, right-aligned: tempo, VOICES (a button: it
     // opens the voice settings) and CPU.
     ClickArea bpmArea, cpuArea;
+    // BPM shows only while something follows the tempo (UI review 31, item 21).
+    bool tempoInUse() const;
+    bool bpmWanted = false;
+    // The FX chain's chips, in the tab row on every page (item 35).
+    FxChainChips fxChips { processorRef };
+    std::function<void (int)> openFxSlot;
     // The dock's place, and where its source groups part (x of the thin rules).
     juce::Rectangle<int> dockBounds, chipRowBounds;
     std::array<int, 2> chipSeparatorX {};
