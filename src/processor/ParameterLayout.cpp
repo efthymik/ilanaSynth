@@ -1465,5 +1465,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout IlanaSynthAudioProcessor::cr
         addFloat (prefix + "_modal_scale", name + " Modal Scale", 0.5f, 2.0f, 1.0f, 0.6309f);
     }
 
+    // The vector PATH to the host's tempo (UI review 31, item 36): SYNC and its
+    // note value, as an LFO's. Off, free at PATH RATE as in every older patch.
+    addBool ("vec_sync", "Vector Path Sync", false);
+    addChoice ("vec_div", "Vector Path Div", getSyncDivisionNames(), 0);
+
     return layout;
 }

@@ -4422,6 +4422,89 @@ int runUiTests()
                         "the arp's VELOCITY, GATE and PITCH lanes each have their own colour");
                 for (const auto* id : { "arp_steps", "arp_vel3", "arp_vel5" })
                     set (id, processor.apvts.getParameter (id)->convertFrom0to1 (processor.apvts.getParameter (id)->getDefaultValue()));
+
+                // UI review 31, item 32: a right-click on a lane never draws (it opens the lane's tools); the tools
+                // each take one undo step; Shift-drag draws a straight line and gives back the steps it leaves.
+                {
+                    const auto withMods = [] (juce::Component& component, juce::Point<float> position, juce::ModifierKeys mods, bool dragged)
+                    {
+                        return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), position, mods, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                                 &component, &component, juce::Time::getCurrentTime(), position, juce::Time::getCurrentTime(),
+                                                 1, dragged);
+                    };
+                    const auto velocityOf = [&processor] (int step) { return processor.apvts.getRawParameterValue ("arp_vel" + juce::String (step + 1))->load(); };
+                    set ("arp_steps", 8.0f);
+                    juce::String menuFor;
+                    GenerativeWidgets::laneMenuProbe() = &menuFor; // (no real pop-up: Xvfb has no window manager)
+                    lanes->mouseDown (withMods (*lanes, { lanes->cellCentre (0, 2).x, low }, juce::ModifierKeys (juce::ModifierKeys::rightButtonModifier), false));
+                    lanes->mouseUp (withMods (*lanes, { lanes->cellCentre (0, 2).x, low }, juce::ModifierKeys(), false));
+                    const auto onBars = menuFor;
+                    menuFor.clear();
+                    lanes->mouseDown (withMods (*lanes, { lane.getX() + 10.0f, low }, juce::ModifierKeys (juce::ModifierKeys::rightButtonModifier), false));
+                    lanes->mouseUp (withMods (*lanes, { lane.getX() + 10.0f, low }, juce::ModifierKeys(), false));
+                    expect (juce::roundToInt (velocityOf (2)) == 100 && onBars == "VEL" && menuFor == "VEL",
+                            "a right-click on the VEL lane (its bars or its name) opens VEL's tools and draws nothing ('" + onBars + "', '" + menuFor + "')");
+
+                    processor.getUndoManager().clearUndoHistory();
+                    lanes->applyLaneTool (ArpLanesEditor::velocity, GenerativeWidgets::LaneTool::rampUp);
+                    auto rising = true;
+                    for (int step = 1; step < 8; ++step)
+                        rising = rising && velocityOf (step) > velocityOf (step - 1);
+                    const auto rampSteps = processor.getUndoManager().getUndoDescriptions();
+                    expect (rising && juce::roundToInt (velocityOf (0)) == 1 && juce::roundToInt (velocityOf (7)) == 127
+                                && juce::roundToInt (velocityOf (8)) == 100 && rampSteps.size() == 1,
+                            "Ramp up on VEL rises 1..127 over the 8 looped steps, leaves step 9, in one undo step ('"
+                                + rampSteps.joinIntoString ("', '") + "')");
+                    lanes->applyLaneTool (ArpLanesEditor::velocity, GenerativeWidgets::LaneTool::shiftLeft);
+                    expect (juce::roundToInt (velocityOf (7)) == 1 && juce::roundToInt (velocityOf (6)) == 127,
+                            "Shift left moves VEL one step left, the first step round to the loop's end");
+                    lanes->applyLaneTool (ArpLanesEditor::velocity, GenerativeWidgets::LaneTool::copy);
+                    lanes->applyLaneTool (ArpLanesEditor::pitch, GenerativeWidgets::LaneTool::paste);
+                    const auto pitchOf = [&processor] (int step) { return juce::roundToInt (processor.apvts.getRawParameterValue ("arp_pitch" + juce::String (step + 1))->load()); };
+                    expect (pitchOf (6) == 12 && pitchOf (7) == -12, "Copy on VEL, Paste on PITCH: the lane's shape, in PITCH's range");
+                    for (const auto lane : { ArpLanesEditor::velocity, ArpLanesEditor::pitch })
+                        lanes->applyLaneTool (lane, GenerativeWidgets::LaneTool::reset);
+                    expect (juce::roundToInt (velocityOf (6)) == 100 && pitchOf (6) == 0, "Reset puts a lane back to its defaults");
+
+                    // Shift-drag from step 1 at the top to step 4 at the foot: a straight line falling over 1-4.
+                    const auto bars = lane.withTrimmedBottom (14.0f);
+                    const auto top = bars.getY() + 1.0f, foot = bars.getBottom() - 1.0f;
+                    const auto shift = juce::ModifierKeys (juce::ModifierKeys::shiftModifier | juce::ModifierKeys::leftButtonModifier);
+                    lanes->mouseDown (withMods (*lanes, { lanes->cellCentre (0, 0).x, top }, shift, false));
+                    lanes->mouseDrag (withMods (*lanes, { lanes->cellCentre (0, 3).x, foot }, shift, true));
+                    const auto falling = velocityOf (0) > velocityOf (1) && velocityOf (1) > velocityOf (2) && velocityOf (2) > velocityOf (3)
+                                      && std::abs ((velocityOf (0) - velocityOf (1)) - (velocityOf (1) - velocityOf (2))) <= 2.0f;
+                    lanes->mouseDrag (withMods (*lanes, { lanes->cellCentre (0, 1).x, foot }, shift, true));
+                    lanes->mouseUp (withMods (*lanes, { lanes->cellCentre (0, 1).x, foot }, shift, true));
+                    expect (falling && juce::roundToInt (velocityOf (2)) == 100 && juce::roundToInt (velocityOf (3)) == 100,
+                            "Shift-drag on VEL draws a straight line and gives back the steps it leaves ("
+                                + juce::String (velocityOf (0)) + ", " + juce::String (velocityOf (1)) + ")");
+                    GenerativeWidgets::laneMenuProbe() = nullptr;
+                    lanes->applyLaneTool (ArpLanesEditor::velocity, GenerativeWidgets::LaneTool::reset);
+                    set ("arp_steps", processor.apvts.getParameter ("arp_steps")->convertFrom0to1 (processor.apvts.getParameter ("arp_steps")->getDefaultValue()));
+                }
+
+                // PROB SEQ's lanes have the same tools; a right-click draws nothing there either.
+                if (auto* seqLanes = findChild<ProbSeqEditor> (*editor))
+                {
+                    const auto chanceOf = [&processor] (int step) { return processor.apvts.getRawParameterValue ("pseq_chance" + juce::String (step + 1))->load(); };
+                    const auto position = juce::Point<float> (seqLanes->cellCentre (ProbSeqEditor::chance, 3).x, seqLanes->barsArea (ProbSeqEditor::chance).getBottom() - 4.0f);
+                    const auto before = chanceOf (3);
+                    juce::String menuFor;
+                    GenerativeWidgets::laneMenuProbe() = &menuFor;
+                    seqLanes->mouseDown (juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), position,
+                                                           juce::ModifierKeys (juce::ModifierKeys::rightButtonModifier), 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                                           seqLanes, seqLanes, juce::Time::getCurrentTime(), position, juce::Time::getCurrentTime(), 1, false));
+                    GenerativeWidgets::laneMenuProbe() = nullptr;
+                    expect (std::abs (chanceOf (3) - before) < 1.0e-6f && menuFor == "CHANCE",
+                            "a right-click on PROB SEQ's CHANCE opens its tools and draws nothing ('" + menuFor + "')");
+                    processor.getUndoManager().clearUndoHistory();
+                    seqLanes->applyLaneTool (ProbSeqEditor::chance, GenerativeWidgets::LaneTool::rampDown);
+                    const auto ramp = processor.getUndoManager().getUndoDescriptions();
+                    expect (chanceOf (0) > 0.99f && chanceOf (1) < chanceOf (0) && ramp.size() == 1 && ramp[0] == "Ramp down CHANCE lane",
+                            "Ramp down on PROB SEQ's CHANCE falls from 100 %, in one undo step ('" + ramp.joinIntoString ("', '") + "')");
+                    seqLanes->applyLaneTool (ProbSeqEditor::chance, GenerativeWidgets::LaneTool::reset);
+                }
             }
             else
             {
@@ -4781,6 +4864,81 @@ int runUiTests()
         for (auto* knob : knobs)
             evolveKnobs += knob->getParameterId().contains ("_evolve") ? 1 : 0;
         expect (evolveKnobs == 0 && pageChips.empty(), "VECTOR has no EVOLVE pane and no VECTOR X / Y chips of its own (I8-13, I8-14)");
+
+        // UI review 31, items 18 and 36: each corner has its oscillator's LEVEL under its picture; PATH's shapes
+        // write the eight points in one undo step; SYNC runs the path at the host tempo.
+        {
+            auto cornerLevel = false;
+            for (auto* knob : knobs)
+                cornerLevel = cornerLevel || (knob->getParameterId() == "osc1_level" && visibleInTree (knob));
+            expect (cornerLevel, "VECTOR: the TOP LEFT corner shows OSC 1's LEVEL under its picture");
+
+            juce::ComboBox* shapes = nullptr;
+            std::vector<juce::ComboBox*> boxes;
+            if (page != nullptr)
+                findAll<juce::ComboBox> (*page, boxes);
+            for (auto* box : boxes)
+                if (box->getProperties()["textPrefix"].toString() == "PATH")
+                    shapes = box;
+            expect (shapes != nullptr, "VECTOR: POSITION AND MOTION has PATH's shape menu");
+
+            if (shapes != nullptr)
+            {
+                const auto pointsText = [&processor]
+                {
+                    juce::String text;
+                    for (int i = 1; i <= 8; ++i)
+                        text << juce::String (processor.apvts.getRawParameterValue ("vec_px" + juce::String (i))->load(), 2) << ","
+                             << juce::String (processor.apvts.getRawParameterValue ("vec_py" + juce::String (i))->load(), 2) << " ";
+                    return text.trim();
+                };
+                expect (shapes->getText() == "Circle", "VECTOR: the path every patch starts with reads Circle ('" + shapes->getText() + "')");
+                processor.getUndoManager().clearUndoHistory();
+                shapes->setSelectedId (2, juce::sendNotificationSync);
+                const auto steps = processor.getUndoManager().getUndoDescriptions();
+                expect (pointsText() == "0.50,0.50 0.78,0.80 0.90,0.50 0.78,0.20 0.50,0.50 0.22,0.80 0.10,0.50 0.22,0.20" && steps.size() == 1,
+                        "VECTOR: Figure 8 writes the path's eight points in one undo step (" + pointsText() + "; '" + steps.joinIntoString ("', '") + "')");
+
+                // SYNC at 1/1 (4 beats) on the Circle: a quarter bar turns the point a quarter round (the octagon's
+                // symmetry makes that exactly 90 degrees), a whole bar brings it back.
+                shapes->setSelectedId (1, juce::sendNotificationSync);
+                for (const auto& [id, value] : { std::pair<const char*, float> { "vec_on", 1.0f }, { "vec_path", 1.0f }, { "vec_sync", 1.0f },
+                                                 { "vec_div", 0.0f }, { "vec_shape", 2.0f }, { "vec_x", 0.5f }, { "vec_y", 0.5f } })
+                    processor.apvts.getParameter (id)->setValueNotifyingHost (processor.apvts.getParameter (id)->convertTo0to1 (value));
+                const auto runFor = [&processor] (double seconds)
+                {
+                    juce::AudioBuffer<float> buffer (2, 256);
+                    juce::MidiBuffer midi;
+                    const auto blocks = juce::roundToInt (seconds * 48000.0 / 256.0); // (prepareToPlay's rate above)
+                    for (int block = 0; block < blocks; ++block)
+                    {
+                        buffer.clear();
+                        processor.processBlock (buffer, midi);
+                    }
+                };
+                const auto angle = [&processor]
+                {
+                    const auto p = processor.getVectorPosition();
+                    return std::atan2 (p.y - 0.5f, p.x - 0.5f) * 180.0f / juce::MathConstants<float>::pi;
+                };
+                runFor (0.1);
+                const auto bpm = processor.getCurrentBpm();
+                const auto start = angle();
+                runFor (60.0 / bpm);
+                const auto quarter = angle();
+                runFor (60.0 / bpm * 3.0);
+                const auto whole = angle();
+                const auto turned = std::abs (std::remainder (quarter - start, 360.0f));
+                expect (std::abs (turned - 90.0f) < 3.0f && std::abs (std::remainder (whole - start, 360.0f)) < 3.0f,
+                        "VECTOR: PATH with SYNC at 1/1 goes round once per bar at the host tempo (a beat turns it "
+                            + juce::String (turned, 1) + " degrees, a bar " + juce::String (std::remainder (whole - start, 360.0f), 1)
+                            + ", " + juce::String (bpm, 1) + " BPM)");
+                for (const auto* id : { "vec_on", "vec_path", "vec_sync", "vec_div", "vec_shape", "vec_x", "vec_y" })
+                    processor.apvts.getParameter (id)->setValueNotifyingHost (processor.apvts.getParameter (id)->getDefaultValue());
+                shapes->setSelectedId (1, juce::sendNotificationSync);
+                processor.getUndoManager().clearUndoHistory();
+            }
+        }
 
         // EVOLVE on the macro's card: AMOUNT and RATE sliders for that
         // macro, and FREEZE; a macro that evolves wears a mark in the strip.

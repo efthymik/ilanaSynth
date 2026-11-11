@@ -1469,6 +1469,7 @@ private:
     std::array<ParamRef, Mod::numMacros> macroIds;
     std::array<std::pair<ParamRef, ParamRef>, Mod::numMacros> evolveIds;
     std::array<std::pair<ParamRef, ParamRef>, numVectorPoints> vectorPathIds;
+    ParamRef vectorSyncRef { "vec_sync" }, vectorDivRef { "vec_div" };
     std::array<LfoSmoother, (size_t) numLfos> lfoSmoothers;
     std::array<bool, (size_t) numLfos> lfoRoutedB {};
     std::array<std::atomic<float>, (size_t) numLfos> lfoLastValuesB {};
