@@ -388,10 +388,12 @@ void runReview9T2Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProc
             auto usedAfter = 0;
             for (int slot = 0; slot < Mod::maxSlots; ++slot)
                 usedAfter += processor.readModSlot (slot).source == Mod::macroSourceFor (macro) ? 1 : 0;
-            expect (usedAfter == usedBefore + 1 && editor.getCurrentPageId() == "MATRIX",
-                    "clicking + ASSIGN adds a routing from that macro and opens the matrix");
-            // Undo puts the matrix back.
-            processor.getUndoManager().undo();
+            // (UI review 31, item 26: + ASSIGN arms the macro for click to
+            // assign; the route comes with the knob clicked next, on this page.)
+            const auto armed = armedModSource() == (int) Mod::macroSourceFor (macro);
+            setArmedModSource (0);
+            expect (usedAfter == usedBefore && armed && editor.getCurrentPageId() != "MATRIX",
+                    "clicking + ASSIGN arms that macro for click to assign and stays on the page");
         }
         else
             expect (false, "Neuro Wobble has an unassigned macro 5-8");

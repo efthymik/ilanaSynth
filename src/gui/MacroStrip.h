@@ -146,18 +146,31 @@ public:
 
         assignBounds = {};
 
+        // Armed (+ ASSIGN pressed, or "Assign by clicking a knob"): the tile
+        // is outlined in the macro's colour until a knob is clicked or Esc.
+        const auto armed = macroIndex >= 0 && armedModSource() == (int) Mod::macroSourceFor (macroIndex);
+        if (armed)
+        {
+            g.setColour (modSourceColour ((int) Mod::macroSourceFor (macroIndex)));
+            g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 6.0f, 1.5f);
+        }
+
         if (macroIndex >= 0 && ! isAssigned())
         {
             // Nothing to move yet: "+ ASSIGN" in the second line, where the
             // other states put their text, so every tile has one shape
-            // (V15-17). It adds a routing from this macro in the matrix
-            // (review 9, I9-20), so macros 5-8 need no drag.
-            const juce::String label ("+ ASSIGN");
+            // (V15-17). It arms the macro: the next knob clicked gets the
+            // route (UI review 31, item 26), so macros 5-8 need no drag.
+            // With several idle, only the first shows it until hovered
+            // (review 11, S11-9; read since UI review 31, item 7).
+            const juce::String label (armed ? "PICK KNOB" : "+ ASSIGN");
             const auto font = IlanaTheme::font (IlanaTheme::TextSize::label, true);
             const auto width = juce::jmin (text.getWidth(), juce::GlyphArrangement::getStringWidthInt (font, label) + 2);
             assignBounds = text.withWidth (width).expanded (3, 1).getIntersection (getLocalBounds());
+            if (quietAssign && ! hover && ! armed)
+                return;
             const auto over = hover && assignBounds.contains (getMouseXYRelative());
-            g.setColour (over ? IlanaTheme::accent() : hover ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2);
+            g.setColour (armed ? modSourceColour ((int) Mod::macroSourceFor (macroIndex)) : over ? IlanaTheme::accent() : hover ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2);
             g.setFont (font);
             IlanaTheme::drawFitted (g, label, text, juce::Justification::topLeft, 1);
             return;
@@ -256,7 +269,7 @@ public:
         }
     }
 
-    // + ASSIGN: add a routing from this macro (the editor opens the matrix).
+    // + ASSIGN: arm this macro (the next knob clicked gets its route).
     void mouseUp (const juce::MouseEvent& event) override
     {
         if (macroIndex >= 0 && ! assignBounds.isEmpty() && ! event.mouseWasDraggedSinceMouseDown()
@@ -269,6 +282,11 @@ public:
             ModNames::openMatrixRow() (firstIdleSlot);
     }
 
+    // Whether + ASSIGN is drawn now (an idle macro after the first shows it on hover only).
+    bool showsAssignLabel() const
+    {
+        return macroIndex >= 0 && ! isAssigned() && (! quietAssign || hover || armedModSource() == (int) Mod::macroSourceFor (macroIndex));
+    }
     // The + ASSIGN button's bounds (empty while the macro moves something).
     juce::Rectangle<int> getAssignBounds() const { return assignBounds; }
     std::function<void (int macro)> onAssign;

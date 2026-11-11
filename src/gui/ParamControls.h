@@ -227,6 +227,55 @@ inline int& pinnedModSource()
     return source;
 }
 
+// Click to assign (UI review 31, item 26): + ASSIGN on a macro, or "Assign
+// by clicking a knob" on any chip, arms a source; the next knob clicked gets
+// the route at the drop's depth, as if the chip had been dragged there. Esc,
+// or a click anywhere else, disarms (the editor shows the hint while armed).
+// Message thread only. 0: nothing armed.
+inline int& armedModSource()
+{
+    static int source = 0;
+    return source;
+}
+
+// Called when a source is armed or disarmed (the editor shows its hint).
+inline std::function<void()>& armedModSourceChanged()
+{
+    static std::function<void()> callback;
+    return callback;
+}
+
+// While armed, a press anywhere but on a knob (a component marked
+// "takesArmedClick", or inside one) disarms.
+struct ArmedClickCanceller : public juce::MouseListener
+{
+    void mouseDown (const juce::MouseEvent& event) override;
+};
+
+inline void setArmedModSource (int source)
+{
+    static ArmedClickCanceller canceller;
+    auto& armed = armedModSource();
+    if (armed == source)
+        return;
+    if (armed == 0)
+        juce::Desktop::getInstance().addGlobalMouseListener (&canceller);
+    else if (source == 0)
+        juce::Desktop::getInstance().removeGlobalMouseListener (&canceller);
+    armed = source;
+    if (armedModSourceChanged() != nullptr)
+        armedModSourceChanged()();
+}
+
+inline void ArmedClickCanceller::mouseDown (const juce::MouseEvent& event)
+{
+    for (auto* component = event.originalComponent; component != nullptr; component = component->getParentComponent())
+        if (component->getProperties().contains ("takesArmedClick"))
+            return;
+    // (Not from inside the global listener's own call.)
+    juce::MessageManager::callAsync ([] { setArmedModSource (0); });
+}
+
 // The source a drag under way carries ("modsource:N" from a chip, a macro,
 // an LFO or envelope card), 0 while none is dragged. Knobs poll it to show
 // every drop target as soon as a drag starts (review 8, V8-10).
@@ -905,6 +954,12 @@ public:
 
     void mouseDown (const juce::MouseEvent& event) override
     {
+        // A press the knob takes for itself (click to assign, Alt-drag a new
+        // route: UI review 31, item 26): the value doesn't move.
+        claimed = claimPress != nullptr && claimPress (event);
+        if (claimed)
+            return;
+
         juce::Slider::mouseDown (event);
 
         // (a popup-menu press or a ctrl-click reset is not the start of a drag)
@@ -928,6 +983,8 @@ public:
     // moves by itself (the look-and-feel glides while this is recent).
     void mouseDoubleClick (const juce::MouseEvent& event) override
     {
+        if (claimed)
+            return;
         getProperties().set ("resetGlideAt", juce::Time::getMillisecondCounterHiRes());
         juce::Slider::mouseDoubleClick (event);
     }
@@ -941,7 +998,7 @@ public:
 
     void mouseDrag (const juce::MouseEvent& event) override
     {
-        if (! dragging)
+        if (claimed || ! dragging)
             return;
 
         setFine (wantsFine (event.mods));
@@ -965,6 +1022,12 @@ public:
 
     void mouseUp (const juce::MouseEvent& event) override
     {
+        if (claimed)
+        {
+            claimed = false;
+            return;
+        }
+
         if (dragging && getProperties().contains ("dragGhostPos"))
         {
             getProperties().set ("dragGhostRelease", juce::Time::getMillisecondCounterHiRes());
@@ -990,8 +1053,13 @@ public:
     std::function<void (int end)> onEndHit;
     // Each step of a drag, and once more on the release (isGrabbed false).
     std::function<void()> onDragValue;
+    // Asked on each press: true takes it (no turn, no reset; the owner
+    // follows the drag as the slider's mouse listener).
+    std::function<bool (const juce::MouseEvent&)> claimPress;
 
 private:
+    bool claimed = false;
+
     void setFine (bool shouldBeFine)
     {
         if (shouldBeFine == fine)
@@ -1029,6 +1097,8 @@ public:
         slider.setColour (juce::Slider::rotarySliderFillColourId, accent);
         addAndMakeVisible (slider);
         slider.addMouseListener (this, false);
+        slider.claimPress = [this] (const juce::MouseEvent& event) { return claimPress (event); };
+        getProperties().set ("takesArmedClick", true);
 
         label.setText (labelText, juce::dontSendNotification);
         label.setJustificationType (juce::Justification::centred);
@@ -1159,11 +1229,96 @@ public:
     {
         closeModCard();
 
+        if (altDragSlot >= 0)
+            return; // (the slider's press, taken by claimPress)
+
+        // A press on the name or around the dial while a source is armed.
+        if (! event.mods.isPopupMenu() && event.originalComponent == this && takeArmedClick())
+            return;
+
         if (event.mods.isPopupMenu())
         {
             startPulse (IlanaTheme::accent());
             showModMenu();
         }
+    }
+
+    // Alt-drag with a source pinned and no ring from it yet: the route is
+    // made on the press and the drag sets its depth (UI review 31, item 26).
+    void mouseDrag (const juce::MouseEvent& event) override
+    {
+        if (altDragSlot < 0 || processorRef == nullptr)
+            return;
+        const auto fine = event.mods.isShiftDown() ? 0.2f : 1.0f;
+        const auto travel = (float) (event.getDistanceFromDragStartX() - event.getDistanceFromDragStartY());
+        const auto depth = juce::jlimit (-1.0f, 1.0f, travel * 0.006f * fine);
+        processorRef->setModSlotValue (altDragSlot, "amt", Mod::storedDepth (processorRef->readModSlot (altDragSlot), depth));
+        refreshRoutings();
+        repaint();
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (altDragSlot < 0)
+            return;
+        altDragSlot = -1;
+        if (processorRef != nullptr)
+            processorRef->endEdit();
+        refreshRoutings();
+        updateNameInk();
+        repaint();
+    }
+
+    // Click to assign: the armed source goes to this knob, as a drop would
+    // put it (one route per source and knob). True when the click was taken.
+    bool takeArmedClick()
+    {
+        const auto source = armedModSource();
+        if (source == 0 || processorRef == nullptr)
+            return false;
+
+        if (! isModulatable())
+        {
+            FloatingNote::show (*this, refusalText());
+            repaint();
+            return true; // (still armed: pick a knob that takes it)
+        }
+
+        setArmedModSource (0);
+        if (! showExistingRouting (source))
+        {
+            processorRef->performEdit ("Add modulation", [this, source] { processorRef->assignModSlot (source, ringConfig.destination, 0.35f); });
+            startPulse (modSourceColour (source));
+        }
+        refreshRoutings();
+        repaint();
+        return true;
+    }
+
+    // The slider's presses the knob takes: an armed source's click, and
+    // Alt-drag making a route from the pinned source.
+    bool claimPress (const juce::MouseEvent& event)
+    {
+        if (event.mods.isPopupMenu())
+            return false;
+        if (armedModSource() != 0)
+            return takeArmedClick();
+
+        const auto pinned = pinnedModSource();
+        if (! event.mods.isAltDown() || pinned == 0 || processorRef == nullptr || ! isModulatable() || routesFrom (pinned))
+            return false;
+
+        processorRef->beginEdit ("Add " + ModNames::source (pinned, processorRef) + " modulation");
+        altDragSlot = processorRef->assignModSlot (pinned, ringConfig.destination, 0.0f);
+        if (altDragSlot < 0)
+        {
+            processorRef->endEdit();
+            return false;
+        }
+        startPulse (modSourceColour (pinned));
+        refreshRoutings();
+        repaint();
+        return true;
     }
 
     juce::Slider& getSlider() { return slider; }
@@ -2442,6 +2597,8 @@ private:
         void mouseDown (const juce::MouseEvent& event) override
         {
             owner.closeModCard();
+            if (! event.mods.isPopupMenu() && owner.takeArmedClick())
+                return;
             const auto ring = ringUnder (event);
 
             if (! juce::isPositiveAndBelow (ring, (int) owner.routings.size()))
@@ -3024,7 +3181,7 @@ private:
             repaint();
         }
 
-        if (const auto dragged = modSourceBeingDragged (*this); dragged != dragSource)
+        if (const auto dragged = modSourceBeingDragged (*this) != 0 ? modSourceBeingDragged (*this) : armedModSource(); dragged != dragSource)
         {
             dragSource = dragged;
             repaint();
@@ -3191,6 +3348,7 @@ private:
     float activity = 0.0f;
     double lastSliderValue = 0.0;
     bool dragHover = false;
+    int altDragSlot = -1; // the route an Alt-drag is making (-1: none)
     int dragSource = 0; // the source being dragged anywhere (V8-10)
     float pulse = 0.0f; // the right-click / assign ring, 1 to 0
     std::unique_ptr<juce::TextEditor> amountEditor;

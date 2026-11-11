@@ -16,6 +16,9 @@
 //   id+=value adds to the recipe's value (for ids whose default is 0, such
 //   as osc1_semi: a recipe that leaves one at its default gets the value).
 //   fx=a,b,c sets fx_slot1..10 to those FX types (the rest to none).
+//   modN_src=0 clears route N's source only; loadFactoryPreset then clears
+//   every slot left with no source as its last step (UI review 31, item 5),
+//   so such a line leaves no "None >" row in the matrix.
 // - mN (1-4) rewires macro N: its old routings are removed, it takes the new
 //   name, and each target (a parameter id, or a destination's display name
 //   from Mod::getDestinationNames) gets a routing with that amount.
