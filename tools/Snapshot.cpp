@@ -1275,26 +1275,46 @@ void runReview31MatrixTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudi
         };
         juce::StringArray differ, stateDiffer, varies;
         auto rendered = 0;
+        const auto renderPreset = [&] (const juce::String& name, bool clearing, std::map<juce::String, float>* state)
+        {
+            IlanaSynthAudioProcessor::clearSourcelessRoutes = clearing;
+            auto synth = std::make_unique<IlanaSynthAudioProcessor>();
+            synth->prepareToPlay (48000.0, 512);
+            synth->loadFactoryPreset (names.indexOf (name));
+            if (state != nullptr)
+                *state = audibleState (*synth);
+            auto out = render (*synth);
+            IlanaSynthAudioProcessor::clearSourcelessRoutes = true;
+            return out;
+        };
         for (const auto& name : had)
         {
-            std::vector<float> renders[3];
-            std::map<juce::String, float> states[3];
-            for (int pass = 0; pass < 3; ++pass)
+            // Three unchanged renders and up to three cleared ones: the cleared
+            // render must equal an unchanged one; a preset whose unchanged
+            // renders differ among themselves is reported as varying.
+            std::map<juce::String, float> stateOff, stateOn;
+            std::vector<std::vector<float>> off, on;
+            off.push_back (renderPreset (name, false, &stateOff));
+            on.push_back (renderPreset (name, true, &stateOn));
+            off.push_back (renderPreset (name, false, nullptr));
+            off.push_back (renderPreset (name, false, nullptr));
+            const auto matches = [&]
             {
-                IlanaSynthAudioProcessor::clearSourcelessRoutes = pass == 2;
-                auto synth = std::make_unique<IlanaSynthAudioProcessor>();
-                synth->prepareToPlay (48000.0, 512);
-                synth->loadFactoryPreset (names.indexOf (name));
-                states[pass] = audibleState (*synth);
-                renders[pass] = render (*synth);
-            }
-            IlanaSynthAudioProcessor::clearSourcelessRoutes = true;
+                for (const auto& a : on)
+                    for (const auto& b : off)
+                        if (a == b)
+                            return true;
+                return false;
+            };
+            while (! matches() && on.size() < 3)
+                on.push_back (renderPreset (name, true, nullptr));
             ++rendered;
-            if (states[0] != states[2])
+            if (stateOff != stateOn)
                 stateDiffer.add (name);
-            if (renders[0] != renders[1])
+            const auto offVaries = off[0] != off[1] || off[0] != off[2];
+            if (offVaries)
                 varies.add (name);
-            else if (renders[0] != renders[2])
+            if (! matches() && ! offVaries)
                 differ.add (name);
         }
         expect (stateDiffer.isEmpty(), "clearing the sourceless routes leaves every parameter the audio reads as it was"
@@ -13223,6 +13243,19 @@ int main (int argc, char** argv)
                 pages->toggleSourcePopover (chip->getSourceIndex(), *chip);
                 break;
             }
+    }
+
+    // ILANA_SNAPSHOT_ARMED: PLAY with macro 1 armed by its + ASSIGN, waiting
+    // for a knob (armed.png; UI review 31, item 26).
+    if (juce::SystemStats::getEnvironmentVariable ("ILANA_SNAPSHOT_ARMED", "").isNotEmpty())
+    {
+        pages->showPage ("MAIN");
+        settle (300);
+        setArmedModSource ((int) Mod::macroSourceFor (0));
+        settle (500);
+        save (*editor, outDir.getChildFile ("armed.png"));
+        setArmedModSource (0);
+        settle (200);
     }
 
     for (int i = 0; i < pageIds.size(); ++i)
