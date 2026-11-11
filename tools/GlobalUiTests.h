@@ -300,7 +300,8 @@ void runGlobalReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudio
         findAll<VectorCornerWave> (editor, corners);
         auto shownCorners = 0;
         for (auto* corner : corners)
-            shownCorners += visibleInTree (corner) && corner->getHeight() > 60 ? 1 : 0;
+            shownCorners += visibleInTree (corner) && corner->getHeight() > 40 ? 1 : 0;
+        // (UI review 31, item 18: the pictures at half their height, each corner's LEVEL and on switch under them.)
         expect (shownCorners == 4, "VECTOR, off: the four corners show a picture of their oscillator (V14-2)");
 
         // V14-1: the rack has no card-sized hole: + ADD is a small button in its top bar.
