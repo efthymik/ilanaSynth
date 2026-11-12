@@ -74,6 +74,17 @@ public:
 
     static constexpr int noteMs = 2500;
 
+    // A hint that stays until hidden, with its key (click to assign, UI
+    // review 31, item 26: "Click a knob to assign LFO 1", CANCEL).
+    void showSticky (const juce::String& note, const juce::String& buttonText, std::function<void()> buttonAction)
+    {
+        undoButton.setButtonText (buttonText);
+        undoButton.setTooltip ("Cancel (Esc)");
+        action = std::move (buttonAction);
+        showText (note, noteMs);
+        stopTimer();
+    }
+
 private:
     void showText (const juce::String& step, int milliseconds)
     {

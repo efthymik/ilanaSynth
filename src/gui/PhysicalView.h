@@ -34,11 +34,72 @@ inline const juce::StringArray& names()
 
 inline juce::String name (int excite) { return names()[juce::jlimit (0, names().size() - 1, excite)]; }
 
+// The six exciter TYPES the picker shows (ilana, 2026-11-11: "5 or 6 physical types that are worth using
+// ... a multi position switch like the minilogue"): each type's engines in its switch's order, the first
+// the default a click on the icon picks (the modal engine where there is one; the older waveguide ones sit
+// under the switch). Display only: oscN_excite keeps its 14 choices, so every patch sounds as it did.
+struct Type
+{
+    const char* name;
+    std::vector<int> engines;          // oscN_excite choices, switch order
+    std::vector<const char*> positions; // the switch's position labels
+};
+
+inline const std::vector<Type>& types()
+{
+    static const std::vector<Type> list {
+        { "PIANO", { 11, 9, 5 }, { "MODAL", "HAMMER", "BRIGHT" } },
+        { "GUITAR", { 12, 0, 1 }, { "MODAL", "BURST", "NOISE" } },
+        { "BOWED", { 13, 4 }, { "MODAL", "LEGACY" } },
+        { "E-PIANO", { 7, 8 }, { "TINE", "REED" } },
+        { "DRIVEN", { 2, 3, 6 }, { "SAW", "PULSE", "OSC IN" } },
+        { "FEEDBACK", { 10 }, { "FEEDBACK" } }
+    };
+    return list;
+}
+
+// The type an exciter belongs to, and its position on that type's switch.
+inline int typeOf (int excite)
+{
+    for (int t = 0; t < (int) types().size(); ++t)
+        for (const auto engine : types()[(size_t) t].engines)
+            if (engine == excite)
+                return t;
+    return 0;
+}
+
+inline int positionOf (int excite)
+{
+    const auto& engines = types()[(size_t) typeOf (excite)].engines;
+    for (int p = 0; p < (int) engines.size(); ++p)
+        if (engines[(size_t) p] == excite)
+            return p;
+    return 0;
+}
+
+// Every engine in the types' order (the header's < > steps through them in this order).
+inline const std::vector<int>& order()
+{
+    static const std::vector<int> list = []
+    {
+        std::vector<int> all;
+        for (const auto& type : types())
+            all.insert (all.end(), type.engines.begin(), type.engines.end());
+        return all;
+    }();
+    return list;
+}
+
+// The menus' groups: one per type, its engines under it.
 inline const std::vector<std::pair<const char*, std::vector<int>>>& groups()
 {
-    static const std::vector<std::pair<const char*, std::vector<int>>> list {
-        { "PLUCK", { 0, 1, 2, 3, 12 } }, { "STRIKE", { 9, 11, 5 } }, { "BOW", { 4, 13 } }, { "ELECTRIC PIANO", { 7, 8 } }, { "DRIVEN", { 10, 6 } }
-    };
+    static const std::vector<std::pair<const char*, std::vector<int>>> list = []
+    {
+        std::vector<std::pair<const char*, std::vector<int>>> all;
+        for (const auto& type : types())
+            all.push_back ({ type.name, type.engines });
+        return all;
+    }();
     return list;
 }
 } // namespace Exciters

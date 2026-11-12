@@ -644,7 +644,7 @@ public:
             case 8:  return 0.708f; // Reed, -3 dB
             case 9:  return 2.0f;   // Piano, +6 dB (heard 2-6 dB under Hammer; the drive takes some back)
             case 11: return 10.0f;  // Modal Piano, +20 dB (the table is in Piano V's dBFS; level with Piano and a wavetable osc at C4)
-            case 12: return 25.0f;  // Modal Guitar, +28 dB (the Iowa guitar's dBFS; level with Piano and Bow at C3-C5)
+            case 12: return 12.5f;  // Modal Guitar, +22 dB (the Omnisphere nylon table, 2026-11-12: at the Iowa table's +28 dB level, level with Piano and Bow at C3-C5)
             case 13: return 1.0f;   // Modal Bowed (ModalBowed::outputGain sets it level with Piano and Bow)
             default: return 1.0f;
         }
@@ -777,6 +777,14 @@ public:
     float getMasterBendRange() const noexcept { return params.masterBendRange; }
     void renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSample, int numSamples) override;
 
+    // (Modal Bowed, chords) How much this note's bowed noise counts toward
+    // a chord's (its loudest Modal Bowed string's bow envelope by the amp's
+    // level and velocity; unison and twin strings are one note), and the
+    // share of their noise its Modal Bowed strings play (IlanaSynth sets it
+    // before each sub-block renders; KarplusStrong::setBowedNoiseShare).
+    float bowedNoiseWeight() const noexcept;
+    void setBowedNoiseShare (float share) noexcept;
+
 private:
     void syncSamplePlayers();
     const SampleData* stretchCopyFor (int osc, const SampleData* origin);
@@ -869,6 +877,10 @@ private:
     };
     ExtraStringBank extraStringUnison[3] { ExtraStringBank (3), ExtraStringBank (4), ExtraStringBank (5) };
     KarplusStrong& stringFor (int osc, int unison)
+    {
+        return osc < 3 ? stringUnison[osc][unison] : extraStringUnison[osc - 3].voices[unison];
+    }
+    const KarplusStrong& stringFor (int osc, int unison) const
     {
         return osc < 3 ? stringUnison[osc][unison] : extraStringUnison[osc - 3].voices[unison];
     }

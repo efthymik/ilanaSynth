@@ -495,7 +495,11 @@ void IlanaSynthAudioProcessor::updateEvolveAndVector (int numSamples)
     auto position = juce::Point<float> (getParam ("vec_x"), getParam ("vec_y"));
     if (isVectorPathOn())
     {
-        vectorPathPhase = std::fmod (vectorPathPhase + seconds * (double) getParam ("vec_rate"), 1.0);
+        // SYNC (appended, off in every older patch): one trip round the path per DIV at the host tempo, as an
+        // LFO's SYNC reads it (UI review 31, item 36).
+        const auto pathRate = getParam (vectorSyncRef) > 0.5f ? (currentBpm.load() / 60.0) / getSyncDivisionBeats ((int) getParam (vectorDivRef))
+                                                              : (double) getParam ("vec_rate");
+        vectorPathPhase = std::fmod (vectorPathPhase + seconds * pathRate, 1.0);
         std::array<juce::Point<float>, numVectorPoints> points;
         for (int i = 0; i < numVectorPoints; ++i)
             points[(size_t) i] = getVectorPathPoint (i);

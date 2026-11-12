@@ -3,6 +3,7 @@
 #include "dsp/MultiSample.h"
 #include "gui/SampleBrowserModel.h"
 #include "dsp/PitchDetect.h"
+#include "dsp/ModalBowedLayers.h"
 
 #ifdef ILANA_TEST_BUILD
 #include "dsp/Modulation.h"
@@ -1388,6 +1389,10 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
     juce::ScopedNoDenormals noDenormals;
     spectralCache->setSynchronous (isNonRealtime());
     stretchRenderer->setSynchronous (isNonRealtime());
+    // (Modal Bowed's residual layers: an offline render waits for their
+    // loops, so every render is the same; at once when they are built.)
+    if (isNonRealtime())
+        ModalBowedLayers::waitUntilBuilt();
 
     const auto totalNumInputChannels = getTotalNumInputChannels();
     const auto totalNumOutputChannels = getTotalNumOutputChannels();
@@ -1452,6 +1457,14 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
         addPreview (scope.startIndex1, scope.blockSize1);
         addPreview (scope.startIndex2, scope.blockSize2);
     }
+
+    // The on-screen wheels, as MIDI (only once one was moved).
+    if (const auto value = uiModWheel.exchange (-1); value >= 0)
+        midiMessages.addEvent (juce::MidiMessage::controllerEvent (1, 1, value), 0);
+    if (const auto value = uiPitchBend.exchange (-1); value >= 0)
+        midiMessages.addEvent (juce::MidiMessage::pitchWheel (1, value), 0);
+    if (const auto value = uiPressure.exchange (-1); value >= 0)
+        midiMessages.addEvent (juce::MidiMessage::channelPressureChange (1, value), 0);
 
     // Learned and macro CCs reach the sound in this block (before anything
     // reads the parameters).
@@ -3287,7 +3300,13 @@ void IlanaSynthAudioProcessor::chooseExciter (int osc, int choice)
     const auto* excite = apvts.getRawParameterValue (prefix + "_excite");
     const auto was = excite != nullptr ? juce::roundToInt (excite->load()) : -1;
     set ("_excite", (float) choice);
-    if (choice == 11 && was != 11)
+    // The modal exciters play their recording as it was with these knobs
+    // (DECAY 0.5, DAMP 0, STIFF 0.5 = the measured stretch, HAMMER / PLUCK
+    // 0.5); the string defaults (DAMP 0.35, STIFF 0) dulled the Modal
+    // Guitar's overtones within a second and dropped its stretch, so
+    // SCALE's stretch did nothing (2026-11-11).
+    const auto modal = [] (int c) { return c == 11 || c == 12; };
+    if (modal (choice) && ! modal (was))
     {
         set ("_string_decay", 0.5f);
         set ("_string_damp", 0.0f);

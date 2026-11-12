@@ -51,9 +51,11 @@ public:
         }
 
         // (The sheet's 145 degree gradient, #ff8a52 to #ff5530 on the ember accent.)
+        // On the two-colour skin the badge runs from its first colour to its second (UI review 31, item 41).
         const auto accent = IlanaTheme::accent();
+        const auto second = IlanaTheme::hasAccentGradient() ? IlanaTheme::accentAt (1.0f) : accent;
         g.setGradientFill (juce::ColourGradient (accent.interpolatedWith (juce::Colours::white, 0.12f).withRotatedHue (0.008f), badge.getX() + badge.getWidth() * 0.2f, badge.getY(),
-                                                 accent.withRotatedHue (-0.01f).withMultipliedSaturation (1.08f), badge.getRight() - badge.getWidth() * 0.2f, badge.getBottom(), false));
+                                                 second.withRotatedHue (-0.01f).withMultipliedSaturation (1.08f), badge.getRight() - badge.getWidth() * 0.2f, badge.getBottom(), false));
         g.fillRoundedRectangle (badge, radius);
 
         juce::Path clip;
