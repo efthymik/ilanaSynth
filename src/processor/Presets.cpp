@@ -978,11 +978,13 @@ void IlanaSynthAudioProcessor::applyPresetVoicing (const char* presetName, std::
 // only between overlapping notes and only a touch of it. Basses and leads
 // speak at once and stop when let go: an amp attack of at most 20 ms (bass)
 // or 80 ms (lead), a release of at most 0.6 s or 0.8 s; a slow swell made
-// fast lines vanish. The presets named for their slide or their bow keep them.
+// fast lines vanish. The presets named for their slide or their bow keep them
+// (the Modal Bowed presets too: the bow's own let-go is the release).
 static void applyPlayStyle (const char* presetName, const juce::String& category,
                             std::vector<std::pair<juce::String, float>>& values)
 {
-    static const juce::StringArray slides { "Theremin", "Legato Glide Lead", "Slide Fiddle", "Rubber Mono", "Stick-Slip Growl" };
+    static const juce::StringArray slides { "Theremin", "Legato Glide Lead", "Slide Fiddle", "Rubber Mono", "Stick-Slip Growl",
+                                        "Modal Violin", "Modal Viola", "Modal Cello" };
     const auto exempt = slides.contains (presetName);
 
     if (! exempt && (category == "Bass" || category == "Lead"))
