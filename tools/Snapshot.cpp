@@ -9027,6 +9027,50 @@ int runUiTests()
         processor.loadFactoryPreset (0);
         settle (100);
     }
+    // Knobs jumped back a frame mid-drag (2026-11-12): a VST3 host (Live)
+    // echoes each edit back through the audio thread a block late; the slider
+    // drew that older value. The knob's attachment now ignores the parameter
+    // while the user moves it, then catches up with the parameter's current value.
+    {
+        auto* parameter = processor.apvts.getParameter ("f1_cutoff");
+        const auto fromAudioThread = [parameter] (float normalised)
+        {
+            std::thread host ([parameter, normalised] { parameter->setValueNotifyingHost (normalised); });
+            host.join();
+        };
+        const auto original = parameter->getValue();
+        const auto plain = [parameter] (float normalised) { return (double) parameter->convertFrom0to1 (normalised); };
+
+        // juce's own attachment: the stale echo moves the slider back (the bug, so the check below means something).
+        {
+            juce::Slider slider;
+            juce::AudioProcessorValueTreeState::SliderAttachment plainAttachment (processor.apvts, "f1_cutoff", slider);
+            slider.setValue (plain (0.6f), juce::sendNotificationSync);
+            fromAudioThread (0.5f);
+            settle (30);
+            expect (std::abs (slider.getValue() - plain (0.5f)) < 1.0e-3,
+                    "knob echo: juce's SliderAttachment draws the host's stale echo (the old behaviour)");
+        }
+        settle ((int) HeldSliderAttachment::holdMs + 50);
+        {
+            juce::Slider slider;
+            HeldSliderAttachment attachment (processor.apvts, "f1_cutoff", slider);
+            slider.setValue (plain (0.6f), juce::sendNotificationSync);
+            fromAudioThread (0.5f); // the host's echo of an older drag step
+            settle (30);
+            expect (std::abs (slider.getValue() - plain (0.6f)) < 1.0e-3, "knob echo: a stale echo mid-drag doesn't move the knob back");
+            slider.setValue (plain (0.65f), juce::sendNotificationSync); // the next drag step
+            expect (std::abs (parameter->getValue() - 0.65f) < 1.0e-3f, "knob echo: the next drag step sets the parameter");
+            fromAudioThread (0.7f); // the parameter moves for real (automation) after the drag
+            settle ((int) HeldSliderAttachment::holdMs + 150);
+            expect (std::abs (slider.getValue() - plain (0.7f)) < 1.0e-3, "knob echo: after the hold the knob shows the parameter's current value");
+            fromAudioThread (0.3f); // not held: follows at once
+            settle (30);
+            expect (std::abs (slider.getValue() - plain (0.3f)) < 1.0e-3, "knob echo: a knob nobody touches follows the parameter at once");
+        }
+        parameter->setValueNotifyingHost (original);
+        settle (30);
+    }
     // UI review 8, R6: text fitting, header, browser, SEQ, dialogs.
     runGlobalReview8Tests (processor, *pages);
     // UI review 31 (builder C): MATRIX, + ASSIGN, the dock, the wheels.

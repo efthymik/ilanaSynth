@@ -11,6 +11,7 @@
 #include "ParamInfo.h"
 #include "ModulePool.h"
 #include "InfoStrip.h"
+#include "HeldSliderAttachment.h"
 
 struct ModRingConfig
 {
@@ -1194,7 +1195,7 @@ public:
         // (one inside it still turns the knob).
         addChildComponent (ringOverlay);
 
-        attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (state, parameterID, slider);
+        attachment = std::make_unique<HeldSliderAttachment> (state, parameterID, slider);
 
         parameter = state.getParameter (parameterID);
 
@@ -3332,7 +3333,7 @@ private:
     bool diffMark = false;
     int endHit = 0;
     double endHitAt = 0.0;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
+    std::unique_ptr<HeldSliderAttachment> attachment;
 
     IlanaSynthAudioProcessor* processorRef = nullptr;
     juce::RangedAudioParameter* parameter = nullptr;
@@ -4602,7 +4603,7 @@ public:
     {
         setSliderStyle (juce::Slider::LinearBar);
         setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
-        attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (state, parameterID, *this);
+        attachment = std::make_unique<HeldSliderAttachment> (state, parameterID, *this);
 
         if (auto* parameter = state.getParameter (parameterID))
         {
@@ -4656,7 +4657,7 @@ private:
 
     juce::String name;
     juce::Colour accent { juce::Colours::orange };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
+    std::unique_ptr<HeldSliderAttachment> attachment;
 };
 
 class ValueSliderControl : public juce::Component
@@ -4669,7 +4670,7 @@ public:
         slider.setColour (juce::Slider::rotarySliderFillColourId, IlanaTheme::accent());
         addAndMakeVisible (slider);
 
-        attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (state, parameterID, slider);
+        attachment = std::make_unique<HeldSliderAttachment> (state, parameterID, slider);
 
         if (auto* parameter = state.getParameter (parameterID))
         {
@@ -4690,7 +4691,7 @@ public:
 private:
     juce::String parameterId;
     KeyboardSlider slider;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
+    std::unique_ptr<HeldSliderAttachment> attachment;
 };
 
 // One dimming rule for every page (UI review 4, V12 and S10). A control

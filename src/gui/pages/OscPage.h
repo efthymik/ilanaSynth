@@ -1614,7 +1614,7 @@ public:
 
             addChildComponent (waveDisplay (i));
             scrubbers[(size_t) i].setColour (oscColour (i));
-            scrubberAttachments.push_back (std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+            scrubberAttachments.push_back (std::make_unique<HeldSliderAttachment> (
                 p.apvts, prefix + "_frame", scrubbers[(size_t) i]));
             addChildComponent (scrubbers[(size_t) i]);
             setupLoadButton (loadButton (i), prefix + "_table", 0);
@@ -5392,7 +5392,7 @@ private:
     EffectRules effectRules { processorRef }; // after processorRef, which it reads
     std::array<std::unique_ptr<WaveDisplay>, OscillatorIds::count> waveDisplays;
     std::array<FrameScrubber, OscillatorIds::count> scrubbers;
-    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> scrubberAttachments;
+    std::vector<std::unique_ptr<HeldSliderAttachment>> scrubberAttachments;
     int lastRevealVersion = -1;
     int selected = 0;
     bool embedded = false; // on PLAY: the oscillator cards without the voice strip

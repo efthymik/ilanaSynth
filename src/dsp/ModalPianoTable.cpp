@@ -29,7 +29,7 @@ namespace
     void buildBodyCurve (ModalPianoTable& table)
     {
         constexpr int bins = ModalPianoTable::curveBins;
-        const auto t = juce::jmin (1, (int) table.times.size() - 1);
+        const auto t = juce::jmin (table.lateTime + 1, (int) table.times.size() - 1); // (0.08 s)
         const auto times = (int) table.times.size();
         std::vector<double> sum (bins, 0.0), weight (bins, 0.0);
         for (const auto& e : table.entries)
@@ -105,10 +105,13 @@ namespace
         const auto count = in.read<std::uint16_t>();
         const auto timeCount = in.read<std::uint16_t>();
         table.rate = in.read<float>();
-        if (version < 1 || version > 4 || timeCount == 0)
+        if (version < 1 || version > 5 || timeCount == 0)
             return {};
         for (int t = 0; t < timeCount; ++t)
             table.times.push_back (in.read<float>());
+        table.modelledPluck = version >= 5;
+        while (table.lateTime < timeCount - 1 && table.times[(size_t) table.lateTime] < 0.0499f)
+            ++table.lateTime;
 
         std::vector<ModalPianoTable::Entry> read;
         for (int e = 0; e < count; ++e)
@@ -170,6 +173,28 @@ namespace
                 entry.phase.assign ((size_t) entry.partials, 0.0f);
                 entry.modeBalance.assign (entry.modes.size(), 0.0f);
                 entry.modePhase.assign (entry.modes.size(), 0.0f);
+            }
+            if (version >= 5)
+            {
+                constexpr auto bands = (size_t) ModalPianoTable::noiseBandCount;
+                if (! in.has (8 + ((size_t) entry.partials + entry.modes.size()) * 2 + bands * 8))
+                    return {};
+                entry.pluckMs = in.read<float>();
+                entry.riseMs = in.read<float>();
+                const auto readPhases = [&in] (size_t count, std::vector<float>& phases)
+                {
+                    for (size_t i = 0; i < count; ++i)
+                    {
+                        const auto v = in.read<std::int16_t>();
+                        phases.push_back (v == -32768 ? ModalPianoTable::noPhase : (float) v / 10000.0f);
+                    }
+                };
+                readPhases ((size_t) entry.partials, entry.startPhase);
+                readPhases (entry.modes.size(), entry.modeStartPhase);
+                for (size_t b = 0; b < bands; ++b)
+                    entry.burstDb.push_back (in.read<float>());
+                for (size_t b = 0; b < bands; ++b)
+                    entry.burstFall.push_back (in.read<float>());
             }
             read.push_back (std::move (entry));
         }
