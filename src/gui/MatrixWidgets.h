@@ -748,9 +748,16 @@ public:
         polarity.onChange = [this] { amount.updateText(); };
         amount.updateText();
         amount.addMouseListener (this, true); // right-click: polarity and typed amount
+        // A left-click anywhere on the row (its number, the gaps, any of its
+        // controls) also shows its curve in the dock: the small curve was the
+        // only way in (ilana 2026-11-12). The curve keeps its own click (it
+        // opens and closes), and the cross only removes.
+        addMouseListener (&rowClick, true);
         stereoAttachment = std::make_unique<juce::ButtonParameterAttachment> (*state.getParameter (id ("stereo")), stereo);
         bypassAttachment = std::make_unique<ReverseButtonAttachment> (*state.getParameter (id ("byp")), bypass);
     }
+
+    ~MatrixRow() override { removeMouseListener (&rowClick); }
 
     int getSlotIndex() const { return slotIndex; }
     int getDisplayNumber() const { return displayNumber; }
@@ -765,6 +772,10 @@ public:
 
     // The "!" of a repeated routing: the page offers to merge it.
     std::function<void (int slot)> onDuplicateClicked;
+    // A left-click anywhere on the row: the page shows its curve.
+    std::function<void (int slot)> onRowClicked;
+    // (The listener that sees those clicks, for the tests.)
+    juce::MouseListener& getRowClickListener() { return rowClick; }
     // A right-click on the row (not on a control): the page's row menu.
     std::function<void (int slot)> onRowMenu;
     // The menu's items without the menu (1 duplicate, 2 show destination,
@@ -1077,7 +1088,22 @@ private:
     };
 
     IlanaSynthAudioProcessor& processorRef;
+    struct RowClick : juce::MouseListener
+    {
+        explicit RowClick (MatrixRow& r) : row (r) {}
+        void mouseDown (const juce::MouseEvent& event) override
+        {
+            const auto* hit = event.originalComponent;
+            if (event.mods.isPopupMenu() || hit == &row.remove || hit == &row.curve || row.curve.isParentOf (hit)
+                || row.onRowClicked == nullptr)
+                return;
+            row.onRowClicked (row.slotIndex);
+        }
+        MatrixRow& row;
+    };
+
     int slotIndex;
+    RowClick rowClick { *this };
     juce::TextButton bypass, remove, stereo { "STEREO" }; // (full words: Impeccable re-score toward 35)
     std::unique_ptr<juce::ButtonParameterAttachment> stereoAttachment;
     DashedAddButton viaButton { "+", "VIA" };

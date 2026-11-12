@@ -152,6 +152,28 @@ inline void runWorkflowUiTests (IlanaSynthAudioProcessor& processor, IlanaSynthA
                 items.add (it.getItem().text);
             expect (items.contains (juce::String (juce::CharPointer_UTF8 ("Type a value\xe2\x80\xa6"))) && items.contains ("Reset to default  (double-click)"),
                     "the knob's menu offers Type a value... and names the double-click reset (" + items.joinIntoString (" | ") + ")");
+
+            // Each routing into the knob has its own submenu in the knob's
+            // menu: polarity, stereo, amount, bypass, remove (no ring or
+            // MATRIX needed).
+            processor.assignModSlot ((int) Mod::Source::Lfo1, (int) Mod::Destination::Filter1Cutoff, 0.35f);
+            settle (300);
+            juce::StringArray routeItems;
+            auto routeIds = true;
+            knob->syncRoutings();
+            const auto routedMenu = knob->buildModMenu();
+            for (juce::PopupMenu::MenuItemIterator it (routedMenu); it.next();)
+                if (it.getItem().subMenu != nullptr && it.getItem().text.startsWith (ModNames::source ((int) Mod::Source::Lfo1)))
+                    for (juce::PopupMenu::MenuItemIterator sub (*it.getItem().subMenu); sub.next();)
+                    {
+                        routeItems.add (sub.getItem().text);
+                        routeIds = routeIds && (sub.getItem().itemID == 0 || sub.getItem().itemID >= 7000);
+                    }
+            expect (routeIds && routeItems.contains ("Unipolar") && routeItems.contains ("Negative") && routeItems.contains ("Bipolar")
+                        && routeItems.contains ("Auto") && routeItems.contains ("Remove"),
+                    "the knob's menu has the LFO 1 routing's polarity choices (" + routeItems.joinIntoString (" | ") + ")");
+            processor.clearModSlotsForTarget ((int) Mod::Destination::Filter1Cutoff);
+            settle (200);
         }
     }
 
