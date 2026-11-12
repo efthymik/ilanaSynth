@@ -13735,6 +13735,36 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    // ILANA_SNAPSHOT_ROWCLICK: Neuro Wobble's matrix, then a click on its
+    // second row's SOURCE (the curve dock follows the row), then stop.
+    if (juce::SystemStats::getEnvironmentVariable ("ILANA_SNAPSHOT_ROWCLICK", "").isNotEmpty())
+    {
+        processor.loadFactoryPreset (processor.getFactoryPresetNames().indexOf ("Neuro Wobble"));
+        settle (300);
+        pages->showPage ("MATRIX");
+        settle (500);
+        save (*editor, outDir.getChildFile ("rowclick-before.png"));
+        std::vector<MatrixRow*> rows;
+        findAll<MatrixRow> (*editor, rows);
+        std::vector<MatrixRow*> shown;
+        for (auto* row : rows)
+            if (visibleInTree (row))
+                shown.push_back (row);
+        std::sort (shown.begin(), shown.end(), [] (auto* a, auto* b) { return a->getY() < b->getY(); });
+        if (shown.size() > 1)
+        {
+            auto* on = &shown[1]->getSourceBox();
+            const juce::Point<float> at { 4.0f, 4.0f };
+            shown[1]->getRowClickListener().mouseDown (juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), at,
+                                                                         juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier), 1.0f,
+                                                                         0.0f, 0.0f, 0.0f, 0.0f, on, on, juce::Time::getCurrentTime(), at,
+                                                                         juce::Time::getCurrentTime(), 1, false));
+            settle (500);
+            save (*editor, outDir.getChildFile ("rowclick-after.png"));
+        }
+        return 0;
+    }
+
     if (juce::SystemStats::getEnvironmentVariable ("ILANA_SNAPSHOT_REMAP", "").isNotEmpty())
     {
         pages->showPage ("MATRIX");
