@@ -551,7 +551,7 @@ public:
             case 8:  return 0.708f; // Reed, -3 dB
             case 9:  return 2.0f;   // Piano, +6 dB (heard 2-6 dB under Hammer; the drive takes some back)
             case 11: return 10.0f;  // Modal Piano, +20 dB (the table is in Piano V's dBFS; level with Piano and a wavetable osc at C4)
-            case 12: return 25.0f;  // Modal Guitar, +28 dB (the Iowa guitar's dBFS; level with Piano and Bow at C3-C5)
+            case 12: return 12.5f;  // Modal Guitar, +22 dB (the Omnisphere nylon table, 2026-11-12: at the Iowa table's +28 dB level, level with Piano and Bow at C3-C5)
             case 13: return 1.0f;   // Modal Bowed (ModalBowed::outputGain sets it level with Piano and Bow)
             default: return 1.0f;
         }

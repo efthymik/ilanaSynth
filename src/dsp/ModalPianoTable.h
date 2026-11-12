@@ -8,7 +8,9 @@
 // tools/build_modal_piano.py): for each recorded note and velocity, the
 // partials' frequencies (as ratios to the note's nominal pitch), each
 // partial's level at a fixed set of times after the strike, and the start of
-// the recording itself (the hammer's attack).
+// the recording itself (the hammer's attack). The Modal Guitar's (version 5,
+// tools/build_modal_guitar.py) has no recording: its pluck is modelled from
+// early levels, start phases, a rise and a noise burst.
 struct ModalPianoTable
 {
     struct Entry
@@ -31,20 +33,35 @@ struct ModalPianoTable
         std::vector<float> balance, phase;         // [partials]
         std::vector<float> modeBalance, modePhase; // [modes]
         float attackDb = -200.0f; // the attack's level over its first 80 ms (both channels), dB
+        // The modelled pluck (version 5; the table has no attack samples):
+        // when the pluck starts after the note's start and how long it
+        // rises (one raised cosine swells over both), each partial's and
+        // mode's phase at the note's start (radians; noPhase: none
+        // measured, a random one), and the pluck's noise per noise band,
+        // at the note's start (dB, the noiseLevels' measure) and its fall
+        // (dB/s).
+        float pluckMs = 0.0f, riseMs = 0.0f;
+        std::vector<float> startPhase, modeStartPhase; // [partials], [modes]
+        std::vector<float> burstDb, burstFall;         // [noiseBandCount]
     };
 
     // The guitar's attacks are separate takes per velocity, not one
     // instrument's strikes: mixed sample by sample their plucks partly
     // cancel (2026-11-11), so it plays the nearer layer's at the blended
-    // level. (The grand keeps its mix: its layers line up.)
+    // level. (The grand keeps its mix: its layers line up. A version 5
+    // table, the guitar's since 2026-11-12, has no attack: modelledPluck.)
     bool nearestAttack = false;
+    // Version 5: the pluck is modelled (Entry::pluckMs ...), not played back.
+    bool modelledPluck = false;
 
+    static constexpr float noPhase = 100.0f; // (Entry::startPhase: none)
     static constexpr int noiseBandCount = 6;
     static constexpr float noiseBands[noiseBandCount][2] { { 0, 500 }, { 500, 1000 }, { 1000, 2000 },
                                                           { 2000, 4000 }, { 4000, 8000 }, { 8000, 16000 } };
     static constexpr int noiseFftSize = 16384;
 
     std::vector<float> times;       // seconds after the strike
+    int lateTime = 0;               // the first time from 0.05 s (the guitar's are after its early ones)
     float rate = 44100.0f;
     std::vector<int> notes, velocities; // sorted, each listed once
     std::vector<Entry> entries;     // velocity-major: entries[v * notes.size() + n]
