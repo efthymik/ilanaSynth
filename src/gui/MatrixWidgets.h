@@ -731,7 +731,7 @@ public:
         sourceAttachment = std::make_unique<IdComboAttachment> (*state.getParameter (id ("src")), source);
         viaAttachment = std::make_unique<IdComboAttachment> (*state.getParameter (id ("aux")), via);
         destinationAttachment = std::make_unique<IdComboAttachment> (*state.getParameter (id ("dst")), destination);
-        amountAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (state, id ("amt"), amount);
+        amountAttachment = std::make_unique<HeldSliderAttachment> (state, id ("amt"), amount);
         // The amount reads as the share of the knob's range the route
         // covers: a bipolar route's 100 % is the whole range (Mod::shownPercent).
         // Typed numbers mean the same.
@@ -1112,7 +1112,7 @@ private:
     CurveControl curve;
     PolarityToggle polarity;
     std::unique_ptr<IdComboAttachment> sourceAttachment, viaAttachment, destinationAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> amountAttachment;
+    std::unique_ptr<HeldSliderAttachment> amountAttachment;
     std::unique_ptr<ReverseButtonAttachment> bypassAttachment;
     juce::Colour lastColour = IlanaTheme::accent();
     juce::String idleReason;
