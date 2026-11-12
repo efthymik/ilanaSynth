@@ -10346,7 +10346,9 @@ static juce::Image renderMenuSheet (juce::LookAndFeel& lf, std::vector<std::pair
             if (item.isSectionHeader)
                 lf.getIdealPopupMenuSectionHeaderSizeWithOptions (item.text, -1, w, h, juce::PopupMenu::Options());
             else
-                lf.getIdealPopupMenuItemSize (item.text, item.isSeparator, -1, w, h);
+                // Measured as JUCE's menu window measures it: the text and its hint.
+                lf.getIdealPopupMenuItemSize (item.shortcutKeyDescription.isNotEmpty() ? item.text + "   " + item.shortcutKeyDescription : item.text,
+                                              item.isSeparator, -1, w, h);
             list.push_back ({ item, h });
             width = juce::jmax (width, w + 2 * border);
             height += h;
@@ -12234,11 +12236,20 @@ int main (int argc, char** argv)
         // can't open under xvfb): the look is the process default, which
         // is what a desktop menu with no look of its own takes.
         pages->showPage ("MAIN");
+        // Two routings into CUTOFF, so the menu shows their submenus.
+        processor.assignModSlot ((int) Mod::Source::Lfo1, (int) Mod::Destination::Filter1Cutoff, 0.35f);
+        processor.assignModSlot ((int) Mod::Source::FilterEnv, (int) Mod::Destination::Filter1Cutoff, 0.5f);
         settle (400);
 
         std::vector<KnobControl*> knobs;
         findAll<KnobControl> (*editor, knobs);
         KnobControl* knob = nullptr;
+        for (auto* candidate : knobs)
+            if (candidate->getRingDestination() == (int) Mod::Destination::Filter1Cutoff)
+                candidate->syncRoutings();
+        for (auto* candidate : knobs)
+            if (knob == nullptr && candidate->getRingDestination() == (int) Mod::Destination::Filter1Cutoff && candidate->getNumRoutings() > 0)
+                knob = candidate;
         for (auto* candidate : knobs)
             if (knob == nullptr && visibleInTree (candidate) && candidate->getNumRings() > 0)
                 knob = candidate;
@@ -12252,6 +12263,21 @@ int main (int argc, char** argv)
                 if (it.getItem().subMenu != nullptr && sub.getNumItems() == 0)
                     sub = *it.getItem().subMenu;
             writePng (renderMenuSheet (lf, { { menu, 0 }, { sub, 1 } }, scale), "widgets-knob-menu.png");
+
+            // The same menu with a routing's submenu open (its polarity).
+            juce::PopupMenu route;
+            auto row = 0, routeRow = -1;
+            for (juce::PopupMenu::MenuItemIterator it (menu); it.next(); ++row)
+                if (it.getItem().subMenu != nullptr && route.getNumItems() == 0)
+                    for (juce::PopupMenu::MenuItemIterator sub2 (*it.getItem().subMenu); sub2.next();)
+                        if (sub2.getItem().text == "Unipolar")
+                        {
+                            route = *it.getItem().subMenu;
+                            routeRow = row;
+                            break;
+                        }
+            if (route.getNumItems() > 0)
+                writePng (renderMenuSheet (lf, { { menu, routeRow }, { route, -1 } }, scale), "widgets-knob-route-menu.png");
         }
 
         std::vector<juce::ComboBox*> combos;
@@ -13706,6 +13732,36 @@ int main (int argc, char** argv)
     if (juce::SystemStats::getEnvironmentVariable ("ILANA_SNAPSHOT_GRAPH", "").isNotEmpty())
     {
         snapshotPatchCableView (processor, outDir);
+        return 0;
+    }
+
+    // ILANA_SNAPSHOT_ROWCLICK: Neuro Wobble's matrix, then a click on its
+    // second row's SOURCE (the curve dock follows the row), then stop.
+    if (juce::SystemStats::getEnvironmentVariable ("ILANA_SNAPSHOT_ROWCLICK", "").isNotEmpty())
+    {
+        processor.loadFactoryPreset (processor.getFactoryPresetNames().indexOf ("Neuro Wobble"));
+        settle (300);
+        pages->showPage ("MATRIX");
+        settle (500);
+        save (*editor, outDir.getChildFile ("rowclick-before.png"));
+        std::vector<MatrixRow*> rows;
+        findAll<MatrixRow> (*editor, rows);
+        std::vector<MatrixRow*> shown;
+        for (auto* row : rows)
+            if (visibleInTree (row))
+                shown.push_back (row);
+        std::sort (shown.begin(), shown.end(), [] (auto* a, auto* b) { return a->getY() < b->getY(); });
+        if (shown.size() > 1)
+        {
+            auto* on = &shown[1]->getSourceBox();
+            const juce::Point<float> at { 4.0f, 4.0f };
+            shown[1]->getRowClickListener().mouseDown (juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), at,
+                                                                         juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier), 1.0f,
+                                                                         0.0f, 0.0f, 0.0f, 0.0f, on, on, juce::Time::getCurrentTime(), at,
+                                                                         juce::Time::getCurrentTime(), 1, false));
+            settle (500);
+            save (*editor, outDir.getChildFile ("rowclick-after.png"));
+        }
         return 0;
     }
 
