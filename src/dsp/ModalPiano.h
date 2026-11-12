@@ -12,7 +12,8 @@
 // Partials that have gone silent, or sit 90 dB under the loudest one, stop
 // running in groups of eight. The first few tens of
 // milliseconds are the recording's own attack (hammer thump and all),
-// resampled to the note's pitch, crossfading into the partials.
+// resampled to the note's pitch, crossfading into the partials (the
+// piano's; the guitar's pluck is modelled, below).
 //
 // In stereo, as the reference's microphones heard it: each partial and board
 // resonance has its own balance and phase between left and right (steady
@@ -30,8 +31,20 @@
 // Eco keeps the first half of the partials.
 //
 // The same engine plays the Modal Guitar (a nylon-string guitar's table,
-// setTable), and two shape knobs move either instrument away from the
-// recording, which they reproduce at 1 (setShape):
+// setTable), which plays no recording: its pluck is modelled (2026-11-12,
+// table version 5, tools/build_modal_guitar.py). Its table starts with four
+// early times (0 to 35 ms) whose levels were fitted to the pluck, so the
+// upper partials and the body's boom start loud and fall fast; each partial
+// and body mode starts in the phase it had in the nearest recorded note at
+// the nearest velocity (not blended: two phases blended would cancel);
+// the note swells along one raised cosine from its start to the top of the
+// pluck (the pluck's measured start, a few ms in as the times count, and
+// its rise, 0.5 to 4 ms; the one thing it adds per sample); and the noise
+// bands above 500 Hz get a burst (the pluck's own noise, measured over the
+// steady noise) that falls block by block.
+//
+// Two shape knobs move either instrument away from the recording, which
+// they reproduce at 1 (setShape):
 //   SIZE    the body (soundboard, guitar box): its resonances sit at their
 //           measured Hz divided by SIZE (a bigger body rings lower)
 //   SCALE   the string's length at the same pitch: longer strings are less
@@ -99,6 +112,8 @@ public:
     {
         count = slots = 0;
         attackLeft = 0;
+        pluckAt = pluckLength = 0;
+        burstLive = false;
         silent = true;
     }
 
@@ -154,6 +169,8 @@ public:
         const auto& table = *tableData;
         count = slots = 0;
         attackLeft = 0;
+        pluckAt = pluckLength = 0;
+        burstLive = false;
         silent = true;
         if (! table.valid())
             return;
@@ -228,6 +245,26 @@ public:
         }
         updatePitch();
 
+        // The modelled pluck (the guitar): each partial and mode starts in
+        // the phase it had in the nearest recorded note at the nearest
+        // velocity (phases are not blended: between two they would cancel),
+        // a sample early, as process() turns it before it sounds.
+        const auto* plucked = table.modelledPluck
+                                  ? &table.at (nearest, at.velocityWeight < 0.5f ? at.velocityIndex
+                                                                                 : juce::jmin (at.velocityIndex + 1, (int) table.velocities.size() - 1))
+                                  : nullptr;
+        if (plucked != nullptr)
+            for (int k = 0; k < slots; ++k)
+            {
+                const auto& phases = k < count ? plucked->startPhase : plucked->modeStartPhase;
+                const auto i = (size_t) (k < count ? k : k - count);
+                if (i >= phases.size() || phases[i] == ModalPianoTable::noPhase)
+                    continue;
+                const auto phase = phases[i] - std::atan2 (rotSin[k], rotCos[k]);
+                re[k] = std::cos (phase);
+                im[k] = std::sin (phase);
+            }
+
         // The stereo picture: the nearest note's, per partial and mode.
         for (int k = 0; k < roundedCount(); ++k)
         {
@@ -251,31 +288,62 @@ public:
         }
 
         // The attack, resampled to this note's pitch.
-        attackA = &modeA->attack;
-        attackB = &modeB->attack;
-        attackRightA = &modeA->attackRight;
-        attackRightB = &modeB->attackRight;
-        attackMix = at.velocityWeight;
-        attackGain = std::pow (10.0f, gainDb / 20.0f);
-        if (table.nearestAttack && modeA != modeB)
+        if (plucked != nullptr)
         {
-            const auto blendedDb = modeA->attackDb + attackMix * (modeB->attackDb - modeA->attackDb);
-            const auto* use = attackMix < 0.5f ? modeA : modeB;
-            attackA = attackB = &use->attack;
-            attackRightA = attackRightB = &use->attackRight;
-            attackGain *= std::pow (10.0f, juce::jlimit (-24.0f, 24.0f, blendedDb - use->attackDb) / 20.0f);
-            attackMix = 0.0f;
+            // None (the guitar): one raised cosine from the note's start to
+            // the top of its pluck (the pluck's start, as the times count,
+            // and its rise), and its noise burst over the steady noise.
+            attackLeft = 0;
+            attackLength = 1;
+            fadeStart = 0;
+            partialRamp = 1.0f; // (nextBlock keeps it there: the crossfade is over)
+            pluckAt = 0;
+            pluckLength = juce::jmax (1, juce::roundToInt (juce::jmax (0.0f, plucked->pluckMs + plucked->riseMs) * 0.001 * sampleRate));
+            const auto toVariance = (float) ModalPianoTable::noiseFftSize / 6.0f * (float) (sampleRate / table.rate) / 0.6931472f;
+            for (int b = 0; b < ModalPianoTable::noiseBandCount; ++b)
+            {
+                auto db = 0.0f, fall = 0.0f;
+                for (int i = 0; i < 4; ++i)
+                {
+                    const auto& e = *at.entries[(size_t) i];
+                    const auto has = (size_t) b < e.burstDb.size();
+                    db += at.weights[(size_t) i] * (has ? e.burstDb[(size_t) b] : -160.0f);
+                    fall += at.weights[(size_t) i] * (has ? e.burstFall[(size_t) b] : 0.0f);
+                }
+                db += levelOffset;
+                burstVariance[b] = db < -140.0f ? 0.0f : std::pow (10.0f, db / 10.0f) * toVariance;
+                burstFactor[b] = std::pow (10.0f, -juce::jmax (0.0f, fall) * (float) (blockSize / sampleRate) / 10.0f);
+                burstLive = burstLive || burstVariance[b] > 0.0f;
+            }
         }
-        const auto anchorHz = 440.0 * std::exp2 ((table.notes[(size_t) nearest] - 69) / 12.0);
-        attackStep = frequency / anchorHz * table.rate / sampleRate;
-        const auto usable = juce::jmin ((double) std::min ({ attackA->size(), attackB->size(), attackRightA->size(), attackRightB->size() }) - 2.0,
-                                        0.08 * table.rate);
-        attackLength = juce::jmax (1, (int) (usable / attackStep));
-        fadeStart = juce::jmin ((int) (0.025 * sampleRate), attackLength / 3);
-        attackLeft = attackLength;
-        attackPosition = 0.0;
-        attackFade = 1.0f;
-        partialRamp = 0.0f;
+        else
+        {
+            attackA = &modeA->attack;
+            attackB = &modeB->attack;
+            attackRightA = &modeA->attackRight;
+            attackRightB = &modeB->attackRight;
+            attackMix = at.velocityWeight;
+            attackGain = std::pow (10.0f, gainDb / 20.0f);
+            if (table.nearestAttack && modeA != modeB)
+            {
+                const auto blendedDb = modeA->attackDb + attackMix * (modeB->attackDb - modeA->attackDb);
+                const auto* use = attackMix < 0.5f ? modeA : modeB;
+                attackA = attackB = &use->attack;
+                attackRightA = attackRightB = &use->attackRight;
+                attackGain *= std::pow (10.0f, juce::jlimit (-24.0f, 24.0f, blendedDb - use->attackDb) / 20.0f);
+                attackMix = 0.0f;
+            }
+            const auto anchorHz = 440.0 * std::exp2 ((table.notes[(size_t) nearest] - 69) / 12.0);
+            attackStep = frequency / anchorHz * table.rate / sampleRate;
+            const auto usable = juce::jmin ((double) std::min ({ attackA->size(), attackB->size(), attackRightA->size(), attackRightB->size() }) - 2.0,
+                                            0.08 * table.rate);
+            attackLength = juce::jmax (1, (int) (usable / attackStep));
+            fadeStart = juce::jmin ((int) (0.025 * sampleRate), attackLength / 3);
+            attackLeft = attackLength;
+            attackPosition = 0.0;
+            attackFade = 1.0f;
+            partialRamp = 0.0f;
+        }
         hasNoise = ! modeA->noiseLevels.empty();
         for (auto& band : noise)
         {
@@ -372,6 +440,14 @@ public:
         left *= partialRamp;
         right *= partialRamp;
         partialRamp += partialRampStep;
+        if (pluckAt < pluckLength)
+        {
+            // The modelled pluck's swell (raised cosine) to its top.
+            const auto rise = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::pi * (float) pluckAt / (float) pluckLength);
+            left *= rise;
+            right *= rise;
+            ++pluckAt;
+        }
 
         if (attackLeft > 0)
         {
@@ -480,7 +556,8 @@ private:
         return k < e.partials ? e.levels[(size_t) (k * times + t)] : -160.0f;
     }
 
-    // The strike's loudness: all partials' power at the first time.
+    // The strike's loudness: all partials' power at 0.05 s (the first time,
+    // or the first after the guitar's early ones).
     static float energyDb (const ModalPianoTable& table, const Corners& c)
     {
         const auto times = (int) table.times.size();
@@ -489,7 +566,7 @@ private:
         {
             auto level = 0.0f;
             for (int i = 0; i < 4; ++i)
-                level += c.weights[(size_t) i] * levelOf (*c.entries[(size_t) i], k, 0, times);
+                level += c.weights[(size_t) i] * levelOf (*c.entries[(size_t) i], k, table.lateTime, times);
             power += std::pow (10.0, level / 10.0);
         }
         return (float) (10.0 * std::log10 (power));
@@ -708,6 +785,17 @@ private:
                 loudest = juce::jmax (loudest, db);
                 variance[(size_t) b] = db < -140.0f ? 0.0f : std::pow (10.0f, db / 10.0f) * toVariance;
             }
+            if (burstLive)
+            {
+                // The pluck's noise, falling.
+                burstLive = false;
+                for (int b = 0; b < ModalPianoTable::noiseBandCount; ++b)
+                {
+                    variance[(size_t) b] += burstVariance[b];
+                    burstVariance[b] = burstVariance[b] * burstFactor[b] < 1.0e-12f ? 0.0f : burstVariance[b] * burstFactor[b];
+                    burstLive = burstLive || burstVariance[b] > 0.0f;
+                }
+            }
             auto& power = noisePower;
             for (int pass = 0; pass < 6; ++pass)
                 for (int b = 0; b < ModalPianoTable::noiseBandCount; ++b)
@@ -875,4 +963,10 @@ private:
     float attackFadeStep = 0.0f, partialRampStep = 0.0f;
     double attackPosition = 0.0, attackStep = 1.0;
     int attackLength = 1, attackLeft = 0, fadeStart = 0;
+    // The modelled pluck: samples into its swell and the swell's length;
+    // its noise per band (noise variance, as nextBlock's) and how much of
+    // it each block leaves.
+    int pluckAt = 0, pluckLength = 0;
+    float burstVariance[ModalPianoTable::noiseBandCount] {}, burstFactor[ModalPianoTable::noiseBandCount] {};
+    bool burstLive = false;
 };
