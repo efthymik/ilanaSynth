@@ -419,14 +419,18 @@ public:
 
     // A routing's right-click menu, on its ring or its badge (Vital's):
     // polarity, stereo, then the amount, bypass and remove.
-    static void addRouteItems (juce::PopupMenu& menu, const Dot& dot)
+    // idBase offsets the item ids (the knob's own menu lists every routing
+    // as a submenu of these, each with its own base); handleRouteChoice takes
+    // the id minus that base.
+    static void addRouteItems (juce::PopupMenu& menu, const Dot& dot, int idBase = 0, bool withHeader = true)
     {
-        menu.addSectionHeader (ModNames::source (dot.source) + "  (" + juce::String (Mod::shownPercent (dot.depth, dot.bipolar)) + "%)");
+        if (withHeader)
+            menu.addSectionHeader (ModNames::source (dot.source) + "  (" + juce::String (Mod::shownPercent (dot.depth, dot.bipolar)) + "%)");
 
-        const auto add = [&menu] (int id, const juce::String& text, const juce::String& hint, bool enabled, bool ticked)
+        const auto add = [&menu, idBase] (int id, const juce::String& text, const juce::String& hint, bool enabled, bool ticked)
         {
             juce::PopupMenu::Item item (text);
-            item.itemID = id;
+            item.itemID = idBase + id;
             item.shortcutKeyDescription = hint;
             item.isEnabled = enabled;
             item.isTicked = ticked;
@@ -3012,13 +3016,20 @@ public:
 
             if (! routings.empty())
             {
-                juce::PopupMenu removeMenu;
+                // Each routing into the knob: its polarity, stereo, amount,
+                // bypass and remove (the ring's own menu), so none of it
+                // needs the thin ring or the MATRIX.
+                for (size_t i = 0; i < routings.size() && i < (size_t) maxRouteSubmenus; ++i)
+                {
+                    const auto& dot = routings[i];
+                    juce::PopupMenu routeMenu;
+                    ModDotStrip::addRouteItems (routeMenu, dot, routeMenuBase + (int) i * routeMenuStride, false);
+                    menu.addSubMenu (ModNames::source (dot.source, processorRef) + "  " + polaritySymbol (dot) + " "
+                                         + juce::String (Mod::shownPercent (dot.depth, dot.bipolar)) + "%"
+                                         + (dot.bypass ? "  (bypassed)" : ""),
+                                     routeMenu, true, nullptr, false, 0);
+                }
 
-                for (const auto& dot : routings)
-                    removeMenu.addItem (5000 + dot.slot, ModNames::source (dot.source, processorRef) + "  ("
-                                                             + juce::String (Mod::shownPercent (dot.depth, dot.bipolar)) + "%)");
-
-                menu.addSubMenu ("Remove modulation", removeMenu);
                 menu.addItem (1000, "Clear all modulation to this knob");
             }
 
@@ -3054,6 +3065,23 @@ public:
     }
 
 private:
+    // The knob menu's routing submenus: ids routeMenuBase + index * stride + the
+    // route item's own id (1..15), clear of the menu's other ids (up to 6116).
+    static constexpr int routeMenuBase = 7000, routeMenuStride = 100, maxRouteSubmenus = 64;
+
+    // How the routing's polarity reads in a menu: up, down, both ways, or
+    // the source's own range.
+    static juce::String polaritySymbol (const ModDotStrip::Dot& dot)
+    {
+        switch ((Mod::Polarity) dot.polarity)
+        {
+            case Mod::Polarity::Unipolar: return "+";
+            case Mod::Polarity::Negative: return juce::String (juce::CharPointer_UTF8 ("\xe2\x88\x92"));
+            case Mod::Polarity::Bipolar:  return juce::String (juce::CharPointer_UTF8 ("\xc2\xb1"));
+            default:                      return dot.bipolar ? juce::String (juce::CharPointer_UTF8 ("\xc2\xb1")) : "+";
+        }
+    }
+
     void showModMenu()
     {
         if (processorRef == nullptr && ! extraMenu)
@@ -3063,10 +3091,19 @@ private:
         juce::Component::SafePointer<KnobControl> safeThis (this);
 
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
-                            [safeThis] (int result)
+                            [safeThis, routes = routings] (int result)
                             {
                                 if (safeThis == nullptr || result == 0)
                                     return;
+
+                                // A routing's submenu: the ring menu's choice.
+                                if (result >= routeMenuBase && result < routeMenuBase + routeMenuStride * maxRouteSubmenus)
+                                {
+                                    const auto index = (size_t) ((result - routeMenuBase) / routeMenuStride);
+                                    if (index < routes.size())
+                                        safeThis->dotStrip.handleRouteChoice ((result - routeMenuBase) % routeMenuStride, routes[index]);
+                                    return;
+                                }
 
                                 auto& processor = *safeThis->processorRef;
 
