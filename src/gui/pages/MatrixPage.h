@@ -178,6 +178,7 @@ public:
             auto row = std::make_unique<MatrixRow> (p, i);
             row->getCurve().onOpenRemap = [this] (int slot) { toggleRemap (slot); };
             row->onDuplicateClicked = [this] (int slot) { showMergeMenu (slot); };
+            row->onRowClicked = [this] (int slot) { showRemap (slot); };
             row->onRowMenu = [this] (int slot) { showRowMenu (slot); };
             row->onRowMenuChoice = [this, i] (int choice) { rowMenuChoice (i, choice); };
             list.addChildComponent (*row);
@@ -452,6 +453,23 @@ public:
 
     // Opens the slot's remap editor in the dock under the rows (or closes
     // it if open). The rows never move for it (UI review 6, V6-22).
+    // A click on a row: its curve in the dock (opened by hand, so it stays
+    // open; another click on the same row leaves it as it is).
+    void showRemap (int slot)
+    {
+        if (remapEditor != nullptr && remapEditor->getSlotIndex() == slot)
+        {
+            if (dockAutomatic)
+            {
+                dockAutomatic = false;
+                dockDismissed = false;
+            }
+            return;
+        }
+
+        toggleRemap (slot);
+    }
+
     void toggleRemap (int slot)
     {
         if (remapEditor != nullptr && remapEditor->getSlotIndex() == slot)
