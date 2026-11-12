@@ -4289,10 +4289,14 @@ void Voice::tuneBody (double driftedFrequency)
                                  + 220.0 * (1.0 - (double) params.resonatorKeytrack))
                                 * std::exp2 ((double) offset / 12.0);
             const auto decay = juce::jlimit (0.0f, 1.0f, params.resonatorDecay + blockMod (D::ResDecay));
+            // A fixed-pitch body (the guitar) ignores KEY TRACK and OFFSET; it
+            // levels itself on the note actually played.
+            const auto fixedPitch = BodyTuning::shapes[(size_t) juce::jlimit (0, 4, params.bodyType - 1)].fixedPitch;
+            const auto bodyNote = fixedPitch ? driftedFrequency : noteHz;
             materialBodyL.configure (params.bodyType - 1, params.bodyMaterial, params.bodySize,
-                                     decay, noteHz, params.quality, -1.0f);
+                                     decay, bodyNote, params.quality, -1.0f, params.bodyLegacyLevel);
             materialBodyR.configure (params.bodyType - 1, params.bodyMaterial, params.bodySize,
-                                     decay, noteHz, params.quality, 1.0f);
+                                     decay, bodyNote, params.quality, 1.0f, params.bodyLegacyLevel);
         }
     }
 }

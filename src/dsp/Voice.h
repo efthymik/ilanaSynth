@@ -354,6 +354,7 @@ struct VoiceParams
     float resonatorKeytrack = 1.0f;
     int bodyType = 0; // Classic, Bar, Plate, Bell, Shell; Classic preserves res_*
     float bodyMaterial = 0.0f, bodySize = 0.5f;
+    bool bodyLegacyLevel = false; // the Guitar body as patches saved before 2026-11-12 heard it (MaterialBody)
     int bodyCouplingMode = 0; // Off, String to body, Body to string, Strings
     float bodyCoupling = 0.0f;
 

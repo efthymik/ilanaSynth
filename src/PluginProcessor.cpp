@@ -1836,6 +1836,7 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
     p.bodyType = (int) getParam ("body_type");
     p.bodyMaterial = getParam ("body_material");
     p.bodySize = getParam ("body_size");
+    p.bodyLegacyLevel = getParam ("body_legacy_level") > 0.5f;
     p.west.on = getParam ("west_on") > 0.5f;
     if (p.west.on)
     {

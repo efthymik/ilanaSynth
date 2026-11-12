@@ -1470,5 +1470,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout IlanaSynthAudioProcessor::cr
     addBool ("vec_sync", "Vector Path Sync", false);
     addChoice ("vec_div", "Vector Path Div", getSyncDivisionNames(), 0);
 
+    // The Guitar body before it was levelled on the note (2026-11-12; ilana:
+    // "guitar type body ... makes no sound"): on, its modes keep the old
+    // normalisation, 20-60 dB quiet at most DECAYs. Off for new patches; old
+    // ones on the Guitar body load with it on (migrateGuitarBodyLevel), so
+    // they sound as they did. No knob.
+    addBool ("body_legacy_level", "Body Legacy Level", false);
+
     return layout;
 }

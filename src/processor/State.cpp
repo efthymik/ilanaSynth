@@ -9,7 +9,7 @@ namespace
     constexpr SavedSchema savedSchemas[] = {
         { "osc3Schema", 2 }, { "grainPosSchema", 2 }, { "lorenzSchema", 2 }, { "stringSchema", 2 },
         { "redundantKnobsSchema", 2 }, { "modRangeSchema", 2 }, { "destSchema", 2 }, { "tableSchema", 4 },
-        { "boardMixSchema", 3 }, { "glideSchema", 2 },
+        { "boardMixSchema", 3 }, { "glideSchema", 2 }, { "guitarBodySchema", 2 },
     };
 
     bool savedByNewerBuild (const juce::ValueTree& state)
@@ -1614,6 +1614,32 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
                                   child.setProperty ("value", value, nullptr);
                           });
         state.setProperty ("glideSchema", 2, nullptr);
+    }
+
+    // A patch on the Guitar body saved before it was levelled on the note
+    // keeps the old, quiet body.
+    if ((int) state.getProperty ("guitarBodySchema", 1) < 2)
+    {
+        const auto find = [&state] (const juce::String& id)
+        {
+            for (int i = 0; i < state.getNumChildren(); ++i)
+                if (state.getChild (i).getProperty ("id").toString() == id)
+                    return state.getChild (i);
+            return juce::ValueTree();
+        };
+        migrateGuitarBodyLevel ([&find] (const juce::String& id, float fallback)
+                                {
+                                    const auto child = find (id);
+                                    return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
+                                },
+                                [&find, &state] (const juce::String& id, float value)
+                                {
+                                    if (auto child = find (id); child.isValid())
+                                        child.setProperty ("value", value, nullptr);
+                                    else
+                                        state.appendChild (juce::ValueTree ("PARAM", { { "id", id }, { "value", value } }), nullptr);
+                                });
+        state.setProperty ("guitarBodySchema", 2, nullptr);
     }
 
     apvts.replaceState (state);

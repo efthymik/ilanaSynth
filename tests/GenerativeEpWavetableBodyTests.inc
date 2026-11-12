@@ -865,6 +865,42 @@ void runM72BodyTests()
         finite = finite && std::isfinite (value) && std::abs (value) <= 2.0f;
     }
     check (finite, "maximum material resonance stays finite under full drive");
+
+    // The Guitar body (fixed modes, 98-850 Hz) was 25-60 dB under the tuned
+    // bodies at DECAY 70 % (ilana 2026-11-12: "guitar type body ... makes no
+    // sound"): a band-limited saw through it now comes out within a few dB of
+    // the Shell's level on every note, and the legacy level stays as it was.
+    const auto sawLevel = [] (int shape, double hz, float decay, bool legacy)
+    {
+        MaterialBody body;
+        body.prepare (48000.0);
+        body.configure (shape, 0.33f, 0.5f, decay, hz, 2, 0.0f, legacy);
+        auto in = 0.0, out = 0.0, phase = 0.5;
+        const auto step = hz / 48000.0;
+        for (int i = 0; i < 48000 * 3; ++i)
+        {
+            phase += step;
+            phase -= std::floor (phase);
+            auto blep = 0.0; // (polyBLEP: no aliases landing on a mode)
+            if (phase < step) { const auto t = phase / step; blep = t + t - t * t - 1.0; }
+            else if (phase > 1.0 - step) { const auto t = (phase - 1.0) / step; blep = t * t + t + t + 1.0; }
+            const auto x = (float) ((2.0 * phase - 1.0 - blep) * 0.1);
+            const auto y = body.process (x);
+            if (i >= 48000 * 2) { in += (double) x * x; out += (double) y * y; }
+        }
+        return 10.0 * std::log10 (out / in);
+    };
+    auto quietest = 100.0, loudest = -100.0;
+    for (int note = 36; note <= 84; note += 1)
+    {
+        const auto hz = 440.0 * std::exp2 ((note - 69) / 12.0);
+        const auto level = sawLevel (4, hz, 0.7f, false) - sawLevel (3, hz, 0.7f, false);
+        quietest = std::min (quietest, level);
+        loudest = std::max (loudest, level);
+    }
+    check (quietest > -4.0 && loudest < 4.0, "the Guitar body is heard at a tuned body's level on every note ("
+                                                 + juce::String (quietest, 1) + " to " + juce::String (loudest, 1) + " dB)");
+    check (sawLevel (4, 164.81, 0.7f, true) < -40.0, "the Guitar body's legacy level is the old, quiet one");
 }
 
 // ILANA_BODY_FIT=<folder> writes impulse responses of the four material
