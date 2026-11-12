@@ -1487,7 +1487,7 @@ public:
     }
 
     // Named places on a knob's range (the slider's "ringMarks": real values, comma-separated), as small
-    // ticks on the track: SIZE's violin, viola and cello (UI review 30).
+    // ticks on the track: the modal SIZE / SCALE's instruments (UI review 30; ModalMarks.h).
     static void paintRingMarks (juce::Graphics& g, juce::Slider& slider, juce::Point<float> centre, float arcRadius, float lineWidth,
                                 float rotaryStartAngle, float rotaryEndAngle)
     {
@@ -1506,8 +1506,11 @@ public:
             juce::Path tick;
             tick.startNewSubPath (centre + dir * (arcRadius - lineWidth * 0.5f));
             tick.lineTo (centre + dir * (arcRadius + lineWidth * 0.5f));
-            g.setColour (IlanaTheme::Ui::well.withAlpha (slider.isEnabled() ? 0.95f : 0.5f));
-            g.strokePath (tick, juce::PathStrokeType (1.6f));
+            // (The mark the knob sits on lights up: a drag snaps there, KnobSlider::markNear.)
+            const auto on = std::abs (mark.getDoubleValue() - slider.getValue()) < 1.0e-4;
+            g.setColour (on ? IlanaTheme::Ui::text.withAlpha (slider.isEnabled() ? 0.95f : 0.5f)
+                            : IlanaTheme::Ui::well.withAlpha (slider.isEnabled() ? 0.95f : 0.5f));
+            g.strokePath (tick, juce::PathStrokeType (on ? 2.0f : 1.6f));
         }
     }
 

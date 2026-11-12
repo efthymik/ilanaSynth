@@ -2,7 +2,10 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include <algorithm>
 #include <cmath>
+#include <optional>
+#include <vector>
 
 #include "../PluginProcessor.h"
 #include "AnimationUtils.h"
@@ -1013,7 +1016,9 @@ public:
         if (std::abs (step) > 0.0f)
             lastEnd = end;
         proportion = juce::jlimit (0.0, 1.0, wanted);
-        setValue (proportionOfLengthToValue (proportion), juce::sendNotificationSync);
+        // (Named places on the ring catch the drag; Alt held moves freely past them.)
+        const auto mark = event.mods.isAltDown() ? std::optional<double>() : markNear (proportion, wantsFine (event.mods));
+        setValue (mark.has_value() ? *mark : proportionOfLengthToValue (proportion), juce::sendNotificationSync);
         if (onDragValue != nullptr)
             onDragValue();
 
@@ -1057,6 +1062,38 @@ public:
     // Asked on each press: true takes it (no turn, no reset; the owner
     // follows the drag as the slider's mouse listener).
     std::function<bool (const juce::MouseEvent&)> claimPress;
+
+    // The knob's named places ("ringMarks": real values, comma-separated; the modal SIZE / SCALE's
+    // instruments, ModalMarks.h) catch a drag that comes within snapPixels of them (a tenth of that
+    // while fine), or half the way to a neighbour where they sit closer: the mark's exact value.
+    static constexpr float snapPixels = 4.0f;
+    std::optional<double> markNear (double atProportion, bool fineDrag)
+    {
+        const auto text = getProperties()["ringMarks"].toString();
+        if (text.isEmpty())
+            return {};
+        std::vector<std::pair<double, double>> marks; // (proportion, value)
+        for (const auto& token : juce::StringArray::fromTokens (text, ",", ""))
+        {
+            const auto value = token.getDoubleValue();
+            const auto at = valueToProportionOfLength (value);
+            if (std::isfinite (at) && at >= 0.0 && at <= 1.0)
+                marks.emplace_back (at, value);
+        }
+        std::sort (marks.begin(), marks.end());
+        const auto reach = snapPixels / fullRangePixels / (fineDrag ? fineDivisor : 1.0f);
+        for (size_t i = 0; i < marks.size(); ++i)
+        {
+            auto window = (double) reach;
+            if (i > 0)
+                window = juce::jmin (window, (marks[i].first - marks[i - 1].first) * 0.5);
+            if (i + 1 < marks.size())
+                window = juce::jmin (window, (marks[i + 1].first - marks[i].first) * 0.5);
+            if (std::abs (atProportion - marks[i].first) <= window)
+                return marks[i].second;
+        }
+        return {};
+    }
 
 private:
     bool claimed = false;
@@ -1133,7 +1170,14 @@ public:
             auto text = slider.getTextFromValue (slider.getValue());
             if (slider.isDoubleClickReturnEnabled())
                 text << juce::String::fromUTF8 ("  \xc2\xb7  default ") << slider.getTextFromValue (slider.getDoubleClickReturnValue());
-            text << juce::String::fromUTF8 ("  \xc2\xb7  hold Shift for fine, double-click to reset");
+            // (A knob with named places, the modal SIZE / SCALE: the one it is on, and how to pass them.)
+            const auto markValues = juce::StringArray::fromTokens (slider.getProperties()["ringMarks"].toString(), ",", "");
+            const auto markNames = juce::StringArray::fromTokens (slider.getProperties()["ringMarkNames"].toString(), ",", "");
+            for (int i = 0; i < juce::jmin (markValues.size(), markNames.size()); ++i)
+                if (std::abs (markValues[i].getDoubleValue() - slider.getValue()) < 1.0e-4)
+                    text << juce::String::fromUTF8 ("  \xc2\xb7  ") << markNames[i];
+            text << juce::String::fromUTF8 (markValues.isEmpty() ? "  \xc2\xb7  hold Shift for fine, double-click to reset"
+                                                                 : "  \xc2\xb7  snaps to instruments, hold Alt to move freely");
             InfoStrip::say (*this, name, text);
         };
 
