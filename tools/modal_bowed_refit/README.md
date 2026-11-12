@@ -373,6 +373,30 @@ at size 1 and under, so the violin (and the pizzicato) play bit for bit as befor
 constant per note (4-18 dB): the score is taken against each note's own sustain, so that is free on it. Rerun
 `size_level.cpp` after any round that moves a note's level.
 
+SIZE past the fitted bodies (2026-11-12; ilana: "make it more realistic", "push all modal instruments in this manner ...
+to create novel timbres"). The fitted span 1..2.1 is untouched (bit for bit at 1, 1.17 and 2.1, bowed and pizz; 0 of
+769 fingerprints). Past either end (`beyondFit`, `slotPower` in ModalBowed.h) each body slot goes on from that end
+(q = SIZE / the end's) by its family's law (Schelleng 1963; Hutchins's octet; Bissinger 2003, 2008; Jansson, Woodhouse
+2005 for the bridge hill; the shared plan in /mnt/project-files/ilanasynth/modal-size-physics/): A0 (slots 0, 1)
+q^-1.25, the corpus and every slot under 700 Hz q^-1.5 easing to q^-1 at 2 kHz, the bridge hill (2.3-3.5 kHz) q^-0.5,
+above it q^-0.75; past the cello Q rises as sqrt q, under the violin it holds; gains the end's, A0 +3 dB per doubling;
+the direct path's low-pass q^-0.5 and, under the violin, +3 dB per halving. Past the cello the air mode the cello's fit
+leaves silent (slot 0: 88 Hz on the cello, a real cello's A0 is about 100) is voiced again toward a double bass (3.1: a
+3/4 bass's 111 cm body against a violin's 35.5) at the loudest slot - 4 dB: A0 54 Hz (a bass's sits near its open A,
+55 Hz), corpus 105, 114, 146, 177, 186, 206, 229 Hz (Brown 2004: T1 about 110 Hz). Slot 1 by the plan's law lands at 77 Hz
+there, 30 % high, which is why slot 0 carries the bass's A0. "What if": past the bass (3.1 to 4) a cistern, Q x8 (body
+gain +9 dB for the energy), the bow 3x slower to bite, the room 4x longer and 6 dB louder; under 0.5 (to 0.25) glass, Q
+up to x41 (the air mode x301 and +12 dB) and the hair's noise ringing the air mode and the first corpus modes (the hair-
+body path, three resonators, only there): a bell at a fixed pitch over the string. Slots under 30 Hz or past a quarter of
+the rate fade out over an octave (a low one keeps its place, silent). Held at the ends instead of extrapolating their fitted
+powers: the per-note tables (their own size's weight past their end; they faded out a quarter of the way before), the
+released partials' loss (size^10.9 took every partial at the let-go past the cello) and the room (its decay powers
+gave the tiny a 13 s hall and the giant none). `ModalBowedSizeLevel.h` gains `above` and `below` knots (12 a unit of u,
+to u 2 and -2, held past) from `size_level.cpp --beyond` / `--merge` (the span's rows kept as they were), each knot's
+level the mean of it and its neighbours (a partial landing on a narrow mode at a knot is luck), within +-18 dB: held
+notes stay within about +-4 dB of the violin's level from 0.25 to 4 (MIDI 28-93). No new per-sample work but the
+glass's three resonators under 0.5; the WOLF drive is not scaled (its resonance moves with its slot).
+
 Chords' noise (2026-11-11; ilana: "the bowed modal noise is a bit much when playing chords"). Each bowed note makes its own
 noise (the bow hair's, so its hiss, body and air-mode noise; the cello's string top; the hall's floor and rumble; the
 residual layers), so four notes stacked four independent noise beds, 6 dB over one note's, while the tone adds as notes

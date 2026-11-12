@@ -127,6 +127,10 @@
 // refitted and a darker roll-off. The violin's: its table's knots shape each
 // partial's level over the held note and, as the cello's, its onset and
 // release, and each residual layer's onset and release.
+// SIZE past the fitted bodies (2026-11-12; see beyondFit): under the violin
+// and over the cello each body mode family goes on by its own law (the air
+// mode, the plates, the bridge hill), toward a violino piccolo (0.8) and a
+// double bass (3.1), then "what if": a glass bell (0.25) and a cistern (4).
 // Eco keeps half the modes and the body's lower half.
 
 #include <juce_core/juce_core.h>
@@ -302,7 +306,8 @@ public:
             noteWeight[i] = weight;
         }
         // (SIZE's loudness, bowed only) This note's row of ModalBowedSizeLevel.
-        sizeLevelRow = plucked ? nullptr : ModalBowedSizeLevel::db[juce::jlimit (ModalBowedSizeLevel::first, ModalBowedSizeLevel::last, midi) - ModalBowedSizeLevel::first];
+        sizeLevelNote = juce::jlimit (ModalBowedSizeLevel::first, ModalBowedSizeLevel::last, midi) - ModalBowedSizeLevel::first;
+        sizeLevelRow = plucked ? nullptr : ModalBowedSizeLevel::db[sizeLevelNote];
         // (Round 11, the violin's) The residual layers: the note's loops if
         // they are built yet (if not, the note plays as round 10 did).
         // (Round 12: picked in updateFit, pickLayers, once the tables' weights
@@ -1415,11 +1420,28 @@ private:
     // the violin plays bit for bit as before; the cello is its fit raised by
     // a constant (the score is relative to each note's sustain). Set with the
     // fit: note-on, and once a block only when SIZE moves.
+    // (2026-11-12) Past the cello (u over 1) and under the violin (u under
+    // 0) its own knots, beyondKnots a unit of u, the dB that keeps the note
+    // at its level at the nearer end (the cello's with its correction, the
+    // violin's), from the end's value, held past the last.
     double sizeLevelDb (double u) const
     {
-        if (! sizeLevelOn || sizeLevelRow == nullptr || ! (u > 0.0))
+        if (! sizeLevelOn || sizeLevelRow == nullptr)
             return 0.0;
         using L = ModalBowedSizeLevel;
+        if (u > 1.0 || u < 0.0)
+        {
+            const auto above = u > 1.0;
+            const auto* knots = above ? L::above[sizeLevelNote] : L::below[sizeLevelNote];
+            const auto count = above ? L::aboveCount : L::belowCount;
+            const auto x = (above ? u - 1.0 : -u) * L::beyondKnots;
+            const auto k = juce::jlimit (0, count - 1, (int) x);
+            const auto a = k == 0 ? (above ? (double) sizeLevelRow[L::knots - 1] : 0.0) : (double) knots[k - 1];
+            const auto b = (double) knots[k];
+            return a + (b - a) * juce::jmin (1.0, x - k);
+        }
+        if (! (u > 0.0))
+            return 0.0;
         const auto x = juce::jmin (1.0, u) * L::knots;
         const auto k = juce::jlimit (0, L::knots - 1, (int) x);
         const auto a = k == 0 ? 0.0 : (double) sizeLevelRow[k - 1];
@@ -1439,9 +1461,14 @@ private:
         const auto toCello = juce::jlimit (0.0, 1.0, std::log (size) / std::log (ModalBowedBodies::cello));
         const auto at = [toCello] (double violin, double cello) { return toCello >= 1.0 ? cello : violin + (cello - violin) * toCello; };
         const auto u = std::log (size) / std::log (ModalBowedBodies::cello);
+        // (2026-11-12: past the fitted bodies the end's table holds, as at its own size)
         for (int i = 0; i < ModalBowedNotes::tableCount; ++i)
+        {
+            const auto own = std::log (ModalBowedNotes::tables[i].size) / std::log (ModalBowedBodies::cello);
+            const auto held = (u > 1.0 && own >= 1.0) || (u < 0.0 && own <= 0.0);
             tableWeight[i] = noteRow[i] == nullptr ? 0.0
-                                                   : noteWeight[i] * juce::jlimit (0.0, 1.0, 1.0 - 4.0 * std::abs (u - std::log (ModalBowedNotes::tables[i].size) / std::log (ModalBowedBodies::cello)));
+                                                   : noteWeight[i] * (held ? 1.0 : juce::jlimit (0.0, 1.0, 1.0 - 4.0 * std::abs (u - own)));
+        }
         // (Round 11, the violin's) The residual layers' weight (their table's,
         // when the note's loops are built), their level (faded out toward
         // the other instrument's size: 1 - |toCello - the table's own|, round
@@ -1487,7 +1514,10 @@ private:
         layerAmp = (float) (layerAmp * outputScale);
         const auto swellTime = note (S::swellSeconds, at (swellSeconds, swellSecondsCello));
         swellCoefficient = (float) (1.0 - std::exp (-1.0 / (swellTime * sampleRate)));
-        swellOnCoefficient = (float) (1.0 - std::exp (-1.0 / (swellTime * std::pow (size, swellSize) * sampleRate)));
+        // (past the double bass, the giant's bow is slower still: beyondFit)
+        const auto beyond = beyondFit();
+        const auto slower = beyond.giant > 0.0 && ! plucked ? 1.0 + giantSlower * beyond.giant : 1.0;
+        swellOnCoefficient = (float) (1.0 - std::exp (-1.0 / (swellTime * std::pow (size, swellSize) * slower * sampleRate)));
         swellDepthAtSize = (float) at (swellDepth, swellDepthCello);
         swellSecondAtSize = (float) at (swellSecondStage, 0.0);
         noiseSwellAtSize = (float) at (noiseSwellDepth, swellDepthCello);   // (the cello's: the stroke's own)
@@ -1501,7 +1531,8 @@ private:
         onsetDarkSecondsAtSize = at (onsetDarkSeconds, onsetDarkSecondsCello) * std::pow (span, onsetDarkSecondsSizeSlope);
         vibratoAtSize = std::pow (span, vibratoSizeSlope);
         vibratoNote = (float) (note (S::vibratoCents, vibratoFitted) / vibratoFitted);
-        releaseLossAtSize = at (releaseLossHz, releaseLossHzCello) * std::pow (size, (double) releaseLossSizeSlope);
+        // (held at the cello's past it: the power was fitted between the two, and past them it took every partial at the let-go)
+        releaseLossAtSize = at (releaseLossHz, releaseLossHzCello) * std::pow (juce::jmin (size, ModalBowedBodies::cello), (double) releaseLossSizeSlope);
         releaseLossSlopeAtSize = (double) releaseLossSlope * std::pow (span, releaseLossSlopeSizeSlope);
         onsetDarkDbAtSize = note (S::onsetDarkDb, at (onsetDarkDb, onsetDarkDbCello));
         onsetDarkSlopeAtSize = at (onsetDarkSlope, onsetDarkSlopeCello);
@@ -1510,7 +1541,7 @@ private:
         // pizzicato keeps round 8's box: its fit was the Iowa violin's.)
         brightnessNow = at (brightness, brightnessCello);
         stringLossNow = at (stringLossHigh, stringLossHighCello);
-        attackScaleNow = at (attackScale, attackScaleCello);
+        attackScaleNow = at (attackScale, attackScaleCello) * slower;
         hissHpNow = at (hissHp, hissHpCello);
         // (round 10: up to hissCap only, and the note's table's hissDb on it)
         hissNow = (float) (at (hissLevel, hissLevelCello) * std::pow (10.0, note (S::hissDb, 0.0) / 20.0)
@@ -1529,6 +1560,10 @@ private:
         bowDriftDbNow = (float) at (bowDriftDb, bowDriftDbCello);
         rippleDbNow = (float) note (S::rippleDb, at (rippleDb, rippleDbCello));
         directDbNow = plucked ? directDbCello + directSizeDbPizz * std::log2 (span) : at (directDb, directDbCello) + directSizeDb * std::log2 (span);
+        // (under the violin, the small box's bridge and string more in front:
+        // tinyDirectDb per halving, a pochette's nasal edge)
+        if (size < 1.0)
+            directDbNow -= tinyDirectDb * std::log2 (size);
         directHpNow = plucked ? directHpCello : at (directHp, directHpCello);
         tiltHzNow = plucked ? tiltHzPizz : at (tiltHz, tiltHzCello);
         const auto violinFloor = plucked || toCello >= 1.0 ? 0.0
@@ -1561,6 +1596,11 @@ private:
         airFloorShare = airGain > 0.0f ? (float) (airFloor * (double) violinFloorGain / ((double) airGain * (double) outputNow)) : 0.0f;
         rumbleGain = (float) ((double) violinFloorGain * std::pow (10.0, rumbleDb / 20.0));
         hairBodyGain = fade > 0.0 && keep > 0.0 ? (float) (fade * std::pow (10.0, hairBodyDb / 20.0) * std::pow (noteHz / 440.0, hairBodySlope / 6.0206) * keep) : 0.0f;
+        // (the tiny's glass: the hair's noise rings its air mode and its two
+        // first corpus modes instead, by the same path, tinyGlassDb at its
+        // smallest; updateBody picks them)
+        if (beyond.tiny > 0.0 && ! plucked)
+            hairBodyGain = (float) (beyond.tiny * std::pow (10.0, tinyGlassDb / 20.0));
         hairOnsetDepthAtSize = plucked ? 0.0f : (float) at (hairOnsetDepth, 0.0);
         wanderHzNow = at (wanderHz, wanderHzCello);
         // (Round 10, the cello's, by toCello: the vibrato's and flutter's
@@ -1784,8 +1824,12 @@ private:
             roomStart[r] = total;
             total += length;
             const auto seconds = (double) length / sampleRate;
-            const auto lowDecay = roomLowDecay * std::pow (fittedSize(), roomLowSizeSlope);
-            const auto highDecay = roomHighDecay * std::pow (fittedSize(), roomHighSizeSlope);
+            // (held at the violin's and the cello's past them, the giant's longer)
+            const auto roomSize = juce::jlimit (1.0, ModalBowedBodies::cello, fittedSize());
+            const auto giant = beyondFit().giant;
+            const auto longer = giant > 0.0 ? 1.0 / (1.0 + giantRoomLonger * giant) : 1.0;
+            const auto lowDecay = roomLowDecay * std::pow (roomSize, roomLowSizeSlope) * longer;
+            const auto highDecay = roomHighDecay * std::pow (roomSize, roomHighSizeSlope) * longer;
             const auto feed = std::pow (10.0, -lowDecay * seconds / 20.0);
             const auto extra = juce::jmax (0.0, highDecay - lowDecay) * seconds; // (dB more per pass at 4 kHz)
             const auto c = (std::pow (10.0, extra / 10.0) - 1.0) / (2.0 * (1.0 - std::cos (juce::MathConstants<double>::twoPi * 4000.0 / sampleRate)));
@@ -1801,11 +1845,78 @@ private:
     }
 
     // The room's return: roomDb for a violin, roomSizeDb more per doubling of the body's size.
-    void updateRoomReturn() { roomReturn = (float) (std::pow (10.0, (roomDb + roomSizeDb * std::log2 ((double) bodySize) + roomSizeDbMore * std::log2 (fittedSize())) / 20.0) * roomScale); }
+    // (Held at the violin's and the cello's past them, the giant's louder.)
+    void updateRoomReturn()
+    {
+        const auto fitted = fittedSize();
+        const auto box = fitted > ModalBowedBodies::cello ? ModalBowedBodies::cello : fitted < 1.0 ? 1.0 : (double) bodySize;
+        const auto giant = beyondFit().giant;
+        roomReturn = (float) (std::pow (10.0, (roomDb + roomSizeDb * std::log2 (box) + roomSizeDbMore * std::log2 (juce::jlimit (1.0, ModalBowedBodies::cello, fitted))
+                                               + giantRoomDb * giant) / 20.0) * roomScale);
+    }
 
     // The bow's contact: a low string takes longer to speak (as on the Bow
     // exciter); the swell after it shapes the note's rise.
     double attackSeconds() const { return 0.05 * attackScaleNow * juce::jlimit (1.0, 2.5, 220.0 / frequency); }
+
+    // SIZE past the fitted bodies (2026-11-12). Between the violin (1) and
+    // the cello (2.1) the fit holds, every resonance at its Hz and bandwidth
+    // over SIZE. Past either end each one goes on from that anchor (q = SIZE
+    // over the anchor) by its own family's law, from the violin family's
+    // acoustics (Schelleng 1963, Hutchins's octet, Bissinger 2003 and 2008):
+    //  - the air mode A0 (slots 0 and 1; a Helmholtz resonance, the cavity
+    //    against the f-holes, which don't grow in step) as q ^ -1.25;
+    //  - the corpus modes (CBR, B1-, B1+: plates, Hz ~ thickness / length^2;
+    //    a big instrument's plates are relatively thicker) and every slot
+    //    under 700 Hz as q ^ -1.5, easing to q ^ -1 at 2 kHz;
+    //  - the bridge hill (2.3-3.5 kHz on a violin: the bridge and its island,
+    //    not the box; Jansson, Woodhouse 2005) as q ^ -0.5, above it q ^ -0.75.
+    // Past the cello Q rises as sqrt q (the box rings on), under the violin it
+    // holds. The gains stay the anchor's, A0 +3 dB per doubling (it radiates
+    // from more area); past the cello the air mode the cello's fit leaves
+    // silent comes back toward a double bass's (doubleBass: slot 0, 88 Hz on
+    // the cello, near a cello's measured A0, lands near 54 Hz, the bass's A0
+    // by its open A string; the corpus modes at 104-180 Hz). Then "what if",
+    // at the knob's ends: past the double bass (to giantSize) a body the size
+    // of a cistern, Q giantQ + 1 times higher (its low modes ring most of a
+    // second), the bow slower to bite, the room longer and louder; under the
+    // pochette (tinyFrom to tinySize) a glass-thin box, Q up to tinyQ + 1
+    // times, the air mode's tinyAirQ + 1 times and tinyAirDb louder: a bell
+    // that sings over the string. Modes under 30 Hz or past a quarter of the
+    // rate fade out over an octave. All of it set with the body, nothing per sample.
+    struct Beyond { double anchor = 1.0, q = 1.0, giant = 0.0, tiny = 0.0, bassAir = 0.0; bool on = false; };
+
+    Beyond beyondFit() const
+    {
+        Beyond b;
+        const auto size = fittedSize();
+        if (size > ModalBowedBodies::cello)
+            b.anchor = ModalBowedBodies::cello;
+        else if (size >= 1.0)
+            return b;
+        const auto smooth = [] (double x) { x = juce::jlimit (0.0, 1.0, x); return x * x * (3.0 - 2.0 * x); };
+        b.on = true;
+        b.q = size / b.anchor;
+        b.giant = smooth (std::log (size / doubleBass) / std::log (giantSize / doubleBass));
+        b.tiny = smooth (std::log (tinyFrom / size) / std::log (tinyFrom / tinySize));
+        b.bassAir = b.q > 1.0 ? smooth (std::log (b.q) / std::log (doubleBass / ModalBowedBodies::cello)) : 0.0;
+        return b;
+    }
+
+    // A slot's power of q (by its Hz on the violin), as above.
+    static double slotPower (int j)
+    {
+        if (j <= 1)
+            return airPower;
+        static constexpr double knotHz[] { 700.0, 2000.0, 2300.0, 3500.0, 4500.0 }, knotPower[] { 1.5, 1.0, 0.5, 0.5, 0.75 };
+        const auto hz = (double) ModalBowedBodies::hz[j];
+        if (hz <= knotHz[0])
+            return knotPower[0];
+        for (int k = 1; k < 5; ++k)
+            if (hz < knotHz[k])
+                return knotPower[k - 1] + (knotPower[k] - knotPower[k - 1]) * std::log (hz / knotHz[k - 1]) / std::log (knotHz[k] / knotHz[k - 1]);
+        return knotPower[4];
+    }
 
     void updateBody()
     {
@@ -1844,7 +1955,9 @@ private:
         updateHighPass();
         {
             // (and low-passed, two poles, at directLp for a violin, lower for a bigger box)
-            const auto hz = (double) directLp / size;
+            // (past the fitted bodies, from the anchor's by q ^ -0.5)
+            const auto beyondLp = beyondFit();
+            const auto hz = beyondLp.on ? (double) directLp / beyondLp.anchor / std::sqrt (beyondLp.q) : (double) directLp / size;
             if (hz < sampleRate * 0.45)
             {
                 const auto w0 = juce::MathConstants<double>::twoPi * hz / sampleRate;
@@ -1862,22 +1975,68 @@ private:
                 lpB1 = lpB2 = lpA1 = lpA2 = 0.0f;
             }
         }
+        // Each slot's Hz, bandwidth and dB at this SIZE (past the fitted
+        // bodies by its family's law, beyondFit), and its share (1 but at
+        // the edges, past the fitted bodies only).
+        const auto beyond = beyondFit();
+        double slotHz[B::count], slotWidth[B::count], slotDb[B::count], slotShare[B::count];
+        for (int j = 0; j < B::count; ++j)
+        {
+            const auto db = (double) lower[j] + blend * ((double) upper[j] - (double) lower[j]);
+            slotShare[j] = 1.0;
+            if (! beyond.on)
+            {
+                slotHz[j] = (double) B::hz[j] / size;
+                slotWidth[j] = (double) B::bandwidth[j] / size;
+                slotDb[j] = db;
+                continue;
+            }
+            const auto q = beyond.q;
+            const auto move = std::pow (q, -slotPower (j));
+            slotHz[j] = (double) B::hz[j] / beyond.anchor * move;
+            slotWidth[j] = (double) B::bandwidth[j] / beyond.anchor * move;
+            slotDb[j] = db;
+            if (q > 1.0)
+            {
+                slotWidth[j] /= std::sqrt (q) * (1.0 + giantQ * beyond.giant);
+                // (the giant's narrower modes take as much energy from a broad drive as before: by the root of the narrowing)
+                slotDb[j] += 10.0 * std::log10 (1.0 + giantQ * beyond.giant);
+                if (j <= 1)
+                    slotDb[j] += 3.0 * std::log2 (q);
+                if (j == 0)   // (the double bass's air mode, toward loudest + bassAirDb)
+                    slotDb[j] += (loudest + bassAirDb - db) * beyond.bassAir;
+            }
+            else
+            {
+                slotWidth[j] /= 1.0 + (j == 1 ? tinyAirQ : tinyQ) * beyond.tiny;
+                if (j == 1)
+                    slotDb[j] += 3.0 * std::log2 (q) + tinyAirDb * beyond.tiny;
+            }
+            // (under 30 Hz and past a quarter of the rate, out over an octave)
+            const auto smooth = [] (double x) { x = juce::jlimit (0.0, 1.0, x); return x * x * (3.0 - 2.0 * x); };
+            if (slotHz[j] < 30.0)
+                slotShare[j] *= smooth (std::log2 (slotHz[j] / 15.0));
+            if (slotHz[j] > sampleRate * 0.225)
+                slotShare[j] *= smooth (std::log2 (sampleRate * 0.45 / slotHz[j]));
+        }
         bodyCount = 0;
         hairBodyCount = 0;
         for (int j = 0; j < count; ++j)
         {
-            const auto hz = (double) B::hz[j] / size;
-            const auto width = (double) B::bandwidth[j] / size;
-            if (hz >= sampleRate * 0.45)
+            const auto hz = slotHz[j];
+            const auto width = slotWidth[j];
+            if (hz >= sampleRate * 0.45)   // (only the top ones: a lower slot faded out keeps its place, silent)
                 continue;
             const auto r = std::exp (-juce::MathConstants<double>::pi * width / sampleRate);
             const auto i = bodyCount++;
             bodyB0[i] = (float) ((1.0 - r * r) * 0.5);
             bodyA1[i] = (float) (-2.0 * r * std::cos (juce::MathConstants<double>::twoPi * hz / sampleRate));
             bodyA2[i] = (float) (r * r);
-            const auto db = (double) lower[j] + blend * ((double) upper[j] - (double) lower[j]);
+            const auto db = slotDb[j];
             bodyGain[i] = (float) std::pow (10.0, db / 20.0);
-            if (hz >= hairBodyLowHz && hz <= hairBodyHighHz && hairBodyCount < maxHairBody)
+            if (slotShare[j] < 1.0)
+                bodyGain[i] = (float) ((double) bodyGain[i] * slotShare[j]);
+            if (beyond.tiny > 0.0 && ! plucked ? j >= 1 && j <= 3 : hz >= hairBodyLowHz && hz <= hairBodyHighHz && hairBodyCount < maxHairBody)
                 hairBodyIndex[hairBodyCount++] = i;
         }
         // WOLF's resonance: the loudest of the body's fitted resonances below
@@ -1885,12 +2044,12 @@ private:
         auto wolfLoudest = -1000.0;
         for (int j = 0; j < B::count && B::hz[j] <= wolfTopHz; ++j)
         {
-            const auto db = (double) lower[j] + blend * ((double) upper[j] - (double) lower[j]);
-            if (db > wolfLoudest)
+            const auto db = slotDb[j];
+            if (db > wolfLoudest && slotShare[j] > 0.0)
             {
                 wolfLoudest = db;
-                wolfHz = (double) B::hz[j] / size;
-                wolfWidth = (double) B::bandwidth[j] / size;
+                wolfHz = slotHz[j];
+                wolfWidth = slotWidth[j];
             }
         }
         updateRipple();
@@ -1997,6 +2156,7 @@ private:
     const ModalBowedNotes::Row* noteRow[ModalBowedNotes::tableCount] {};
     double noteWeight[ModalBowedNotes::tableCount] {}, tableWeight[ModalBowedNotes::tableCount] {};
     const float* sizeLevelRow = nullptr;   // (SIZE's loudness: the note's row, trigger)
+    int sizeLevelNote = 0;
     bool sizeLevelOn = true;
     std::uint32_t floorSeed = 1;
     float floorGain = 0.0f, floorLowPole = 0.0f, floorHighPole = 0.0f, floorRise = 0.0f;
@@ -2203,6 +2363,17 @@ private:
     static constexpr float releaseLossSizeSlope = 10.877f;
     static constexpr double releaseRingSizeSlope = -3.0806, releaseLossSlopeSizeSlope = 1.1345, releaseRampSizeSlope = 1.9217, releaseFadeSizeSlope = 0.39364;
     static constexpr double roomLowSizeSlope = 1.5661, roomHighSizeSlope = 0.13181;
+    // SIZE past the fitted bodies (beyondFit): A0's power of q, the double
+    // bass's size (a 3/4 bass: body 111 cm, a violin's 35.5) and its air
+    // mode's dB under the loudest slot; the giant from doubleBass to
+    // giantSize (Q giantQ + 1 times, the bow giantSlower + 1 times slower,
+    // the room's decay giantRoomLonger + 1 times longer and giantRoomDb
+    // louder); the tiny from tinyFrom to tinySize (Q tinyQ + 1 times, the
+    // air mode's tinyAirQ + 1 and tinyAirDb louder); under the violin the
+    // direct path tinyDirectDb louder per halving.
+    static constexpr double airPower = 1.25, doubleBass = 3.1, bassAirDb = -4.0;
+    static constexpr double giantSize = 4.0, giantQ = 7.0, giantSlower = 2.0, giantRoomLonger = 3.0, giantRoomDb = 6.0;
+    static constexpr double tinyFrom = 0.5, tinySize = 0.25, tinyQ = 40.0, tinyAirQ = 300.0, tinyAirDb = 12.0, tinyDirectDb = 3.0, tinyGlassDb = -50.0;
     // The room (fitted to the tails of Spitfire's long notes).
     static constexpr int roomLines = 4;
     static constexpr double roomDb = -2.5, roomSizeDb = -18.8971, roomSizeDbMore = 14.736, roomMs = 18.44, roomLowDecay = 38.88, roomHighDecay = 159.5;
