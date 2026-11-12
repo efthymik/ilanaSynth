@@ -32,10 +32,11 @@ inline const std::vector<Mark>& marks (int excite, bool scale)
                                                 { 1.13f, "JUMBO" },       { 1.3f, "GUITARRON" } };
     static const std::vector<Mark> guitarScale { { 0.51f, "SOPRANO UKE" }, { 0.66f, "TENOR UKE" }, { 0.83f, "REQUINTO" },
                                                  { 1.0f, "CLASSICAL" },    { 1.1f, "BARITONE" } };
-    // (Violin, viola and cello are the engine's fitted bodies, exactly as the Modal Violin / Viola / Cello presets.)
-    static const std::vector<Mark> bowedSize { { 0.87f, "1/2 VIOLIN" }, { 1.0f, "VIOLIN" }, { 1.17f, "VIOLA" },
-                                               { 2.1f, "CELLO" },       { 3.1f, "DOUBLE BASS" } };
-    static const std::vector<Mark> bowedScale { { 0.87f, "1/2 VIOLIN" }, { 1.0f, "VIOLIN" }, { 1.13f, "VIOLA" }, { 2.0f, "CELLO" } };
+    // (The engine's measured bodies (PR #259): pochette 0.6, 3/4 violin / violino piccolo 0.8, and the fitted violin,
+    // viola and cello exactly as the Modal Violin / Viola / Cello presets; the double bass 3.1.)
+    static const std::vector<Mark> bowedSize { { 0.6f, "POCHETTE" }, { 0.8f, "3/4 VIOLIN" }, { 1.0f, "VIOLIN" }, { 1.17f, "VIOLA" },
+                                               { 2.1f, "CELLO" },     { 3.1f, "DOUBLE BASS" } };
+    static const std::vector<Mark> bowedScale { { 0.94f, "3/4 VIOLIN" }, { 1.0f, "VIOLIN" }, { 1.13f, "VIOLA" }, { 2.0f, "CELLO" } };
     static const std::vector<Mark> pianoSize { { 0.55f, "UPRIGHT" }, { 0.57f, "BABY GRAND" }, { 0.77f, "MODEL B" },
                                                { 1.0f, "CONCERT GRAND" }, { 1.12f, "F308" } };
     static const std::vector<Mark> pianoScale { { 0.58f, "UPRIGHT" }, { 0.65f, "BABY GRAND" }, { 0.85f, "MODEL B" },
