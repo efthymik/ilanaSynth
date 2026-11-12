@@ -607,6 +607,7 @@ namespace Library
 #include "PresetPackRecipes.h"
 #include "PresetPackShowcase.h"
 #include "PresetPackIlanaOwn.h"
+#include "PresetPackModalBowed.h"
 
 // The owner's blind A/B marked these presets bad in both their old and new
 // form (2026-09-30): rebuilt from scratch (content/analysis/rebuild-8.md).
@@ -2910,6 +2911,9 @@ inline std::vector<FactoryPreset> buildLaterPacks()
 
     // ilana's own presets, as she made them.
     addIlanaOwnPresets (add);
+
+    // The Modal Bowed violin, viola and cello (PresetPackModalBowed.h).
+    addModalBowedPresets (add);
 
     return list;
 }

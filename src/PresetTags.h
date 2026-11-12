@@ -743,6 +743,9 @@ inline const FactoryTagRow factoryTagRows[] {
     { "Rave Kick", "Percussion, Gritty, Warm, Percussive, Wavetable" },
     { "Snap Clap", "Percussion, Bright, Percussive, Wavetable" },
     { "Closed Hat", "Percussion, FM, Bright, Percussive" },
+    { "Modal Violin", "Strings, Physical, Bright, Sustained" },
+    { "Modal Viola", "Strings, Physical, Warm, Sustained" },
+    { "Modal Cello", "Strings, Physical, Dark, Sustained" },
 };
 
 // A factory preset's tags ("Bell, FM, Bright"), or "" for any other name.
