@@ -1383,6 +1383,25 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
                               values.push_back ({ id, value });
                           });
 
+    // ...and its colour was on even at MIX 0 % (moved up the knob, same sound).
+    migrateDenseBoardBypass ([&values] (const juce::String& id, float fallback)
+                             {
+                                 for (const auto& entry : values)
+                                     if (entry.first == id)
+                                         return entry.second;
+                                 return fallback;
+                             },
+                             [&values] (const juce::String& id, float value)
+                             {
+                                 for (auto& entry : values)
+                                     if (entry.first == id)
+                                     {
+                                         entry.second = value;
+                                         return;
+                                     }
+                                 values.push_back ({ id, value });
+                             });
+
     // Its operators (a wavetable tuned by ratio or fixed Hz, or on the
     // Operator EG) load as FM / DX7, which renders the same.
     {
