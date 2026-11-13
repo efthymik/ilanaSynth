@@ -9,6 +9,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_dsp/juce_dsp.h>
 
+#include "ParameterEchoGuard.h"
 #include "SectionColours.h"
 
 #include <array>
@@ -1677,6 +1678,13 @@ private:
     };
     std::atomic<unsigned> paramEpoch { 0 }, liveEpoch { 0 }, dataEpoch { 0 }, sampleEpoch { 0 };
     ParamEpoch paramEpochListener { paramEpoch };
+
+public:
+    // A VST3 host's late echo of the editor's own edits (Live) no longer steps
+    // a parameter back a frame mid-drag (ParameterEchoGuard.h).
+    ParameterEchoGuard echoGuard;
+
+private:
 
     // Undo (stability review 4): the value tree has no undo manager, so a
     // host's automation or a learned CC no longer lands in her history (and

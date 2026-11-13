@@ -134,6 +134,7 @@ IlanaSynthAudioProcessor::IlanaSynthAudioProcessor()
     }
 
     undoRecorder.prepare (getParameters());
+    echoGuard.attach (getParameters());
     for (auto* parameter : getParameters())
     {
         parameter->addListener (&paramEpochListener);
