@@ -110,9 +110,20 @@ def analyse(x, rate, note):
     half = max(2.0, 0.2 * f0)
     levels = np.full((len(partials), len(TIMES)), -160.0)
     for t, when in enumerate(TIMES):
-        mag = spectrum(x, max(0, int(when * rate) - size // 2), size)
+        # A frame that would start before the note is centred later than
+        # its time (at 0.05 and 0.08 s an 8192 frame from 0 reads ~93 ms):
+        # it read a decaying note too quiet, and the partials came in
+        # under the attack, a dip heard as a blip before the note. A
+        # shorter frame centred on the time, while it still resolves the
+        # partials (6 bins apart); the bass keeps the long one.
+        use, bins = size, freqs
+        if int(when * rate) < size // 2:
+            short = 1 << int(np.floor(np.log2(max(2.0, 2 * when * rate))))
+            if short < size and short * f0 / rate >= 6.0:
+                use, bins = short, np.fft.rfftfreq(short, 1 / rate)
+        mag = spectrum(x, max(0, int(when * rate) - use // 2), use)
         for n, f in enumerate(partials):
-            k = (freqs > f - half) & (freqs < f + half)
+            k = (bins > f - half) & (bins < f + half)
             levels[n, t] = 20 * np.log10(mag[k].max() + 1e-9)
     return f0, partials / f0, levels
 

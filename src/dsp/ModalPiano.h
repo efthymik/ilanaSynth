@@ -46,8 +46,35 @@
 //
 // Two shape knobs move either instrument away from the recording, which
 // they reproduce at 1 (setShape):
-//   SIZE    the body (soundboard, guitar box): its resonances sit at their
-//           measured Hz divided by SIZE (a bigger body rings lower)
+//   SIZE    the body (soundboard, guitar box), physically (2026-11-13):
+//           real near x1, a smooth "what if" out to x0.25 and x4, soft
+//           limits, nothing new per sample (setBodyLaws, moveMode,
+//           bodyShapeDb). Each table mode is tagged at parse time
+//           (ModalPianoTable::ModeKind). Guitar: air (A0 102.5 Hz) and top
+//           (T(1,1)2 240 Hz) move as a coupled pair (Helmholtz SIZE^-1.25,
+//           top SIZE^-1.5), the rest of the plate SIZE^-1.5; the partials
+//           follow the moved resonances and the bass corner under A0 (and
+//           the averaged tone, as the plate, above 1.5 kHz), drain into
+//           moved modes, and the pluck rises slower and clicks softer on a
+//           bigger box. Grand: board modes move SIZE^-p (p 2 under 200 Hz
+//           to 0.5 from 1.2 kHz; the bass strings' longitudinal modes stay),
+//           the averaged tone moves with them, the bass radiation corner
+//           (55 Hz) as SIZE^-2, and the board's thump noise on the board's
+//           time. Both: modes keep constant Q (moved by r, they ring 1/r as
+//           long, after the dampers too), fade out under 30 Hz, and past
+//           x1.4 free slots fill with infill modes (density ~ area).
+//           Exactly the recording at x1 (every term skipped). Past x2 it
+//           leaves physics (the giant body, addGiant; x2 and under as
+//           before): extra mode slots crossfade in by x4, body modes fed
+//           by the note's spectrum near each, and a halo of the note's
+//           lowest partials a few cents off; each blooms, rings long (T60
+//           rising with SIZE) and rings on after key-up, the low end cut,
+//           the dry note ducked so the level holds. The guitar is a giant
+//           hollow box: ten shared sine modes 80-400 Hz for its pitch, and
+//           from 500 Hz up a dense wash carried by the noise bands, fed
+//           band by band from the note (feedWash); the grand a piano on a
+//           huge plate (each voice its own 18 plate modes to 4 kHz, a fast
+//           bloom, a stronger halo).
 //   SCALE   the string's length at the same pitch: longer strings are less
 //           stiff (the stretch falls as SCALE^-3) and ring longer (x SCALE)
 
@@ -80,8 +107,9 @@ class ModalPiano
 public:
     static constexpr int maxPartials = 100;
     static constexpr int maxModes = 16;     // the board's resonances
+    static constexpr int maxGiant = 32;     // SIZE past x2: the giant body's 24 modes and up to 7 silent ones (addGiant)
     static constexpr int group = 8;         // slots run and skipped together (one AVX register, two SSE)
-    static constexpr int maxSlots = (maxPartials + maxModes + group - 1) / group * group;
+    static constexpr int maxSlots = (maxPartials + maxModes + maxGiant + group - 1) / group * group;
     static constexpr int blockSize = 32;
     // Tests and benches turn it off to compare with every partial running
     // (CPU round 2026-10-31): skipping groups of silent partials, and
@@ -111,7 +139,7 @@ public:
 
     void reset()
     {
-        count = slots = 0;
+        count = slots = modeSlots = giantStart = 0;
         attackLeft = 0;
         pluckAt = pluckLength = 0;
         burstLive = false;
@@ -133,6 +161,8 @@ public:
         if (&newTable == tableData)
             return;
         tableData = &newTable;
+        if (sized)
+            setBodyLaws();
         reset();
     }
 
@@ -146,6 +176,11 @@ public:
         bodySize = newSize;
         stringScale = newScale;
         shapeDbDirty = true;
+        sized = newSize != 1.0f;
+        if (sized)
+            setBodyLaws();
+        else
+            giant = 0.0f;
         stretchScale = 1.0f / (newScale * newScale * newScale);
         pitchDirty = true;
     }
@@ -168,7 +203,10 @@ public:
     void trigger (float velocity, float randomUnit)
     {
         const auto& table = *tableData;
-        count = slots = 0;
+        count = slots = giantStart = 0;
+        washOn = false;
+        std::fill (std::begin (washPower), std::end (washPower), 0.0f);
+        std::fill (std::begin (washLastDb), std::end (washLastDb), -200.0f);
         attackLeft = 0;
         pluckAt = pluckLength = 0;
         burstLive = pluckNoise = false;
@@ -236,6 +274,12 @@ public:
             im[k] = std::sin (phase);
             amp[k] = 0.0f;
         }
+        modeSlots = slots;
+        if (sized)
+            addInfill (modes, seed);
+        giantStart = slots;
+        if (sized && logSize > 1.0f)
+            addGiant (seed);
         for (int k = slots; k < roundedCount(); ++k)
         {
             measured[k] = harmonic[k] = re[k] = im[k] = amp[k] = 0.0f;
@@ -245,6 +289,8 @@ public:
             blockTurn[k] = 0.0;
         }
         updatePitch();
+        if (slots > giantStart)
+            coupleGiant();
 
         // The modelled pluck (the guitar): each partial and mode starts in
         // the phase it had in the nearest recorded note at the nearest
@@ -257,11 +303,34 @@ public:
         if (plucked != nullptr)
             for (int k = 0; k < slots; ++k)
             {
+                if (k >= modeSlots)
+                    break; // (infill modes: random)
                 const auto& phases = k < count ? plucked->startPhase : plucked->modeStartPhase;
                 const auto i = (size_t) (k < count ? k : k - count);
                 if (i >= phases.size() || phases[i] == ModalPianoTable::noPhase)
                     continue;
                 const auto phase = phases[i] - std::atan2 (rotSin[k], rotCos[k]);
+                re[k] = std::cos (phase);
+                im[k] = std::sin (phase);
+            }
+        // The recorded attack (the grand): each partial starts in step with
+        // the attack it takes over from (the two layers' as they're mixed),
+        // or the crossfade cancels them halfway, a hole heard as a blip
+        // before the note. (Resampled to the pitch, the attack's partial
+        // turns as the partial does: aligned at the start, aligned after.)
+        alignedAttack = plucked == nullptr && ! modeA->attackSin.empty() && ! modeB->attackSin.empty();
+        if (alignedAttack)
+            for (int k = 0; k < count; ++k)
+            {
+                const auto i = (size_t) k;
+                if (i >= modeA->attackSin.size() || i >= modeB->attackSin.size())
+                    break;
+                const auto w = at.velocityWeight;
+                const auto s = modeA->attackSin[i] + w * (modeB->attackSin[i] - modeA->attackSin[i]);
+                const auto c = modeA->attackCos[i] + w * (modeB->attackCos[i] - modeA->attackCos[i]);
+                if (s * s + c * c < 1.0e-14f)
+                    continue;
+                const auto phase = std::atan2 (c, s) - std::atan2 (rotSin[k], rotCos[k]);
                 re[k] = std::cos (phase);
                 im[k] = std::sin (phase);
             }
@@ -275,12 +344,25 @@ public:
                 balance = modeA->balance[(size_t) k];
                 phase = modeA->phase[(size_t) k];
             }
-            else if (k >= count && k < slots)
+            else if (k >= count && k < modeSlots)
             {
                 balance = modeA->modeBalance[(size_t) (k - count)];
                 phase = modeA->modePhase[(size_t) (k - count)];
             }
             // Each channel's gain, at the two channels' power average of 1.
+            if (k >= modeSlots && k < giantStart)
+            {
+                // (An infill mode: its lower neighbour's.)
+                const auto parent = (size_t) (infillFrom[k - modeSlots] - count);
+                balance = modeA->modeBalance[parent];
+                phase = modeA->modePhase[parent];
+            }
+            if (k >= giantStart && k < slots)
+            {
+                // (A giant body mode: its own place, wide.)
+                balance = 10.0f * (hash01 (k - giantStart, 3) - 0.5f);
+                phase = 2.0f * (hash01 (k - giantStart, 4) - 0.5f);
+            }
             const auto ratio = std::pow (10.0f, balance / 20.0f);
             const auto right = std::sqrt (2.0f / (1.0f + ratio * ratio));
             gainLeft[k] = ratio * right;
@@ -300,7 +382,9 @@ public:
             fadeStart = 0;
             partialRamp = 1.0f; // (nextBlock keeps it there: the crossfade is over)
             pluckAt = 0;
-            pluckLength = juce::jmax (1, juce::roundToInt (juce::jmax (0.0f, plucked->pluckMs + plucked->riseMs) * 0.001 * sampleRate));
+            // (SIZE: a bigger top gives way slower, the rise x SIZE^0.5.)
+            const auto riseMs = sized ? plucked->riseMs * std::sqrt (bodySize) : plucked->riseMs;
+            pluckLength = juce::jmax (1, juce::roundToInt (juce::jmax (0.0f, plucked->pluckMs + riseMs) * 0.001 * sampleRate));
             const auto toVariance = (float) ModalPianoTable::noiseFftSize / 6.0f * (float) (sampleRate / table.rate) / 0.6931472f;
             for (int b = 0; b < ModalPianoTable::noiseBandCount; ++b)
             {
@@ -313,6 +397,8 @@ public:
                     fall += at.weights[(size_t) i] * (has ? e.burstFall[(size_t) b] : 0.0f);
                 }
                 db += levelOffset;
+                if (sized)
+                    db -= 2.0f * logSize; // (SIZE: a heavier top, a softer click)
                 burstVariance[b] = db < -175.0f ? 0.0f : std::pow (10.0f, db / 10.0f) * toVariance;
                 burstFactor[b] = std::pow (10.0f, -juce::jmax (0.0f, fall) * (float) (blockSize / sampleRate) / 10.0f);
                 burstLive = burstLive || burstVariance[b] > 0.0f;
@@ -595,14 +681,17 @@ private:
     // is scaled so the length goes there and on to the next block's level
     // along an exponential, which is how a level that falls in dB falls.
     // A silent partial keeps a tiny length (-160 dB) so its phase stays.
-    void setLevel (int k, float target)
+    // (span: samples to the target; the giant body's slots go 8 blocks at a time.)
+    // (fromFloor: a slot starting or back from the cut swells from the
+    // floor over the span instead of jumping: the giant body's.)
+    void setLevel (int k, float target, int span = blockSize, bool fromFloor = false)
     {
         static constexpr float floorLevel = 1.0e-8f;
         const auto from = amp[k] > 0.0f ? amp[k] : floorLevel;
         const auto length2 = re[k] * re[k] + im[k] * im[k];
         auto scale = length2 > 0.0f ? from / std::sqrt (length2) : 1.0f;
         auto start = from;
-        if (amp[k] == 0.0f && target > 0.0f)
+        if (amp[k] == 0.0f && target > 0.0f && ! fromFloor)
         {
             // Starting (the strike, or back from silence): at its level at once.
             scale *= target / floorLevel;
@@ -611,7 +700,7 @@ private:
         re[k] *= scale;
         im[k] *= scale;
         const auto to = target > 0.0f ? target : floorLevel;
-        const auto growth = start == to ? 1.0f : std::exp2 (std::log2 (to / start) * (1.0f / (float) blockSize));
+        const auto growth = start == to ? 1.0f : std::exp2 (std::log2 (to / start) * (1.0f / (float) span));
         turnCos[k] = rotCos[k] * growth;
         turnSin[k] = rotSin[k] * growth;
         amp[k] = target;
@@ -630,9 +719,512 @@ private:
     {
         auto db = 0.0f;
         if (bodySize != 1.0f && tableData != nullptr)
-            db += juce::jlimit (-9.0f, 9.0f, 0.6f * (tableData->curveAt (partialHz * bodySize) - tableData->curveAt (partialHz)));
+            db += bodyShapeDb (partialHz);
         if (stringScale != 1.0f)
             db += juce::jlimit (-12.0f, 12.0f, 3.0f * std::log2 (stringScale) * std::log2 ((float) (k + 1)));
+        if (slots > giantStart)
+            db -= giantDuckDb();
+        return db;
+    }
+
+    // ---- SIZE, physically (2026-11-13; ilana: "make it more realistic",
+    // "push all modal instruments in this manner ... to create novel
+    // timbres"). Exact at x1 (every term below is skipped there), real
+    // near it, and carried on smoothly as a "what if" out to x0.25 and x4,
+    // with soft limits (tanh) instead of clamps. All of it is worked out
+    // here, per note or when SIZE or the pitch moves: nothing per sample.
+    static float softLimit (float x, float limit) { return limit * std::tanh (x / limit); }
+    static float smoothstep (float x)
+    {
+        x = juce::jlimit (0.0f, 1.0f, x);
+        return x * x * (3.0f - 2.0f * x);
+    }
+
+    // The guitar's air (A0) and top (T(1,1)2) modes are coupled
+    // (Christensen & Vistisen 1980): decoupled once into the Helmholtz
+    // resonance and the top's own (coupling c 0.5), then the air moves as
+    // SIZE^-1.25 (a scaled box with a scaled hole is SIZE^-1, a fixed hole
+    // SIZE^-1.5), the top and the rest of the plate as SIZE^-1.5 (thickness
+    // fixed would be SIZE^-2, scaled SIZE^-1; the bracing stiffens), and
+    // the pair recoupled. A0 102.5 Hz at x1: 197 Hz at x0.6 (a tenor uke),
+    // 56 at x1.6, 32 at x2.5 (under E2: a guitar half drum).
+    void setBodyLaws()
+    {
+        const auto& table = *tableData;
+        logSize = std::log2 (bodySize);
+        if (table.guitarBody)
+        {
+            const auto fm2 = (double) table.airHz * table.airHz, fp2 = (double) table.topHz * table.topHz;
+            constexpr double c2 = 0.25;
+            const auto sum = fm2 + fp2, product = fm2 * fp2 / (1.0 - c2);
+            const auto d = std::sqrt (juce::jmax (0.0, sum * sum - 4.0 * product));
+            const auto h2 = 0.5 * (sum - d) * std::pow ((double) bodySize, -2.5);
+            const auto p2 = 0.5 * (sum + d) * std::pow ((double) bodySize, -3.0);
+            const auto mid = 0.5 * (h2 + p2), half = 0.5 * std::sqrt ((p2 - h2) * (p2 - h2) + 4.0 * c2 * h2 * p2);
+            airRatio = (float) (std::sqrt (juce::jmax (0.0, mid - half)) / table.airHz);
+            topRatio = (float) (std::sqrt (mid + half) / table.topHz);
+            plateRatio = std::exp2 (-1.5f * logSize);
+        }
+        // The grand's board noise (0-500 Hz, the thump) on the board's time.
+        noiseTime = std::exp2 (2.0f * std::tanh (-logSize));
+        // Past x2, the giant body (addGiant): 0 at x2, rising linearly in log2 SIZE to 1 at x4.
+        giant = logSize > 1.0f ? juce::jmin (1.0f, logSize - 1.0f) : 0.0f;
+    }
+
+    // The grand's board: its thickness hardly changes with a piano's size,
+    // so its low modes go as h/L^2, SIZE^-2 (the lowest strong one, 58 Hz in
+    // this table, would be ~100 Hz on an upright); above ~1 kHz the ribs
+    // hold the waves and it hardly moves (SIZE^-0.5).
+    static float boardPower (float hz)
+    {
+        if (hz <= 200.0f)
+            return 2.0f;
+        if (hz >= 1200.0f)
+            return 0.5f;
+        return 2.0f - 1.5f * std::log2 (hz / 200.0f) / 2.5849625f;
+    }
+
+    // log2 of how far the board moves hz at log2 SIZE l: SIZE^-p(f). Between
+    // 200 Hz and 1.2 kHz that maps log f with a slope of 1 + 0.585 l, which
+    // would fold (high modes landing under low ones) on a small board, and
+    // the inverse (the curve's lookup, -l) on a big one: there the slope
+    // stays at least 0.25, and above 1.2 kHz all move as 1.2 kHz does.
+    static float boardShift (float hz, float l)
+    {
+        const auto slope = 1.0f + 0.5849625f * l;
+        if (slope >= 0.25f || hz <= 200.0f)
+            return -boardPower (hz) * l;
+        const auto x = std::log2 (juce::jmin (hz, 1200.0f) / 200.0f);
+        return -2.0f * l + 0.25f * x - x;
+    }
+
+    // How far a body mode at hz (of this kind) moves.
+    float modeRatio (unsigned char kind, float hz) const
+    {
+        if (kind == ModalPianoTable::stringMode)
+            return 1.0f;
+        if (! tableData->guitarBody)
+            return std::exp2 (boardShift (hz, logSize));
+        return kind == ModalPianoTable::airMode ? airRatio : kind == ModalPianoTable::topMode ? topRatio : plateRatio;
+    }
+
+    // A mode moved under 30 Hz or over 0.45 of the rate fades out over an
+    // octave (and none moved toward the middle is raised).
+    float edgeDb (float hz) const
+    {
+        const auto x = juce::jmax (std::log2 (30.0f / hz), std::log2 (hz / (0.45f * (float) sampleRate)));
+        const auto g = 1.0f - smoothstep (x);
+        return g > 1.0e-7f ? 20.0f * std::log10 (g) : -140.0f;
+    }
+
+    // A body mode slot's Hz, decay (ringScale) and level (modeDb) at this SIZE.
+    void moveMode (int k)
+    {
+        if (k >= giantStart)
+        {
+            moveGiant (k);
+            return;
+        }
+        if (k < modeSlots)
+        {
+            const auto m = (size_t) (k - count);
+            const auto from = modeA->modes[m];
+            const auto kind = m < modeA->modeKind.size() ? modeA->modeKind[m] : ModalPianoTable::boardMode;
+            const auto r = modeRatio (kind, from);
+            hz[k] = from * r;
+            // Constant Q: a mode moved by r rings 1/r as long (to ~4x).
+            ringScale[k] = std::exp2 (2.0f * std::tanh (std::log2 (r) * 0.5f));
+            // A mode's level hardly changes with size (radiation ~ area x
+            // f x velocity, the velocity ~ 1 / mass); the air mode's a
+            // little (2 dB per doubling).
+            modeDb[k] = juce::jmin (0.0f, edgeDb (hz[k]) - edgeDb (from))
+                        + (kind == ModalPianoTable::airMode ? softLimit (2.0f * logSize, 6.0f) : 0.0f);
+            if (slots > giantStart)
+                modeDb[k] -= giantDuckDb();
+            return;
+        }
+        const auto j = k - modeSlots;
+        const auto a = infillFrom[j], b = infillTo[j];
+        hz[k] = std::exp2 (std::log2 (hz[a]) + infillU[j] * (std::log2 (hz[b]) - std::log2 (hz[a])));
+        ringScale[k] = std::sqrt (ringScale[a] * ringScale[b]);
+        const auto fade = smoothstep (2.0f * std::log2 (bodySize / infillAt[j]));
+        // (Only the fade-in: the neighbours' levels it is read from carry
+        // their edge fades and the giant body's duck already.)
+        modeDb[k] = fade > 1.0e-7f ? 20.0f * std::log10 (fade) : -140.0f;
+    }
+
+    // A bigger plate has more modes per Hz (~ area, SIZE^2 at a fixed
+    // thickness): past x1.4 the free slots fill with modes between moved
+    // neighbours (the widest gaps first, at a random point between them),
+    // each fading in over half an octave of SIZE from where the density
+    // asks for it.
+    void addInfill (int modes, std::uint32_t& seed)
+    {
+        if (bodySize <= 1.4f || modes < 2)
+            return;
+        float moved[maxModes];
+        int order[maxModes], gaps[maxModes];
+        auto bodyModes = 0; // (the strings' own modes, which don't move, make no gaps)
+        for (int m = 0; m < modes; ++m)
+        {
+            const auto kind = (size_t) m < modeA->modeKind.size() ? modeA->modeKind[(size_t) m] : ModalPianoTable::boardMode;
+            moved[m] = modeA->modes[(size_t) m] * modeRatio (kind, modeA->modes[(size_t) m]);
+            if (kind != ModalPianoTable::stringMode)
+                order[bodyModes++] = m;
+        }
+        if (bodyModes < 2)
+            return;
+        std::sort (order, order + bodyModes, [&moved] (int x, int y) { return moved[x] < moved[y]; });
+        const auto pairs = bodyModes - 1;
+        for (int i = 0; i < pairs; ++i)
+            gaps[i] = i;
+        std::stable_sort (gaps, gaps + pairs, [&] (int x, int y)
+                          { return moved[order[x + 1]] / moved[order[x]] > moved[order[y + 1]] / moved[order[y]]; });
+        for (int i = 0; i < maxModes - modes; ++i)
+        {
+            const auto at = 1.4f * std::sqrt (1.0f + (float) i / (float) modes);
+            if (bodySize <= at)
+                break;
+            const auto pair = gaps[i % pairs];
+            seed = seed * 1664525u + 22695477u;
+            infillFrom[i] = count + order[pair];
+            infillTo[i] = count + order[pair + 1];
+            infillU[i] = 0.3f + 0.4f * (float) (seed >> 8) / 16777216.0f;
+            infillAt[i] = at;
+            const auto k = slots++;
+            seed = seed * 1664525u + 22695477u;
+            const auto phase = (float) (seed >> 8) * (juce::MathConstants<float>::twoPi / 16777216.0f);
+            re[k] = std::cos (phase);
+            im[k] = std::sin (phase);
+            amp[k] = 0.0f;
+        }
+    }
+
+    // ---- SIZE past x2: the giant body (2026-11-13; ilana: "past x2 it
+    // leaves physics: dense ringing body modes stay in the strings' range,
+    // a reverb-like bloom, longer ring-on; x1-x2 stays as is"). Physics
+    // alone sends every body mode under the strings past ~x2 (and fades
+    // it under 30 Hz), so x2.5 and x4 sounded alike above 100 Hz. Past x2
+    // (giant: 0 at x2, linear in log2 SIZE to 1 at x4) a layer of
+    // extra mode slots crossfades in, filling the strings' range:
+    //   body modes  a ladder through the strings' range (jittered per
+    //               slot, sinking slowly as SIZE^-0.5 past x2), fed by the
+    //               note's spectrum near each one (a broad kernel, plus a
+    //               narrow one for partials right on a mode), low end cut;
+    //   sympathetic the note's lowest partials again, a few cents off
+    //               (each voice its own detune): a halo that beats slowly
+    //               against the strings and outlasts them;
+    // each slot fading in at its own rank (denser with SIZE), blooming
+    // (a rise of tau) and ringing long (T60 rising with SIZE; slower still
+    // after key-up), with the strings and the table's body ducked a few dB
+    // so the level holds. Two flavours (GiantFlavour): the guitar a giant
+    // hollow box, nearly a gong (one fixed set of modes for every note,
+    // 55 Hz-1.8 kHz, upper modes swell later); the grand a piano on a huge
+    // plate (each voice its own denser plate modes to 6 kHz, a fast bloom,
+    // a strong halo). All of it per note and per block, in the existing
+    // phasor bank: nothing new per sample.
+    struct GiantFlavour
+    {
+        int sympathetic, body;           // slots of each
+        float lowHz, highHz;             // the body ladder at x2
+        bool shared;                     // one ladder for every note (else each voice's own)
+        float cornerHz;                  // the layer's low cut (12 dB/octave under it)
+        float bodyShare;                 // of the layer's power, the body modes' (the rest the halo's)
+        float t60From, t60To, t60Tilt, tiltHz; // body T60 (s) at giant 0 and 1, times (Hz / tiltHz)^-tilt
+        float haloT60From, haloT60To;
+        float bloomFrom, bloomTo, bloomHigh;   // rise tau (s); + bloomHigh x sqrt (Hz / 1 kHz) x giant
+        float layerFromDb, layerToDb;    // the layer's power over the note's (at 0.05 s), giant 0 and 1
+        float duckDb;                    // the strings and table body down by this x giant
+        float haloCents;                 // the halo's detune, up to
+        float whiten;                    // a body mode feeds on the note's power to this (under 1: brighter, less boom)
+        float tilt;                      // and its feed tilts up as (Hz / 500)^tilt (against mud)
+        float topHz;                     // and falls 6 dB/octave over this (0: no fall)
+        float wash;                      // 0: none; else the noise bands from 500 Hz up carry a wash, each
+                                         // band fed as this many body modes (the body sines then stay low)
+    };
+    const GiantFlavour& flavour() const
+    {
+        static constexpr GiantFlavour box { 4, 10, 80.0f, 400.0f, true, 100.0f, 0.75f, 3.0f, 10.0f, 0.7f, 250.0f,
+                                            2.5f, 8.0f, 0.02f, 0.10f, 0.15f, -9.0f, 0.0f, 2.0f, 6.0f, 0.7f, 0.3f, 0.0f, 3.0f };
+        static constexpr GiantFlavour plate { 6, 18, 110.0f, 4000.0f, false, 100.0f, 0.6f, 3.0f, 12.0f, 0.6f, 500.0f,
+                                              3.0f, 14.0f, 0.01f, 0.10f, 0.0f, -9.0f, 1.0f, 1.5f, 5.0f, 0.8f, 0.0f, 2000.0f, 0.0f };
+        return tableData->guitarBody ? box : plate;
+    }
+    // A fixed number in [0, 1) for slot j (the guitar's one ladder, stereo places).
+    static float hash01 (int j, int salt)
+    {
+        auto h = (std::uint32_t) j * 2654435761u + (std::uint32_t) salt * 40503u + 0x9e3779b9u;
+        h ^= h >> 15;
+        h *= 2246822519u;
+        h ^= h >> 13;
+        h *= 3266489917u;
+        h ^= h >> 16;
+        return (float) (h >> 8) / 16777216.0f;
+    }
+    float giantDuckDb() const { return flavour().duckDb * giant; }
+
+    // The giant body's slots, after the infill (SIZE over x2 at the note's start).
+    void addGiant (std::uint32_t& seed)
+    {
+        const auto& f = flavour();
+        const auto next = [&seed]
+        {
+            seed = seed * 1664525u + 22695477u;
+            return (float) (seed >> 8) / 16777216.0f;
+        };
+        const auto add = [&] (int partial, float hz, float detuneCents, float rank)
+        {
+            const auto j = slots - giantStart;
+            giantPartial[j] = partial;
+            giantBaseHz[j] = hz;
+            giantDetune[j] = std::exp2 (detuneCents / 1200.0f);
+            giantRank[j] = rank;
+            giantCouple[j] = -140.0f;
+            const auto k = slots++;
+            const auto phase = next() * juce::MathConstants<float>::twoPi;
+            re[k] = std::cos (phase);
+            im[k] = std::sin (phase);
+            amp[k] = 0.0f;
+        };
+        washOn = f.wash > 0.0f;
+        // (Silent slots up to a group's edge first: the giant body's groups,
+        // always sounding, then don't keep the partials' last one running.)
+        while (slots % group != 0)
+            add (-2, 1000.0f, 0.0f, 2.0f);
+        for (int i = 0; i < f.sympathetic && i < count; ++i)
+        {
+            const auto cents = f.haloCents * (0.4f + 0.6f * next()) * (next() < 0.5f ? -1.0f : 1.0f);
+            add (i, 0.0f, cents, 0.5f * (float) i / (float) f.sympathetic);
+        }
+        for (int b = 0; b < f.body; ++b)
+        {
+            const auto u = f.shared ? hash01 (b, 1) : next();
+            const auto at = ((float) b + 0.5f + 0.8f * (u - 0.5f)) / (float) f.body;
+            add (-1, f.lowHz * std::pow (f.highHz / f.lowHz, at), 1.5f * (2.0f * next() - 1.0f),
+                 (float) ((b * 7) % f.body) / (float) f.body);
+        }
+    }
+
+    // A giant slot's Hz, level (but for its bloom and fall), fall and bloom at this SIZE.
+    void moveGiant (int k)
+    {
+        const auto& f = flavour();
+        const auto j = k - giantStart;
+        const auto halo = giantPartial[j] >= 0;
+        hz[k] = (halo ? hz[giantPartial[j]] : giantBaseHz[j] * std::exp2 (-0.5f * (logSize - 1.0f))) * giantDetune[j];
+        ringScale[k] = 1.0f;
+        modeDb[k] = 0.0f;
+        const auto on = smoothstep ((1.5f * giant - giantRank[j]) * 4.0f);
+        giantDb[j] = giantCouple[j] + f.layerFromDb + giant * (f.layerToDb - f.layerFromDb)
+                     + (on > 1.0e-7f ? 20.0f * std::log10 (on) : -140.0f) + juce::jmin (0.0f, edgeDb (hz[k]));
+        const auto t60 = halo ? f.haloT60From * std::pow (f.haloT60To / f.haloT60From, giant)
+                                    * (f.wash > 0.0f ? juce::jmin (1.0f, std::pow (hz[k] / f.tiltHz, -f.t60Tilt)) : 1.0f)
+                              : f.t60From * std::pow (f.t60To / f.t60From, giant) * std::pow (juce::jmax (20.0f, hz[k]) / f.tiltHz, -f.t60Tilt);
+        giantFall[j] = 60.0f / juce::jmax (0.05f, t60);
+        giantBloom[j] = f.bloomFrom + giant * (f.bloomTo - f.bloomFrom + f.bloomHigh * std::sqrt (hz[k] / 1000.0f));
+    }
+
+    // What each giant slot gets from this note (once, at its start): the
+    // halo its partial's power, a body mode the note's power near it; the
+    // body and the halo each scaled to their share of the note's power.
+    void coupleGiant()
+    {
+        const auto& f = flavour();
+        const auto& table = *tableData;
+        const auto times = (int) table.times.size();
+        float power[maxPartials], fed[maxPartials];
+        auto total = 1.0e-30f;
+        for (int k = 0; k < count; ++k)
+        {
+            auto level = levelOffset + shapeDb[k];
+            for (int i = 0; i < 4; ++i)
+                level += corners.weights[(size_t) i] * levelOf (*corners.entries[(size_t) i], k, table.lateTime, times);
+            power[k] = level < -140.0f ? 0.0f : std::pow (10.0f, level / 10.0f);
+            fed[k] = level < -140.0f ? 0.0f : std::pow (10.0f, f.whiten * level / 10.0f);
+            total += power[k];
+        }
+        float feed[maxGiant];
+        auto bodySum = 1.0e-30f, haloSum = 1.0e-30f;
+        for (int k = giantStart; k < slots; ++k)
+        {
+            const auto j = k - giantStart;
+            auto c = 0.0f;
+            if (giantPartial[j] == -2)
+                c = 0.0f;
+            else if (giantPartial[j] >= 0)
+            {
+                c = power[giantPartial[j]];
+                haloSum += c;
+            }
+            else
+            {
+                for (int i = 0; i < count; ++i)
+                {
+                    const auto r = hz[i] / hz[k], x = r - 1.0f / r;
+                    c += fed[i] * (1.0f / (1.0f + 2.0f * x * x) + 4.0f / (1.0f + 1600.0f * x * x));
+                }
+                const auto low = f.cornerHz / hz[k];
+                const auto high = f.topHz > 0.0f ? hz[k] / f.topHz : 0.0f;
+                c *= std::pow (hz[k] / 500.0f, f.tilt) / ((1.0f + low * low * low * low) * (1.0f + high * high));
+                bodySum += c;
+            }
+            feed[j] = c;
+        }
+        if (washOn)
+            feedWash (fed, bodySum);
+        for (int k = giantStart; k < slots; ++k)
+        {
+            const auto j = k - giantStart;
+            const auto share = giantPartial[j] == -2 ? 0.0f : giantPartial[j] >= 0 ? (1.0f - f.bodyShare) / haloSum : f.bodyShare / bodySum;
+            const auto p = total * share * feed[j];
+            giantCouple[j] = p > 1.0e-14f ? 10.0f * std::log10 (p) : -140.0f;
+            moveGiant (k);
+        }
+        for (int b = 1; b < ModalPianoTable::noiseBandCount && washOn; ++b)
+        {
+            const auto p = total * f.bodyShare / bodySum * washFeed[b];
+            washCouple[b] = p > 1.0e-14f ? 10.0f * std::log10 (p) : -140.0f;
+        }
+        moveWash();
+    }
+
+    // The guitar's wash (GiantFlavour::wash): from 500 Hz up the giant body
+    // is too dense for sines, so the noise bands carry it, each fed by the
+    // note's partials in it (and a third of its neighbours'), blooming and
+    // falling as a body mode at its middle would. No cost per sample: the
+    // bands run anyway.
+    void feedWash (const float* fed, float& bodySum)
+    {
+        const auto& f = flavour();
+        float inBand[ModalPianoTable::noiseBandCount] {};
+        for (int i = 0; i < count; ++i)
+            for (int b = 1; b < ModalPianoTable::noiseBandCount; ++b)
+                if (hz[i] >= ModalPianoTable::noiseBands[b][0] && hz[i] < ModalPianoTable::noiseBands[b][1])
+                    inBand[b] += fed[i];
+        for (int b = 1; b < ModalPianoTable::noiseBandCount; ++b)
+        {
+            const auto spread = inBand[b] + 0.3f * (inBand[b - 1] + (b + 1 < ModalPianoTable::noiseBandCount ? inBand[b + 1] : 0.0f));
+            const auto mid = washHz (b);
+            const auto high = mid / 1000.0f; // (the wash darkens from 1 kHz: the strings above it are faint, a hiss would stand out)
+            washFeed[b] = f.wash * spread * std::pow (mid / 500.0f, f.tilt) / (1.0f + high * high);
+            bodySum += washFeed[b];
+        }
+    }
+    static float washHz (int b) { return std::sqrt (ModalPianoTable::noiseBands[b][0] * ModalPianoTable::noiseBands[b][1]); }
+    void moveWash()
+    {
+        if (! washOn)
+            return;
+        const auto& f = flavour();
+        for (int b = 1; b < ModalPianoTable::noiseBandCount; ++b)
+        {
+            const auto mid = washHz (b);
+            const auto on = smoothstep ((1.5f * giant - 0.08f * (float) (b - 1)) * 4.0f);
+            washDb[b] = washCouple[b] + f.layerFromDb + giant * (f.layerToDb - f.layerFromDb) + (on > 1.0e-7f ? 20.0f * std::log10 (on) : -140.0f)
+                        + juce::jmin (0.0f, edgeDb (mid));
+            const auto t60 = f.t60From * std::pow (f.t60To / f.t60From, giant) * juce::jmin (1.5f, std::pow (mid / f.tiltHz, -f.t60Tilt));
+            washFall[b] = 60.0f / juce::jmax (0.05f, t60);
+            washBloom[b] = f.bloomFrom + giant * (f.bloomTo - f.bloomFrom + f.bloomHigh * std::sqrt (mid / 1000.0f));
+        }
+    }
+
+    // SIZE on a partial's level.
+    // The guitar, below ~1 kHz: the box's two strong resonances (air and
+    // top, Q 12, peaks ~9 and ~7 dB as the table's A0 bump), moved, over
+    // where they were; and its bass corner (under the air mode the hole
+    // and the top cancel, 12 dB/octave from 0.8 A0) moved with A0: a small
+    // box loses its bass, a big one keeps it. Above ~1.5 kHz (crossfaded
+    // from 700 Hz) the average tone moved as the plate (SIZE^1.5), as before.
+    // The grand: the average tone moved as its board (SIZE^p(f), 2 in the
+    // bass to 0.5 from 1.2 kHz), and its bass radiation corner (55 Hz in
+    // this table, where the board modes under it are ~12 dB weaker) moved
+    // as SIZE^-2: an upright, a spinet, a toy piano below, the sub-bass
+    // opening up above.
+    float bodyShapeDb (float hz) const
+    {
+        const auto& table = *tableData;
+        const auto corner = [hz] (float from, float to)
+        {
+            const auto a = from / hz, b = to / hz;
+            return (1.0f + a * a * a * a) / (1.0f + b * b * b * b);
+        };
+        if (table.guitarBody)
+        {
+            const auto w = smoothstep (std::log2 (hz / 700.0f) * 0.9086f); // (1 over log2 (1500 / 700))
+            auto low = 0.0f, high = 0.0f;
+            if (w < 1.0f)
+            {
+                const auto resonances = [hz] (float air, float top)
+                {
+                    constexpr float q = 12.0f, airGain = (2.5f / q) * (2.5f / q), topGain = (2.0f / q) * (2.0f / q);
+                    const auto lorentz = [hz, q] (float f)
+                    {
+                        const auto x = hz / f, y = 1.0f - x * x;
+                        return 1.0f / (y * y + x * x / (q * q));
+                    };
+                    return 1.0f + airGain * lorentz (air) + topGain * lorentz (top);
+                };
+                const auto air = table.airHz * airRatio, top = table.topHz * topRatio;
+                low = softLimit (10.0f * std::log10 (resonances (air, top) / resonances (table.airHz, table.topHz)
+                                                     * corner (0.8f * table.airHz, 0.8f * air)), 20.0f);
+            }
+            if (w > 0.0f)
+                high = softLimit (0.6f * (table.curveAt (hz * std::exp2 (1.5f * logSize)) - table.curveAt (hz)), 9.0f);
+            return low + w * (high - low);
+        }
+        const auto average = softLimit (0.6f * (table.curveAt (hz * std::exp2 (boardShift (hz, -logSize))) - table.curveAt (hz)), 9.0f);
+        constexpr float bassCorner = 55.0f;
+        return average + softLimit (10.0f * std::log10 (corner (bassCorner, bassCorner * std::exp2 (-2.0f * logSize))), 24.0f);
+    }
+
+    // The guitar: a partial near a body mode drains into it (Gough 1981):
+    // ~6 dB/s more at a moved mode's peak (Q 12), and up to 1.5 dB/s less
+    // where one has moved away.
+    float drainOf (float hz) const
+    {
+        const auto& table = *tableData;
+        if (! table.guitarBody || hz > 2000.0f)
+            return 0.0f;
+        const auto closeness = [hz] (float f)
+        {
+            const auto x = 12.0f * (hz / f - f / hz);
+            return 1.0f / (1.0f + x * x);
+        };
+        const auto d = 6.0f * (closeness (table.airHz * airRatio) + closeness (table.topHz * topRatio) - closeness (table.airHz) - closeness (table.topHz));
+        return d > 0.0f ? d : softLimit (d, 1.5f);
+    }
+
+    // A drain as it acts on the level: a negative one (a body mode moved
+    // away) slows the measured fall, which DECAY stretches, so it is
+    // stretched too and kept under 0.5 dB/s: it never makes a partial rise.
+    float drainOn (float rate) const
+    {
+        return rate < 0.0f ? juce::jmax (-0.5f, rate / timeScale) : rate;
+    }
+
+    // The grand's lowest noise band (0-500 Hz: the board's thump) read at
+    // the board's time: a big board booms on, a small one stops dead.
+    float boardNoiseDb (double t) const
+    {
+        const auto& table = *tableData;
+        const auto times = (int) table.times.size();
+        const auto tn = t * (double) noiseTime;
+        auto s = 0;
+        while (s < times - 2 && tn >= table.times[(size_t) s + 1])
+            ++s;
+        auto a = 0.0f, c = 0.0f;
+        for (int i = 0; i < 4; ++i)
+        {
+            const auto& e = *corners.entries[(size_t) i];
+            a += corners.weights[(size_t) i] * e.noiseLevels[(size_t) s];
+            c += corners.weights[(size_t) i] * e.noiseLevels[(size_t) s + 1];
+        }
+        const auto t0 = table.times[(size_t) s], t1 = table.times[(size_t) s + 1];
+        const auto u = (float) juce::jlimit (0.0, 1.0, (std::log (tn + 0.005) - std::log (t0 + 0.005))
+                                                         / (std::log (t1 + 0.005) - std::log (t0 + 0.005)));
+        auto db = a + u * (c - a) + levelOffset;
+        if (const auto beyond = (float) juce::jmax (0.0, tn - table.times.back()); beyond > 0.0f)
+            db += juce::jmin (-1.0f, (c - a) / (t1 - t0)) * beyond;
         return db;
     }
 
@@ -649,6 +1241,8 @@ private:
             const auto ratio = harmonic[k] + (measured[k] - harmonic[k]) * (stiffness * stretchScale);
             hz[k] = (float) (ratio * frequency);
             shapeDb[k] = shapeGainDb (k, hz[k]);
+            if (sized)
+                drainRate[k] = drainOf (hz[k]);
             const auto w = juce::MathConstants<double>::twoPi * juce::jmin ((double) hz[k], sampleRate * 0.49) / sampleRate;
             rotCos[k] = (float) std::cos (w);
             rotSin[k] = (float) std::sin (w);
@@ -656,12 +1250,16 @@ private:
         }
         for (int k = count; k < slots; ++k)
         {
-            hz[k] = modeA != nullptr ? modeA->modes[(size_t) (k - count)] / bodySize : modeHz[k - count];
-            const auto w = juce::MathConstants<double>::twoPi * hz[k] / sampleRate;
+            if (! sized && k < modeSlots)
+                hz[k] = modeA != nullptr ? modeA->modes[(size_t) (k - count)] / bodySize : modeHz[k - count];
+            else
+                moveMode (k);
+            const auto w = juce::MathConstants<double>::twoPi * (sized ? juce::jmin ((double) hz[k], sampleRate * 0.49) : (double) hz[k]) / sampleRate;
             rotCos[k] = (float) std::cos (w);
             rotSin[k] = (float) std::sin (w);
             blockTurn[k] = blockSize * (double) std::atan2 (rotSin[k], rotCos[k]);
         }
+        moveWash();
     }
 
     // Every block: each partial's level on the measured curve (log time
@@ -708,12 +1306,34 @@ private:
                     noiseB[b] = c + levelOffset;
                 }
             const auto w = corners.velocityWeight;
-            for (int k = count; k < slots; ++k)
+            for (int k = count; k < modeSlots; ++k)
             {
                 const auto m = (size_t) (k - count);
                 const auto at = [times] (const ModalPianoTable::Entry& e, size_t mode, int t) { return e.modeLevels[mode * (size_t) times + (size_t) t]; };
                 levelA[k] = at (*modeA, m, s) + w * (at (*modeB, m, s) - at (*modeA, m, s)) + levelOffset;
                 levelB[k] = at (*modeA, m, s + 1) + w * (at (*modeB, m, s + 1) - at (*modeA, m, s + 1)) + levelOffset;
+                if (sized)
+                {
+                    // SIZE: at constant Q a mode moved by r falls r times
+                    // as fast (from its level at 0.05 s; the guitar's early
+                    // pluck times as measured), and its level change.
+                    const auto late = table.lateTime;
+                    const auto ref = at (*modeA, m, late) + w * (at (*modeB, m, late) - at (*modeA, m, late)) + levelOffset;
+                    if (s > late)
+                        levelA[k] = ref + (levelA[k] - ref) * ringScale[k];
+                    if (s + 1 > late)
+                        levelB[k] = ref + (levelB[k] - ref) * ringScale[k];
+                    levelA[k] += modeDb[k];
+                    levelB[k] += modeDb[k];
+                }
+            }
+            // SIZE's infill modes: between their two neighbours, 3 dB under
+            // their mean, faded in.
+            for (int k = modeSlots; k < giantStart; ++k)
+            {
+                const auto a = infillFrom[k - modeSlots], b = infillTo[k - modeSlots];
+                levelA[k] = 0.5f * (levelA[a] + levelA[b]) - 3.0f + modeDb[k];
+                levelB[k] = 0.5f * (levelB[a] + levelB[b]) - 3.0f + modeDb[k];
             }
         }
 
@@ -733,13 +1353,48 @@ private:
         const auto cut = skipSilentGroups ? loudestPartial - relativeCut : -1000.0f;
         auto loudest = -200.0f, loudestNow = -200.0f;
         bool slotLive[maxSlots];
+        const auto giantRelease = 0.3f * std::exp2 (-3.3f * giant);
+        const auto giantTurn = (int) ((elapsed / blockSize) & 7);
         for (int k = 0; k < slots; ++k)
         {
+            if (k >= giantStart)
+            {
+                // The giant body: blooming, then its own long fall (and
+                // a slower one after key-up). Slow: each slot is set 8
+                // blocks ahead, an eighth of them each block.
+                const auto j = k - giantStart;
+                if (((j + giantTurn) & 7) != 0 && elapsed > 0)
+                {
+                    loudest = juce::jmax (loudest, giantLastDb[j]);
+                    loudestNow = juce::jmax (loudestNow, giantLastDb[j]);
+                    slotLive[k] = amp[k] > 0.0f;
+                    continue;
+                }
+                const auto span = 8 - ((j + giantTurn) & 7);
+                const auto at = (float) ((double) (elapsed + span * blockSize) / sampleRate);
+                const auto r = at / giantBloom[j];
+                const auto bloom = r > 12.0f ? 0.0f : 20.0f * std::log10 (juce::jmax (1.0e-7f, 1.0f - std::exp (-r)));
+                const auto releasedThen = released < 0 ? 0.0f : (float) ((elapsed + span * blockSize - released) / sampleRate);
+                const auto db = giantDb[j] + bloom - giantFall[j] * at / timeScale
+                                - dampRate * juce::jmin (8.0f, hz[k] / 1000.0f) * at
+                                - releaseRate * releasedThen * giantRelease;
+                giantLastDb[j] = db;
+                loudest = juce::jmax (loudest, db);
+                loudestNow = juce::jmax (loudestNow, db);
+                const auto target = db < -140.0f || db < cut ? 0.0f : std::pow (10.0f, db / 20.0f);
+                slotLive[k] = target > 0.0f || amp[k] > 0.0f;
+                setLevel (k, target, span * blockSize, true);
+                continue;
+            }
             auto db = levelA[k] + u * (levelB[k] - levelA[k]);
             if (beyond > 0.0f)
                 db += juce::jmin (-1.0f, (levelB[k] - levelA[k]) / (t1 - t0)) * beyond;
-            db -= (dampRate * juce::jmin (8.0f, hz[k] / 1000.0f)) * seconds
-                  + releaseRate * releasedFor;
+            if (! sized)
+                db -= (dampRate * juce::jmin (8.0f, hz[k] / 1000.0f)) * seconds
+                      + releaseRate * releasedFor;
+            else // (SIZE: partials near the moved body modes drain into them; a big body rings on after the dampers)
+                db -= (dampRate * juce::jmin (8.0f, hz[k] / 1000.0f) + (k < count ? drainOn (drainRate[k]) : 0.0f)) * seconds
+                      + releaseRate * releasedFor * (k < count ? 1.0f : ringScale[k]);
             loudest = juce::jmax (loudest, db);
             loudestNow = juce::jmax (loudestNow, db);
             const auto target = db < -140.0f || db < cut ? 0.0f : std::pow (10.0f, db / 20.0f);
@@ -799,6 +1454,8 @@ private:
                 auto db = noiseA[b] + u * (noiseB[b] - noiseA[b]);
                 if (beyond > 0.0f)
                     db += juce::jmin (-1.0f, (noiseB[b] - noiseA[b]) / (t1 - t0)) * beyond;
+                if (b == 0 && sized && ! table.guitarBody)
+                    db = boardNoiseDb (t); // (SIZE: the board's thump on its own time)
                 db -= releaseRate * releasedFor;
                 loudest = juce::jmax (loudest, db);
                 // (The guitar's top band sits at -138..-150 dB: its floor is lower.)
@@ -830,10 +1487,25 @@ private:
                             others += noiseLeak[b][j] * power[(size_t) j];
                     power[(size_t) b] = juce::jmax (0.0f, (variance[(size_t) b] - others) / noiseLeak[b][b]);
                 }
+            auto& wash = washPower;
+            if (washOn && ((elapsed / blockSize) & 3) == 0) // (slow: every 4th block, the bands' ramps smooth it)
+                for (int b = 1; b < ModalPianoTable::noiseBandCount; ++b)
+                {
+                    // (The giant body's wash: its power in the middle, as
+                    // a sine's a^2 / 2, through the band's filter.)
+                    const auto r = seconds / washBloom[b];
+                    const auto db = washDb[b] + (r > 12.0f ? 0.0f : 20.0f * std::log10 (juce::jmax (1.0e-7f, 1.0f - std::exp (-r))))
+                                    - washFall[b] * seconds / timeScale - releaseRate * releasedFor * giantRelease;
+                    washLastDb[b] = db;
+                    wash[b] = db < -140.0f ? 0.0f : 0.5f * std::pow (10.0f, db / 10.0f) / noiseGain[b];
+                }
+            if (washOn)
+                for (int b = 1; b < ModalPianoTable::noiseBandCount; ++b)
+                    loudest = juce::jmax (loudest, washLastDb[b]);
             for (int j = 0; j < ModalPianoTable::noiseBandCount; ++j)
             {
                 auto& band = noise[(size_t) j];
-                band.step = (std::sqrt (power[(size_t) j]) - band.gain) / (float) blockSize;
+                band.step = (std::sqrt (washOn ? power[(size_t) j] + wash[j] : power[(size_t) j]) - band.gain) / (float) blockSize;
             }
         }
 
@@ -845,8 +1517,10 @@ private:
         if (atEnd > fadeStart)
         {
             const auto x = juce::jlimit (0.0f, 1.0f, (float) (atEnd - fadeStart) / (float) juce::jmax (1, attackLength - fadeStart));
-            fadeTarget = std::cos (x * juce::MathConstants<float>::halfPi);
-            rampTarget = std::sin (x * juce::MathConstants<float>::halfPi);
+            // In step (alignedAttack), the two add as amplitudes: a straight
+            // crossfade (equal power would swell 3 dB halfway).
+            fadeTarget = alignedAttack ? 1.0f - x : std::cos (x * juce::MathConstants<float>::halfPi);
+            rampTarget = alignedAttack ? x : std::sin (x * juce::MathConstants<float>::halfPi);
         }
         attackFadeStep = (fadeTarget - attackFade) / (float) blockSize;
         partialRampStep = (rampTarget - partialRamp) / (float) blockSize;
@@ -862,6 +1536,24 @@ private:
     const ModalPianoTable* tableData = &ModalPianoTable::get();
     float bodySize = 1.0f, stringScale = 1.0f, stretchScale = 1.0f;
     bool shapeDbDirty = false;
+    // SIZE's physics (setBodyLaws; sized: SIZE isn't 1, so it's on).
+    bool sized = false;
+    float logSize = 0.0f, airRatio = 1.0f, topRatio = 1.0f, plateRatio = 1.0f, noiseTime = 1.0f;
+    int modeSlots = 0; // the table's modes end here; SIZE's infill modes follow
+    float ringScale[maxSlots] {}, modeDb[maxSlots] {}, drainRate[maxSlots] {};
+    int infillFrom[maxModes] {}, infillTo[maxModes] {};
+    float infillU[maxModes] {}, infillAt[maxModes] {};
+    // The giant body (addGiant, past x2): its slots start at giantStart.
+    float giant = 0.0f;
+    int giantStart = 0;
+    int giantPartial[maxGiant] {}; // the halo's partial, or -1: a body mode (-2: silent, to a group's edge)
+    float giantBaseHz[maxGiant] {}, giantDetune[maxGiant] {}, giantRank[maxGiant] {}, giantCouple[maxGiant] {};
+    float giantDb[maxGiant] {}, giantFall[maxGiant] {}, giantBloom[maxGiant] {}, giantLastDb[maxGiant] {};
+    bool washOn = false; // the guitar's wash in the noise bands (feedWash)
+    float washFeed[ModalPianoTable::noiseBandCount] {}, washCouple[ModalPianoTable::noiseBandCount] {};
+    float washDb[ModalPianoTable::noiseBandCount] {}, washFall[ModalPianoTable::noiseBandCount] {}, washBloom[ModalPianoTable::noiseBandCount] {};
+    float washPower[ModalPianoTable::noiseBandCount] {}, washLastDb[ModalPianoTable::noiseBandCount] {};
+    float noiseGain[ModalPianoTable::noiseBandCount] {}; // each band's filter's power gain on white noise
     float shapeDb[maxSlots] {}; // each partial's SIZE / SCALE level change (shapeGainDb)
     // The table's sinusoid levels are the reference's in dBFS (about 20 dB
     // quiet); Voice::exciterTrim brings the Modal Piano up to the other
@@ -1017,6 +1709,22 @@ private:
             std::nth_element (psd.begin(), psd.begin() + points / 2, psd.end());
             noiseMedian[b] = hi > lo && psd[points / 2] > 0.0 ? (float) (1.0 / psd[points / 2]) : 1.0f;
         }
+
+        // noiseGain[j]: band j's filter's output variance for white noise of 1.
+        for (int j = 0; j < bands; ++j)
+        {
+            const auto& f = noise[(size_t) j];
+            auto sum = 0.0;
+            constexpr int points = 2048;
+            for (int i = 0; i < points; ++i)
+            {
+                const auto z = std::polar (1.0, -juce::MathConstants<double>::pi * (i + 0.5) / points);
+                const auto h = ((double) f.b0 + (double) f.b1 * z + (double) f.b2 * z * z)
+                               / (1.0 + (double) f.a1 * z + (double) f.a2 * z * z);
+                sum += std::norm (h) * std::norm (h);
+            }
+            noiseGain[j] = (float) juce::jmax (1.0e-9, sum / points);
+        }
     }
     const ModalPianoTable::Entry* modeA = nullptr;
     const ModalPianoTable::Entry* modeB = nullptr;
@@ -1025,6 +1733,7 @@ private:
     const std::vector<float>* attackRightA = nullptr;
     const std::vector<float>* attackRightB = nullptr;
     float attackMix = 0.0f, attackGain = 1.0f, attackFade = 1.0f, partialRamp = 0.0f;
+    bool alignedAttack = false; // (the partials start in step with the recorded attack)
     float attackFadeStep = 0.0f, partialRampStep = 0.0f;
     double attackPosition = 0.0, attackStep = 1.0;
     int attackLength = 1, attackLeft = 0, fadeStart = 0;
