@@ -708,6 +708,46 @@ void runReview7ModulationTests (IlanaSynthAudioProcessor& processor, IlanaSynthA
         if (first != nullptr)
             first->getCurve().onOpenRemap (first->getSlotIndex());
         settle (100);
+
+        // A click anywhere on a row shows its curve (ilana 2026-11-12: the
+        // small curve was the only way in); a second click keeps it open, a
+        // right-click and the cross don't, and the curve still toggles.
+        MatrixRow* second = nullptr;
+        for (auto* row : rows)
+            if (row->isVisible() && row != first && (second == nullptr || row->getY() < second->getY()))
+                second = row;
+        const auto shownSlot = [&]
+        {
+            std::vector<RemapEditor*> open;
+            findAll<RemapEditor> (editor, open);
+            return open.empty() ? -1 : open[0]->getSlotIndex();
+        };
+        const auto press = [&] (MatrixRow* row, juce::Component* on, bool right)
+        {
+            const juce::Point<float> at { 4.0f, 4.0f };
+            const juce::ModifierKeys mods (right ? juce::ModifierKeys::rightButtonModifier : juce::ModifierKeys::leftButtonModifier);
+            row->getRowClickListener().mouseDown (juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), at, mods, 1.0f,
+                                                                    0.0f, 0.0f, 0.0f, 0.0f, on, on, juce::Time::getCurrentTime(), at,
+                                                                    juce::Time::getCurrentTime(), 1, false));
+            settle (100);
+        };
+        if (first != nullptr && second != nullptr)
+        {
+            press (second, &second->getSourceBox(), false);
+            expect (shownSlot() == second->getSlotIndex(), "a click on a row's SOURCE shows that row's curve");
+            press (second, second, false);
+            expect (shownSlot() == second->getSlotIndex(), "a second click on the same row keeps its curve open");
+            press (first, first, true);
+            expect (shownSlot() == second->getSlotIndex(), "a right-click on a row does not move the curve");
+            press (first, &first->getCurve(), false);
+            expect (shownSlot() == second->getSlotIndex(), "the row click leaves the small curve to its own click");
+            press (first, &first->getDestinationBox(), false);
+            expect (shownSlot() == first->getSlotIndex(), "a click on another row's DESTINATION moves the curve to that row");
+            first->getCurve().onOpenRemap (first->getSlotIndex()); // (closed again for the tests after)
+            settle (100);
+        }
+        else
+            expect (false, "Neuro Wobble has two routings for the row-click test");
     }
 
     // Badges beside the rings only while the knob is hovered (V7-27); a

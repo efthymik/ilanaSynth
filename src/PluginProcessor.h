@@ -427,6 +427,13 @@ public:
     static int migrateDenseBoardMix (const std::function<float (const juce::String&, float)>& get,
                                      const std::function<void (const juce::String&, float)>& set,
                                      bool mixKnob = true);
+    // Since 2026-11-12 the Dense board's MIX fades its colour in over the knob's
+    // first DenseSoundboard::colourReach (0 % is a true bypass) and its wood over
+    // the rest: a patch on the Dense board from before gets MIX moved to
+    // colourReach + MIX x (1 - colourReach), and every route or macro into MIX
+    // scaled by (1 - colourReach), so it sounds the same. Returns 1 if it changed.
+    static int migrateDenseBoardBypass (const std::function<float (const juce::String&, float)>& get,
+                                        const std::function<void (const juce::String&, float)>& set);
     // GLIDE took 16 times its knob's time until 2026-11 (Voice::glideCoeff):
     // a patch or factory recipe from before gets GLIDE x16 (at most the knob's
     // 2 s), and its routes and macros into GLIDE reach as far in seconds, so
@@ -530,6 +537,14 @@ public:
     int getActiveVoiceCount() const { return activeVoiceCount.load(); }
     // Voices still rendering, tails included (getActiveVoiceCount counts only
     // those with their envelopes up). Audio thread or tests only.
+    // The voice playing `note`, or nullptr. Tests only.
+    const Voice* voicePlayingForTest (int note) const
+    {
+        for (int i = 0; i < synth.getNumVoices(); ++i)
+            if (synth.getVoice (i)->isVoiceActive() && synth.getVoice (i)->getCurrentlyPlayingNote() == note)
+                return dynamic_cast<const Voice*> (synth.getVoice (i));
+        return nullptr;
+    }
     int getRenderingVoiceCount() const
     {
         auto count = 0;
@@ -987,6 +1002,12 @@ public:
     // TIME's engines: copies still rendering, for the sample card.
     int getStretchRendersPending() const { return stretchRenderer != nullptr ? stretchRenderer->pendingCount() : 0; }
     void flushAsyncUpdates();
+    // A private renderer (bounce, resampled preset) runs its async updates only
+    // on the thread that owns it, through flushAsyncUpdates. The message
+    // thread's delivery of the same update is ignored: it raced the bounce
+    // thread on the renderer (sample loads taken from under it, oversampling
+    // rebuilt mid-render).
+    void keepAsyncUpdatesOnThisThread() { asyncOwnerThread.store (juce::Thread::getCurrentThreadId()); }
 
     // M8.6: resample to oscillator. The patch plays one note on a copy of
     // the processor, off the audio thread, and the result lands on an
@@ -1574,6 +1595,7 @@ private:
     std::array<std::array<float, LfoCurve::tableSize>, (size_t) numLfos> lfoCurveTables {};
     std::array<std::array<float, LfoCurve::tableSize>, (size_t) numLfos> activeLfoCurveTables {};
     mutable juce::SpinLock lfoShapeLock;
+    std::atomic<juce::Thread::ThreadID> asyncOwnerThread { nullptr }; // keepAsyncUpdatesOnThisThread
 
     using RemapTable = std::array<float, (size_t) Mod::remapSize + 1>;
     std::array<LfoCurve, (size_t) Mod::maxSlots> modRemaps;

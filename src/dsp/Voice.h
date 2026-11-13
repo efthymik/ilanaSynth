@@ -462,6 +462,23 @@ struct VoiceParams
     bool anySpectralMods = false;     // a per-note source feeds a spectral amount: each voice picks its own table
     SpectralCache* spectralCache = nullptr;
 
+    // Per-note routes into plain knobs the voice reads (2026-11-12, ilana:
+    // "per voice howl, size, etc for all modal engines ... all engines"):
+    // a route fed by a per-note source (velocity, key, RANDOM, an envelope,
+    // a retriggered LFO) into one of the knobs voiceKnobOffsetFor lists is
+    // summed by each voice for itself (Voice::applyVoiceKnobs), so a held
+    // note keeps its own value (its RANDOM drawn once, at its note-on) while
+    // new notes take theirs. Routes from synth-wide sources stay in the knob.
+    struct VoiceKnob
+    {
+        int destination = -1;
+        int offset = 0; // the knob's float in VoiceParams, in bytes from its start
+        const juce::NormalisableRange<float>* range = nullptr;
+    };
+    static constexpr int maxVoiceKnobs = 32;
+    std::array<VoiceKnob, maxVoiceKnobs> voiceKnobs {};
+    int numVoiceKnobs = 0;
+
     // Appends a routing (for code that drives a voice directly, e.g. tests).
     void addModSlot (Mod::Source source, Mod::Destination destination, float depth)
     {
@@ -481,6 +498,79 @@ struct VoiceParams
         activeDestinations[numActiveDestinations++] = (int) destination;
     }
 };
+
+// Where a knob that per-note routes move per voice (VoiceParams::voiceKnobs)
+// lives in VoiceParams, in bytes, or -1. Physical (strings, keys, bow,
+// pickups, feedback amp, the modal exciters' SIZE and SCALE: WOLF / HOWL is
+// Bridge Buzz), sample and granular, the operator / PD knobs (WARP 2, WARP
+// ENV, KEY LEVEL), FM noise, BODY and WEST. Each is read by the voice from
+// its own copy of the parameters, so moving it there is all it takes.
+inline int voiceKnobOffsetFor (int destination)
+{
+    static const std::vector<int> table = []
+    {
+        std::vector<int> offsets ((size_t) Mod::getNumDestinations(), -1);
+        static VoiceParams probe;
+        const auto* base = reinterpret_cast<const char*> (&probe);
+        const auto put = [&] (const juce::String& id, const float& field)
+        {
+            const auto destination = Mod::destinationForParamId (id);
+            if (destination > 0 && destination < (int) offsets.size())
+                offsets[(size_t) destination] = (int) (reinterpret_cast<const char*> (&field) - base);
+        };
+
+        using O = VoiceParams::OscParams;
+        using Field = float O::*;
+        const std::pair<const char*, Field> fields[] {
+            { "_string_decay", &O::stringDecay }, { "_string_damp", &O::stringDamping },
+            { "_string_sustain", &O::stringSustain }, { "_string_stiffness", &O::stringStiffness },
+            { "_string_pickup", &O::stringPickup }, { "_string_excite_pos", &O::stringExcitationPosition },
+            { "_string_pick_hardness", &O::stringPickHardness }, { "_string_pick_pos", &O::stringPickPosition },
+            { "_bow_pressure", &O::bowPressure }, { "_bow_speed", &O::bowSpeed },
+            { "_bridge_buzz", &O::bridgeBuzz }, { "_fret_rattle", &O::fretRattle },
+            { "_hammer_hard", &O::hammerHardness }, { "_couple", &O::couple },
+            { "_damper", &O::damper }, { "_register", &O::registerMap },
+            { "_ep_distance", &O::epDistance }, { "_ep_position", &O::epPosition },
+            { "_fb_gain", &O::fbGain }, { "_fb_distance", &O::fbDistance },
+            { "_modal_size", &O::modalSize }, { "_modal_scale", &O::modalScale },
+            { "_grain_size", &O::grainSizeMs }, { "_grain_density", &O::grainDensity },
+            { "_grain_spray", &O::grainSpray }, { "_grain_pitch", &O::grainPitch },
+            { "_grain_spread", &O::grainSpread }, { "_grain_pos", &O::grainPosition },
+            { "_grain_scan", &O::grainScan },
+            { "_sample_fade_in", &O::sampleFadeIn }, { "_sample_fade_out", &O::sampleFadeOut },
+            { "_warp2_amt", &O::warpAmount2 }, { "_pd_env_amt", &O::pdEnvAmount }, { "_key_level", &O::keyLevel },
+        };
+        const char* prefixes[] { "osc1", "osc2", "sub", "osc4", "osc5", "osc6" };
+        for (int osc = 0; osc < VoiceParams::numOscillators; ++osc)
+        {
+            for (const auto& [suffix, field] : fields)
+                put (juce::String (prefixes[osc]) + suffix, probe.oscillators[osc].*field);
+            put ("fm_noise" + juce::String (osc + 1), probe.fmNoise[osc]);
+        }
+        put ("body_material", probe.bodyMaterial);
+        put ("body_size", probe.bodySize);
+        put ("body_coupling", probe.bodyCoupling);
+        put ("west_fold", probe.west.fold);
+        put ("west_sym", probe.west.symmetry);
+        put ("west_decay", probe.west.decay);
+        put ("west_res", probe.west.resonance);
+        put ("west_strike", probe.west.strike);
+        put ("west_open", probe.west.open);
+        return offsets;
+    }();
+    return juce::isPositiveAndBelow (destination, (int) table.size()) ? table[(size_t) destination] : -1;
+}
+
+// A route each voice works out for itself (see VoiceParams::voiceKnobs). A
+// stereo route into a string knob keeps its own path (it splits the sides).
+inline bool isVoiceKnobSlot (const Mod::Slot& slot)
+{
+    if (! (slot.perVoiceLfo || Mod::isPerVoiceSource (slot.source) || Mod::isPerVoiceSource (slot.aux)))
+        return false;
+    if (slot.stereo && Mod::StereoString::targetFor (slot.destination).osc >= 0)
+        return false;
+    return voiceKnobOffsetFor (slot.destination) >= 0;
+}
 
 // What the synth knows that a note starting later must still see: the last
 // mod wheel, expression and channel pressure per MIDI channel (a voice only
@@ -521,12 +611,15 @@ public:
     void setParams (const VoiceParams& newParams)
     {
         params = newParams;
+        voiceKnobsApplied = false; // fresh knobs: nothing of ours to take back
         paramsFresh = true; // the next render eases the glided knobs to these (BlockGlide)
     }
 
     // Where an idle voice finds this block's parameters when a note starts on
     // it (the processor copies them into the voices that are sounding only).
     void setParamsSource (const VoiceParams* source) noexcept { paramsSource = source; }
+    // The parameters this voice plays with (its per-note knob routes in). Tests only.
+    const VoiceParams& paramsForTest() const noexcept { return params; }
     // Fade out over the given samples, then end (a voice over SUSTAIN
     // VOICES); a new note on the voice cancels it.
     void startFadeOut (int samples) noexcept
@@ -552,7 +645,7 @@ public:
             case 8:  return 0.708f; // Reed, -3 dB
             case 9:  return 2.0f;   // Piano, +6 dB (heard 2-6 dB under Hammer; the drive takes some back)
             case 11: return 10.0f;  // Modal Piano, +20 dB (the table is in Piano V's dBFS; level with Piano and a wavetable osc at C4)
-            case 12: return 12.5f;  // Modal Guitar, +22 dB (the Omnisphere nylon table, 2026-11-12: at the Iowa table's +28 dB level, level with Piano and Bow at C3-C5)
+            case 12: return 6.3f;   // Modal Guitar, +16 dB (round 4, 2026-11-12: 12.5 played it 5-6 dB over the Modal Piano at mf on Init, into the drive; now level with it at mf, C3-C5)
             case 13: return 1.0f;   // Modal Bowed (ModalBowed::outputGain sets it level with Piano and Bow)
             default: return 1.0f;
         }
@@ -985,6 +1078,11 @@ private:
     // Per-voice spectral amount mods: slot targets -1000 - osc; worked out once a block.
     mutable std::array<float, 6> spectralMods {};
     std::array<float, 6> spectralBlock {};
+    // The per-note knob routes (VoiceParams::voiceKnobs): the knobs' own
+    // values while this voice's are in params, to put back before the next sum.
+    std::array<float, VoiceParams::maxVoiceKnobs> voiceKnobBase {};
+    bool voiceKnobsApplied = false;
+    void applyVoiceKnobs (bool noteStart);
     std::array<bool, Mod::numStereoDestinations> stereoRouted {}; // a stereo route feeds Mod::stereoDestinations[i]
     // Whether Filter 1 (0) or 2 (1) has a stereo route (cutoff, resonance, morph or drive): its sides run apart.
     bool filterStereo (int filter) const
