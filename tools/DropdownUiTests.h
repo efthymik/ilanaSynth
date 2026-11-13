@@ -89,6 +89,66 @@ void runDropdownTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProce
         }
     }
 
+    // The GRANULAR / SAMPLE card's SOURCE box (2026-11-13, ilana: "granular
+    // source drop down will sometimes fail to appear"): its menu is its own,
+    // so the base class's "menu active" flag, once set by the first click,
+    // was never cleared and every later click did nothing.
+    {
+        if (auto* mode = processor.apvts.getParameter ("osc1_mode"))
+            mode->setValueNotifyingHost (mode->convertTo0to1 (3.0f)); // (granular)
+        int boxes = 0;
+
+        for (const char* page : { "OSC", "MAIN" })
+        {
+            editor.showPage (page);
+            settle (350);
+
+            std::vector<SampleNameBox*> names;
+            findAll<SampleNameBox> (editor, names);
+
+            for (auto* box : names)
+            {
+                if (! visibleInTree (box) || box->getWidth() < 8 || box->getHeight() < 8)
+                    continue;
+
+                ++boxes;
+                int opened = 0;
+                const auto keep = box->onPopup;
+                box->onPopup = [&opened] { ++opened; };
+                const auto name = juce::String (page) + ": SOURCE";
+                const auto click = [&]
+                {
+                    const auto before = opened;
+                    box->mouseDown (event (*box, false));
+                    settle (20);
+                    box->mouseUp (event (*box, true));
+                    settle (250);
+                    return opened == before + 1 && ! box->isPopupActive();
+                };
+
+                for (int n = 0; n < 4; ++n)
+                    if (! click())
+                    {
+                        stuck.add (name + " (click " + juce::String (n + 1) + " opened " + juce::String (opened) + " so far)");
+                        break;
+                    }
+
+                const auto before = opened;
+                box->keyPressed (juce::KeyPress (juce::KeyPress::returnKey));
+                settle (250);
+
+                if (opened != before + 1 || ! click())
+                    stuck.add (name + " (Return then click)");
+
+                box->onPopup = keep;
+            }
+        }
+
+        expect (boxes > 0, "dropdowns: found the granular SOURCE box (" + juce::String (boxes) + ")");
+        processor.loadFactoryPreset (juce::jmax (0, processor.getFactoryPresetNames().indexOf ("Init")));
+        settle (300);
+    }
+
     expect (tried > 6, "dropdowns: found the selects with their own list (" + juce::String (tried) + ")");
     expect (stuck.isEmpty(), "dropdowns: every select opens its list on every click (" + juce::String (stuck.size()) + " failed: " + stuck.joinIntoString ("; ") + ")");
 }
