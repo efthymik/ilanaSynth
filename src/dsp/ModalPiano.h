@@ -18,8 +18,9 @@
 // In stereo, as the reference's microphones heard it: each partial and board
 // resonance has its own balance and phase between left and right (steady
 // over a note, so measured once per note), the attack is the recording's two
-// channels, and the noise is two uncorrelated draws. process() returns the
-// middle, (left + right) / 2, and side() the rest, (left - right) / 2.
+// channels, and the noise is two uncorrelated draws (the guitar's is one,
+// round 4: its reference is dual mono). process() returns the middle,
+// (left + right) / 2, and side() the rest, (left - right) / 2.
 //
 // The knobs move away from the recording, which they reproduce at their
 // middle (DECAY, STIFF, HAMMER) or at 0 (DAMP):
@@ -170,7 +171,7 @@ public:
         count = slots = 0;
         attackLeft = 0;
         pluckAt = pluckLength = 0;
-        burstLive = false;
+        burstLive = pluckNoise = false;
         silent = true;
         if (! table.valid())
             return;
@@ -288,6 +289,7 @@ public:
         }
 
         // The attack, resampled to this note's pitch.
+        pluckNoise = plucked != nullptr;
         if (plucked != nullptr)
         {
             // None (the guitar): one raised cosine from the note's start to
@@ -311,7 +313,7 @@ public:
                     fall += at.weights[(size_t) i] * (has ? e.burstFall[(size_t) b] : 0.0f);
                 }
                 db += levelOffset;
-                burstVariance[b] = db < -140.0f ? 0.0f : std::pow (10.0f, db / 10.0f) * toVariance;
+                burstVariance[b] = db < -175.0f ? 0.0f : std::pow (10.0f, db / 10.0f) * toVariance;
                 burstFactor[b] = std::pow (10.0f, -juce::jmax (0.0f, fall) * (float) (blockSize / sampleRate) / 10.0f);
                 burstLive = burstLive || burstVariance[b] > 0.0f;
             }
@@ -423,7 +425,23 @@ public:
                 right += im[k] * rightSin[k] + re[k] * rightCos[k];
             }
        #endif
-        if (hasNoise)
+        if (hasNoise && pluckNoise)
+        {
+            // The modelled pluck's noise is one draw in both channels (the
+            // reference render is dual mono: two draws lost 3 dB in the
+            // middle).
+            noiseSeed = noiseSeed * 1664525u + 1013904223u;
+            const auto white = ((float) (noiseSeed >> 8) * (2.0f / 16777216.0f) - 1.0f) * 1.7320508f;
+            auto sum = 0.0f;
+            for (auto& band : noise)
+            {
+                sum += band.gain * band.filter (band.left, white);
+                band.gain += band.step;
+            }
+            left += sum;
+            right += sum;
+        }
+        else if (hasNoise)
         {
             // Uniform, unit variance; a draw for each channel.
             noiseSeed = noiseSeed * 1664525u + 1013904223u;
@@ -783,8 +801,14 @@ private:
                     db += juce::jmin (-1.0f, (noiseB[b] - noiseA[b]) / (t1 - t0)) * beyond;
                 db -= releaseRate * releasedFor;
                 loudest = juce::jmax (loudest, db);
-                variance[(size_t) b] = db < -140.0f ? 0.0f : std::pow (10.0f, db / 10.0f) * toVariance;
+                // (The guitar's top band sits at -138..-150 dB: its floor is lower.)
+                variance[(size_t) b] = db < (pluckNoise ? -175.0f : -140.0f) ? 0.0f : std::pow (10.0f, db / 10.0f) * toVariance;
             }
+            // (The steady noise only: the burst, scaled too, made the
+            // pluck's first 5 ms louder still against the reference.)
+            if (pluckNoise)
+                for (int b = 0; b < ModalPianoTable::noiseBandCount; ++b)
+                    variance[(size_t) b] *= noiseMedian[b];
             if (burstLive)
             {
                 // The pluck's noise, falling.
@@ -896,6 +920,12 @@ private:
     std::array<float, ModalPianoTable::noiseBandCount> noisePower {};
     std::uint32_t noiseSeed = 1, noiseSeedRight = 2;
     bool hasNoise = false;
+    // The guitar's noise (the modelled pluck's table): one draw for both
+    // channels, a lower floor, and each band's variance times noiseMedian
+    // (the table's measure is the band's median bin, which noiseLeak's mean
+    // over log-spaced points misses by 3 to 7 dB).
+    bool pluckNoise = false;
+    float noiseMedian[ModalPianoTable::noiseBandCount] {};
 
     void designNoise()
     {
@@ -951,6 +981,41 @@ private:
                 noiseLeak[b][j] = (float) (hi > lo ? sum / points : (b == j ? 1.0 : 0.0));
             }
             noiseLeak[b][b] = juce::jmax (1.0e-6f, noiseLeak[b][b]);
+        }
+
+        // noiseMedian[b]: 1 over the median, over evenly spaced Hz in band
+        // b (as the table's FFT bins), of the filters' power when the
+        // Gauss-Seidel passes ask every band for a variance of 1.
+        double power[bands] {};
+        for (int pass = 0; pass < 60; ++pass)
+            for (int b = 0; b < bands; ++b)
+            {
+                auto others = 0.0;
+                for (int j = 0; j < bands; ++j)
+                    if (j != b)
+                        others += noiseLeak[b][j] * power[j];
+                power[b] = juce::jmax (0.0, (1.0 - others) / noiseLeak[b][b]);
+            }
+        for (int b = 0; b < bands; ++b)
+        {
+            const auto lo = juce::jmax (20.0, (double) ModalPianoTable::noiseBands[b][0]);
+            const auto hi = juce::jmin ((double) ModalPianoTable::noiseBands[b][1], nyquist);
+            constexpr int points = 255;
+            std::array<double, points> psd {};
+            for (int i = 0; i < points; ++i)
+            {
+                const auto hz = lo + (hi - lo) * (i + 0.5) / points;
+                const auto z = std::polar (1.0, -juce::MathConstants<double>::twoPi * hz / sampleRate);
+                for (int j = 0; j < bands; ++j)
+                {
+                    const auto& f = noise[(size_t) j];
+                    const auto h = ((double) f.b0 + (double) f.b1 * z + (double) f.b2 * z * z)
+                                   / (1.0 + (double) f.a1 * z + (double) f.a2 * z * z);
+                    psd[(size_t) i] += power[j] * std::norm (h) * std::norm (h);
+                }
+            }
+            std::nth_element (psd.begin(), psd.begin() + points / 2, psd.end());
+            noiseMedian[b] = hi > lo && psd[points / 2] > 0.0 ? (float) (1.0 / psd[points / 2]) : 1.0f;
         }
     }
     const ModalPianoTable::Entry* modeA = nullptr;
