@@ -391,10 +391,12 @@ void runTests()
                 }
             check (identical, "the Modal Piano and Guitar at SIZE x1 are the recording's, bit for bit, after SIZE has moved");
 
-            // SIZE x1 to x2 is as it was before the giant body came in past
-            // x2 (2026-11-13, at caf747a): the renders' bits hashed (FNV-1a),
-            // for the AVX and SSE paths, on the Linux x86-64 build they were
-            // measured on (another compiler or libm may round differently).
+            // SIZE x1.25 to x2 pinned: the giant body past x2 leaves it alone
+            // (2026-11-13; it matched caf747a bit for bit until the audit's
+            // fixes to the drain, the infill and the board's fold moved it by
+            // -46 dB or less). The renders' bits hashed (FNV-1a), for the AVX
+            // and SSE paths, on the Linux x86-64 build they were measured on
+            // (another compiler or libm may round differently).
            #if defined(__linux__) && defined(__x86_64__)
             {
                 std::uint64_t hash = 14695981039346656037ull;
@@ -407,8 +409,8 @@ void runTests()
                                 std::memcpy (&bits, &v, sizeof (bits));
                                 hash = (hash ^ bits) * 1099511628211ull;
                             }
-                const auto expected = ModalPiano::useAvx() ? 0x79272aa3ff0679f1ull : 0xea96573b1b744288ull;
-                check (hash == expected, "the Modal Piano and Guitar from SIZE x1 to x2 are bit for bit as before the giant body (hash "
+                const auto expected = ModalPiano::useAvx() ? 0xf2c84ade5464a270ull : 0xbc7d8ade81d7ded0ull;
+                check (hash == expected, "the Modal Piano and Guitar from SIZE x1.25 to x2 are bit for bit as pinned (hash "
                                              + juce::String::toHexString ((juce::int64) hash) + ")");
             }
            #endif
