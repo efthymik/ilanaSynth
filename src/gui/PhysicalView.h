@@ -17,6 +17,7 @@
 #include "../PluginProcessor.h"
 #include "IlanaLookAndFeel.h"
 #include "AnimationUtils.h"
+#include "ModalMarks.h"
 
 // The exciters (oscN_excite) by one set of names on every page, and in
 // groups for the menus (UI review 7, I7-27). Choice 5, the M4 hammer kept
@@ -351,7 +352,7 @@ private:
     }
 
     // The modal instruments' own picture: the body as big as SIZE makes it, the neck as long as SCALE, and
-    // beside it the name of the size (the engine's marks: violin x1, viola x1.17, cello x2.1) with both
+    // beside it the name of the size (the real instruments of ModalMarks.h: violin x1, viola x1.17, ...) with both
     // factors. Fills a fixed zone at the left of `area` whatever the size, so the string beside it never
     // jumps; returns the zone's right edge.
     float paintInstrument (juce::Graphics& g, juce::Rectangle<float> area, bool bowed, juce::Colour accent) const
@@ -433,7 +434,7 @@ private:
         auto text = juce::Rectangle<float> (textX, midY - lineH, textWidth, lineH * 2.0f);
         g.setFont (nameFont);
         g.setColour (IlanaTheme::Ui::text);
-        g.drawText (instrumentName (bowed, size), text.removeFromTop (lineH).toNearestInt(), juce::Justification::centredLeft);
+        g.drawText (ModalMarks::name (bowed ? 13 : 12, false, size), text.removeFromTop (lineH).toNearestInt(), juce::Justification::centredLeft);
         g.setColour (IlanaTheme::Ui::text2);
         g.drawText (juce::String::fromUTF8 ("BODY \xc3\x97") + factorText (size) + juce::String::fromUTF8 ("  NECK \xc3\x97") + factorText (scale),
                     text.toNearestInt(), juce::Justification::centredLeft);
@@ -443,23 +444,6 @@ private:
     static juce::String factorText (float factor)
     {
         return juce::String (factor, std::abs (factor * 10.0f - std::round (factor * 10.0f)) < 0.05f ? 1 : 2);
-    }
-
-public:
-    // The engine's instrument marks on SIZE (ModalBowedBodies.h): the violin is x1, the viola x1.17, the cello x2.1.
-    static constexpr float violaSize = 1.17f, celloSize = 2.1f;
-
-    // What a modal body of this SIZE is called: an instrument at its mark, else where it sits between them.
-    static juce::String instrumentName (bool bowed, float size)
-    {
-        const auto atMark = [size] (float mark) { return std::abs (std::log2 (size / mark)) < 0.045f; };
-        const auto to = juce::String::fromUTF8 (" \xe2\x80\xba ");
-        if (! bowed)
-            return atMark (1.0f) ? "NYLON GUITAR" : size < 1.0f ? "SMALL GUITAR" : "BIG GUITAR";
-        if (atMark (1.0f)) return "VIOLIN";
-        if (atMark (violaSize)) return "VIOLA";
-        if (atMark (celloSize)) return "CELLO";
-        return size < 1.0f ? juce::String ("SMALL VIOLIN") : size < violaSize ? "VIOLIN" + to + "VIOLA" : size < celloSize ? "VIOLA" + to + "CELLO" : juce::String ("BIG CELLO");
     }
 
 private:
