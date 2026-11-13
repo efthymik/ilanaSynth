@@ -1470,5 +1470,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout IlanaSynthAudioProcessor::cr
     addBool ("vec_sync", "Vector Path Sync", false);
     addChoice ("vec_div", "Vector Path Div", getSyncDivisionNames(), 0);
 
+    // The material bodies' levels before 2026-11-13 (ilana: "guitar type body
+    // ... makes no sound"; bodies quiet on plucks at high DECAY): on, the
+    // Guitar body keeps its old normalisation (20-60 dB quiet), short notes
+    // lose level as DECAY rises and String to body feeds the mix at 20 %.
+    // Off for new patches; old ones on a material body load with it on
+    // (migrateBodyLevel), so they sound as they did. No knob.
+    addBool ("body_legacy_level", "Body Legacy Level", false);
+
     return layout;
 }
