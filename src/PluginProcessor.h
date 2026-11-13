@@ -443,6 +443,13 @@ public:
     // it glides as it did. Returns how many values it changed.
     static int migrateGlideTime (const std::function<float (const juce::String&, float)>& get,
                                  const std::function<void (const juce::String&, float)>& set);
+    // The material bodies' levels changed on 2026-11-13 (MaterialBody: the
+    // Guitar body was 20-60 dB quiet, short notes lost level as DECAY rose,
+    // String to body at COUPLE 0 fed the body 14 dB down): a patch or factory
+    // recipe on a material body from before gets body_legacy_level on, so it
+    // sounds as it did. Returns 1 if it set it.
+    static int migrateBodyLevel (const std::function<float (const juce::String&, float)>& get,
+                                 const std::function<void (const juce::String&, float)>& set);
     // The same on the live parameters (after a bounce or a factory preset).
     void migrateOperatorModes();
     bool clearModSlotsForTarget (int destination);

@@ -1070,6 +1070,7 @@ inline const HelpRow helpRows[] {
     { is ("body_size"), "Body tuning in whole semitones; larger rings lower." },
     { is ("body_coupling_mode"), "Direction of energy transfer. String to body, body to string, or between strings." },
     { is ("body_coupling"), "Strength of the selected coupling path." },
+    { is ("body_legacy_level"), "On in patches saved before 2026-11-13 on a material body: they keep the body's old levels." },
     { is ("res_amount"), "Wet amount of the selected body." },
     { is ("res_decay"), "How long the resonances ring." },
     { is ("res_offset"), "Resonator tuning in semitones. Inharmonic = metallic." },
