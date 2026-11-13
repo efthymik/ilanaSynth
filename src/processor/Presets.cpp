@@ -333,6 +333,9 @@ bool IlanaSynthAudioProcessor::loadPresetByIndex (int index)
 
 void IlanaSynthAudioProcessor::handleAsyncUpdate()
 {
+    if (const auto owner = asyncOwnerThread.load(); owner != nullptr && owner != juce::Thread::getCurrentThreadId())
+        return; // a private renderer: its owner flushes (keepAsyncUpdatesOnThisThread)
+
     BuiltInTables::buildWanted(); // tables the audio thread asked for
 
     // Roadmap step 17: the FX patch follows the slots; the rack's plan
@@ -1497,6 +1500,7 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
             // On the heap: a processor is too big for a stack frame (MSVC's
             // 1 MB stack overflowed at loadFactoryPreset's entry).
             auto renderer = std::make_unique<IlanaSynthAudioProcessor>();
+            renderer->keepAsyncUpdatesOnThisThread();
             renderer->loadFactoryPreset (source);
             renderer->flushAsyncUpdates();
             BounceRequest request;

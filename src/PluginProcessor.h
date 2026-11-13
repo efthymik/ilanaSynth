@@ -533,6 +533,14 @@ public:
     int getActiveVoiceCount() const { return activeVoiceCount.load(); }
     // Voices still rendering, tails included (getActiveVoiceCount counts only
     // those with their envelopes up). Audio thread or tests only.
+    // The voice playing `note`, or nullptr. Tests only.
+    const Voice* voicePlayingForTest (int note) const
+    {
+        for (int i = 0; i < synth.getNumVoices(); ++i)
+            if (synth.getVoice (i)->isVoiceActive() && synth.getVoice (i)->getCurrentlyPlayingNote() == note)
+                return dynamic_cast<const Voice*> (synth.getVoice (i));
+        return nullptr;
+    }
     int getRenderingVoiceCount() const
     {
         auto count = 0;
@@ -990,6 +998,12 @@ public:
     // TIME's engines: copies still rendering, for the sample card.
     int getStretchRendersPending() const { return stretchRenderer != nullptr ? stretchRenderer->pendingCount() : 0; }
     void flushAsyncUpdates();
+    // A private renderer (bounce, resampled preset) runs its async updates only
+    // on the thread that owns it, through flushAsyncUpdates. The message
+    // thread's delivery of the same update is ignored: it raced the bounce
+    // thread on the renderer (sample loads taken from under it, oversampling
+    // rebuilt mid-render).
+    void keepAsyncUpdatesOnThisThread() { asyncOwnerThread.store (juce::Thread::getCurrentThreadId()); }
 
     // M8.6: resample to oscillator. The patch plays one note on a copy of
     // the processor, off the audio thread, and the result lands on an
@@ -1577,6 +1591,7 @@ private:
     std::array<std::array<float, LfoCurve::tableSize>, (size_t) numLfos> lfoCurveTables {};
     std::array<std::array<float, LfoCurve::tableSize>, (size_t) numLfos> activeLfoCurveTables {};
     mutable juce::SpinLock lfoShapeLock;
+    std::atomic<juce::Thread::ThreadID> asyncOwnerThread { nullptr }; // keepAsyncUpdatesOnThisThread
 
     using RemapTable = std::array<float, (size_t) Mod::remapSize + 1>;
     std::array<LfoCurve, (size_t) Mod::maxSlots> modRemaps;

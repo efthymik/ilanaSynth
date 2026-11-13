@@ -359,7 +359,10 @@ const SampleData* Voice::stretchCopyFor (int osc, const SampleData* origin)
 void Voice::startNote (int midiNoteNumber, float velocity, juce::SynthesiserSound*, int currentPitchWheelPosition)
 {
     if (paramsSource != nullptr)
+    {
         params = *paramsSource;
+        voiceKnobsApplied = false;
+    }
     paramsFresh = glidesSnap = true; // a note starts on the knobs' values, not eased in
 
     const auto mono = monoPending;
@@ -496,6 +499,11 @@ void Voice::startNote (int midiNoteNumber, float velocity, juce::SynthesiserSoun
 
     randomValue = random.nextFloat() * 2.0f - 1.0f;
     voicePan = random.nextFloat() * 2.0f - 1.0f;
+
+    // Per-note routes into the knobs (velocity, key, this note's RANDOM):
+    // in place before the strings and players below start from them.
+    renderStart = 0; // (the shared LFO buffers: read at their first sample here)
+    applyVoiceKnobs (true);
 
     for (int u = 0; u < VoiceParams::maxUnison; ++u)
     {
@@ -989,6 +997,70 @@ void Voice::advanceVoiceLfos (int sampleIndex)
     }
 }
 
+// The per-note routes into plain knobs (VoiceParams::voiceKnobs): summed
+// for this voice, at its note-on and then once a block, and written into its
+// own copy of the knobs, as the synth moves the knob for a synth-wide route
+// (an offset in the knob's 0..1 travel, clamped to it). A RANDOM, velocity
+// or key route thus holds for the whole note: a new note draws its own and
+// leaves the held ones alone. The knob's value is kept, to put back first.
+void Voice::applyVoiceKnobs (bool noteStart)
+{
+    const auto knob = [this] (int k) -> float&
+    {
+        return *reinterpret_cast<float*> (reinterpret_cast<char*> (&params) + params.voiceKnobs[(size_t) k].offset);
+    };
+
+    if (voiceKnobsApplied)
+    {
+        for (int k = 0; k < params.numVoiceKnobs; ++k)
+            knob (k) = voiceKnobBase[(size_t) k];
+        voiceKnobsApplied = false;
+    }
+
+    if (params.numVoiceKnobs == 0 || params.numModSlots == 0)
+        return;
+
+    // At note-on the envelopes have not started: they read 0.
+    const auto read = [&] (Mod::Source source)
+    {
+        if (noteStart && source >= Mod::Source::Env6 && source <= Mod::Source::Env16)
+            return 0.0f;
+        return noteStart ? sourceValue (source, 0, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f)
+                         : sourceValue (source, 0, lastAmpValue, lastFilterValue, lastFilter2Value, lastModValue, lastEnv4Value);
+    };
+
+    std::array<float, VoiceParams::maxVoiceKnobs> sums {};
+    for (int s = 0; s < params.numModSlots; ++s)
+    {
+        const auto& slot = params.modSlots[s];
+        if (! isVoiceKnobSlot (slot))
+            continue;
+        auto k = 0;
+        while (k < params.numVoiceKnobs && params.voiceKnobs[(size_t) k].destination != slot.destination)
+            ++k;
+        if (k == params.numVoiceKnobs)
+            continue;
+
+        auto value = Mod::shape (slot, read (slot.source));
+        if (slot.aux != Mod::Source::None)
+            value *= Mod::auxScale (slot.aux, read (slot.aux));
+        sums[(size_t) k] += slot.depth * value;
+    }
+
+    for (int k = 0; k < params.numVoiceKnobs; ++k)
+    {
+        auto& value = knob (k);
+        voiceKnobBase[(size_t) k] = value;
+        const auto* range = params.voiceKnobs[(size_t) k].range;
+        if (sums[(size_t) k] == 0.0f || range == nullptr)
+            continue;
+        const auto moved = range->convertFrom0to1 (juce::jlimit (0.0f, 1.0f, range->convertTo0to1 (range->snapToLegalValue (value)) + sums[(size_t) k]));
+        if (std::isfinite (moved))
+            value = moved;
+    }
+    voiceKnobsApplied = true;
+}
+
 float Voice::bowedNoiseWeight() const noexcept
 {
     if (! isVoiceActive())
@@ -1395,6 +1467,9 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
 
         evaluateMods (blockMods.data(), 0, lastAmpValue, lastFilterValue, lastFilter2Value, lastModValue, lastEnv4Value);
     }
+
+    // Per-note routes into the knobs: this voice's own values for the block.
+    applyVoiceKnobs (false);
 
     // Per-note routes into the spectral amounts: each voice's own value for the block.
     spectralBlock = params.anySpectralMods && params.numModSlots > 0 ? spectralMods : std::array<float, 6> {};

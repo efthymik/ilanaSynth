@@ -1060,6 +1060,11 @@ void IlanaSynthAudioProcessor::setOversampling (int factor)
     if (factor == oversamplingFactor.load())
         return;
 
+    // The callback lock keeps the audio thread out while the oversamplers and
+    // LFO buffers are rebuilt. suspendProcessing alone is not enough: the CLAP
+    // wrapper only checks it before a block, so a block already running kept
+    // reading the freed buffers. processBlock try-locks the same lock.
+    const juce::ScopedLock callbackLock (getCallbackLock());
     suspendProcessing (true);
 
     // The keys held down now (E-12): the voices are re-prepared below, which
@@ -1117,6 +1122,17 @@ void IlanaSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     // Flush-to-zero and denormals-are-zero from the first instruction of the
     // callback: hosts reset MXCSR between calls (see docs/ROUTING-CPU.md).
     juce::ScopedNoDenormals noDenormals;
+
+    // setOversampling holds this lock while it rebuilds the buffers. The VST3
+    // and standalone wrappers already hold it here (it is re-entrant); a
+    // wrapper that does not (CLAP) gets one silent block instead of a crash.
+    const juce::ScopedTryLock callbackLock (getCallbackLock());
+    if (! callbackLock.isLocked())
+    {
+        buffer.clear();
+        midiMessages.clear();
+        return;
+    }
 
     if (hostWorkgroupPending)
         hostWorkgroupPending = ! synth.setVoiceThreadsWorkgroup (hostWorkgroup);
@@ -1426,9 +1442,14 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
     }
 
     {
-        const juce::SpinLock::ScopedLockType lock (lfoShapeLock);
-        activeLfoCustom = lfoCustom;
-        activeLfoCurveTables = lfoCurveTables;
+        // Never wait for the editor here (it copies and allocates under this
+        // lock): if it holds the lock, this block keeps the last block's shapes.
+        const juce::SpinLock::ScopedTryLockType lock (lfoShapeLock);
+        if (lock.isLocked())
+        {
+            activeLfoCustom = lfoCustom;
+            activeLfoCurveTables = lfoCurveTables;
+        }
     }
 
     if (const auto epoch = remapEpoch.load(); epoch != activeRemapEpoch)
@@ -1488,8 +1509,9 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
         auto slot = readModSlot (i);
         slot.remap = activeModRemapOn[(size_t) i] ? activeModRemapTables[(size_t) i].data() : nullptr;
 
-        // A spectral amount fed by a retriggered LFO is worked out per voice, like an envelope.
-        if (Mod::spectralOscFor (slot.destination) >= 0)
+        // A spectral amount or a knob the voices read (voiceKnobOffsetFor)
+        // fed by a retriggered LFO is worked out per voice, like an envelope.
+        if (Mod::spectralOscFor (slot.destination) >= 0 || voiceKnobOffsetFor (slot.destination) >= 0)
             for (const auto source : { slot.source, slot.aux })
             {
                 const auto lfo = juce::jmax (Mod::lfoIndexFor (source), Mod::lfoBIndexFor (source));
@@ -1894,6 +1916,17 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
         if (! Mod::isExplicitDestination (destination))
         {
             p.anySpectralMods = p.anySpectralMods || Mod::isVoiceSpectralSlot (activeSlots[i]);
+            if (isVoiceKnobSlot (activeSlots[i]))
+            {
+                auto seen = false;
+                for (int k = 0; k < p.numVoiceKnobs && ! seen; ++k)
+                    seen = p.voiceKnobs[(size_t) k].destination == destination;
+                const auto index = Mod::paramDestinationIndex (destination);
+                if (! seen && p.numVoiceKnobs < VoiceParams::maxVoiceKnobs && index >= 0 && index < (int) paramDestinations.size()
+                    && paramDestinations[(size_t) index].parameter != nullptr)
+                    p.voiceKnobs[(size_t) p.numVoiceKnobs++] = { destination, voiceKnobOffsetFor (destination),
+                                                                 &paramDestinations[(size_t) index].parameter->getNormalisableRange() };
+            }
             p.anyExtendedFmMods = p.anyExtendedFmMods || Mod::extendedFmCellFor (destination) >= 0;
             continue;
         }
@@ -2431,8 +2464,10 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
                 buffer.addFrom (channel, 0, liveDry, juce::jmin (channel, liveDry.getNumChannels() - 1), 0,
                                 juce::jmin (liveInputSamples, buffer.getNumSamples()), dry);
 
+    // The scope is only for the editor: skip this block's write rather than
+    // wait while the editor copies it.
+    if (const juce::SpinLock::ScopedTryLockType lock (scopeLock); lock.isLocked())
     {
-        const juce::SpinLock::ScopedLockType lock (scopeLock);
         auto writePosition = scopeWritePos.load();
 
         const auto* leftData = buffer.getReadPointer (0);

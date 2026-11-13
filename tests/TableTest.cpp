@@ -87,6 +87,7 @@ void timedRun (const char* name, Suite&& suite)
 #include "FxLfoTests.inc"
 #include "TensionEnvTests.inc"
 #include "PhysModTests.inc"
+#include "VoiceKnobTests.inc"
 #include "FilterPairTests.inc"
 #include "CpuPassTests.inc"
 #include "CpuRound3Tests.inc"
@@ -436,6 +437,13 @@ int main()
     {
         runFilterOverhaulTests();
         std::cout << (failures == 0 ? "FILTER TESTS PASSED" : "FILTER TESTS FAILED") << " (" << failures << " failures)" << std::endl;
+        return failures == 0 ? 0 : 1;
+    }
+
+    if (juce::SystemStats::getEnvironmentVariable ("ILANA_VOICEKNOB_TEST", "").isNotEmpty())
+    {
+        runVoiceKnobTests();
+        std::cout << (failures == 0 ? "VOICEKNOB TESTS PASSED" : "VOICEKNOB TESTS FAILED") << " (" << failures << " failures)" << std::endl;
         return failures == 0 ? 0 : 1;
     }
 
@@ -844,6 +852,7 @@ int main()
     timedRun ("runMultiSampleTests", [] { runMultiSampleTests(); });
     timedRun ("runTensionEnvTests", [] { runTensionEnvTests(); });
     timedRun ("runPhysModTests", [] { runPhysModTests(); });
+    timedRun ("runVoiceKnobTests", [] { runVoiceKnobTests(); });
     timedRun ("runFilterPairTests", [] { runFilterPairTests(); });
     timedRun ("runCpuPassTests", [] { runCpuPassTests(); });
     timedRun ("runCpuRound3Tests", [] { runCpuRound3Tests(); });
