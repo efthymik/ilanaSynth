@@ -33,6 +33,13 @@ struct ModalPianoTable
         std::vector<float> balance, phase;         // [partials]
         std::vector<float> modeBalance, modePhase; // [modes]
         float attackDb = -200.0f; // the attack's level over its first 80 ms (both channels), dB
+        // Each partial in the attack (left channel) where it hands over to
+        // the partials, 20-80 ms: its sine and cosine parts (sin (w t + p)
+        // = s sin w t + c cos w t, t from the attack's start), so the
+        // partials start in step with it; out of step they cancel it
+        // mid-crossfade, a hole heard as a blip before the note
+        // (2026-11-13). Empty: none (no attack).
+        std::vector<float> attackSin, attackCos; // [partials]
         // The modelled pluck (version 5; the table has no attack samples):
         // when the pluck starts after the note's start and how long it
         // rises (one raised cosine swells over both), each partial's and
@@ -43,7 +50,15 @@ struct ModalPianoTable
         float pluckMs = 0.0f, riseMs = 0.0f;
         std::vector<float> startPhase, modeStartPhase; // [partials], [modes]
         std::vector<float> burstDb, burstFall;         // [noiseBandCount]
+        // What each mode is, for SIZE (ModeKind, sorted at parse time):
+        // the guitar's air (A0) and top (T(1,1)2) modes, the board's or
+        // plate's other modes, and modes that are the strings' (the
+        // grand's bass strings ring longitudinal modes at 0.4-1.2 kHz),
+        // which don't move with the body.
+        std::vector<unsigned char> modeKind; // [modes]
     };
+
+    enum ModeKind : unsigned char { boardMode = 0, airMode = 1, topMode = 2, stringMode = 3 };
 
     // The guitar's attacks are separate takes per velocity, not one
     // instrument's strikes: mixed sample by sample their plucks partly
@@ -53,6 +68,11 @@ struct ModalPianoTable
     bool nearestAttack = false;
     // Version 5: the pluck is modelled (Entry::pluckMs ...), not played back.
     bool modelledPluck = false;
+    // The guitar's box (SIZE moves its air and top modes as a coupled
+    // pair), not the grand's soundboard; and the box's air and top modes
+    // as the table has them (Hz; the most common ones over the notes).
+    bool guitarBody = false;
+    float airHz = 103.0f, topHz = 240.0f;
 
     static constexpr float noPhase = 100.0f; // (Entry::startPhase: none)
     static constexpr int noiseBandCount = 6;

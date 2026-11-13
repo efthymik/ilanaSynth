@@ -94,7 +94,88 @@ namespace
         }
     }
 
-    ModalPianoTable parse (const char* data, int size)
+    // What each mode is, for SIZE (2026-11-13, checked against both
+    // tables). The guitar's: in each entry, the air mode (A0) is its
+    // loudest mode at 0.08 s from 80 to 180 Hz (102.5 Hz in most notes,
+    // 108.4 in the notes resampled a semitone up; the top notes' copies
+    // climb to 170 Hz with their pitch), the top mode (T(1,1)2) its
+    // loudest from 1.8 to 2.8 times that (240 or 255 Hz, some 27 dB
+    // under A0); the rest are the plate's. (No peaks of the open strings'
+    // harmonics recur: 12 % of the modes sit within 1.5 % of one, about
+    // chance, and those are A0 and T(1,1)2 copies; none are strings.) The
+    // table's air and top modes: the most common ones. The grand's: its
+    // board modes run 21-250 Hz (and some 290-900 Hz in the middle); in
+    // the bass notes (under 60 Hz) the modes above 400 Hz are the strings'
+    // longitudinal modes (0.4-1.2 kHz, up to -46 dB), which stay put.
+    void classifyModes (ModalPianoTable& table)
+    {
+        const auto late = juce::jmin (table.lateTime + 1, (int) table.times.size() - 1); // (0.08 s)
+        const auto times = (size_t) table.times.size();
+        std::vector<float> airs, tops;
+        for (auto& e : table.entries)
+        {
+            const auto modes = e.modes.size();
+            e.modeKind.assign (modes, ModalPianoTable::boardMode);
+            const auto level = [&] (size_t m) { return e.modeLevels[m * times + (size_t) late]; };
+            if (! table.guitarBody)
+            {
+                if (440.0 * std::exp2 ((e.note - 69) / 12.0) < 60.0)
+                    for (size_t m = 0; m < modes; ++m)
+                        if (e.modes[m] > 400.0f)
+                            e.modeKind[m] = ModalPianoTable::stringMode;
+                continue;
+            }
+            const auto loudest = [&] (float lo, float hi)
+            {
+                auto best = -1;
+                for (size_t m = 0; m < modes; ++m)
+                    if (e.modes[m] >= lo && e.modes[m] <= hi && e.modeKind[m] == ModalPianoTable::boardMode
+                        && (best < 0 || level (m) > level ((size_t) best)))
+                        best = (int) m;
+                return best;
+            };
+            auto air = table.airHz;
+            if (const auto a = loudest (80.0f, 180.0f); a >= 0)
+            {
+                e.modeKind[(size_t) a] = ModalPianoTable::airMode;
+                air = e.modes[(size_t) a];
+                airs.push_back (air);
+            }
+            if (const auto t = loudest (1.8f * air, 2.8f * air); t >= 0)
+            {
+                e.modeKind[(size_t) t] = ModalPianoTable::topMode;
+                tops.push_back (e.modes[(size_t) t]);
+            }
+        }
+        const auto mostCommon = [] (std::vector<float> hz, float fallback)
+        {
+            if (hz.empty())
+                return fallback;
+            std::sort (hz.begin(), hz.end());
+            auto best = hz.front();
+            size_t bestRun = 0;
+            for (size_t i = 0; i < hz.size();)
+            {
+                auto j = i;
+                while (j < hz.size() && hz[j] == hz[i])
+                    ++j;
+                if (j - i > bestRun)
+                {
+                    bestRun = j - i;
+                    best = hz[i];
+                }
+                i = j;
+            }
+            return best;
+        };
+        if (table.guitarBody)
+        {
+            table.airHz = mostCommon (airs, table.airHz);
+            table.topHz = mostCommon (tops, table.topHz);
+        }
+    }
+
+    ModalPianoTable parse (const char* data, int size, bool guitarBody)
     {
         ModalPianoTable table;
         Reader in { reinterpret_cast<const unsigned char*> (data), (size_t) size };
@@ -223,6 +304,8 @@ namespace
         if (std::find (filled.begin(), filled.end(), false) != filled.end())
             return {};
         buildBodyCurve (table);
+        table.guitarBody = guitarBody;
+        classifyModes (table);
         for (auto& e : table.entries)
         {
             const auto n = juce::jmin (e.attack.size(), e.attackRight.size(), (size_t) (0.08 * table.rate));
@@ -230,6 +313,36 @@ namespace
             for (size_t i = 0; i < n; ++i)
                 power += 0.5 * ((double) e.attack[i] * e.attack[i] + (double) e.attackRight[i] * e.attackRight[i]);
             e.attackDb = (float) (10.0 * std::log10 (power / (double) juce::jmax ((size_t) 1, n)));
+
+            // Each partial's sine and cosine parts over 20-80 ms (Hann).
+            const auto lo = (size_t) (0.02 * table.rate), hi = juce::jmin (e.attack.size(), (size_t) (0.08 * table.rate));
+            if (hi <= lo + 16)
+                continue;
+            const auto f0 = 440.0 * std::exp2 ((e.note - 69) / 12.0);
+            e.attackSin.assign ((size_t) e.partials, 0.0f);
+            e.attackCos.assign ((size_t) e.partials, 0.0f);
+            for (int k = 0; k < e.partials; ++k)
+            {
+                const auto w = juce::MathConstants<double>::twoPi * e.ratios[(size_t) k] * f0 / table.rate;
+                if (w >= juce::MathConstants<double>::pi)
+                    break;
+                // (The sine and cosine by rotation: no sin/cos per sample.)
+                auto c = std::cos (w * (double) lo), s = std::sin (w * (double) lo);
+                const auto dc = std::cos (w), ds = std::sin (w);
+                auto sumSin = 0.0, sumCos = 0.0;
+                const auto span = (double) (hi - lo);
+                for (size_t i = lo; i < hi; ++i)
+                {
+                    const auto hann = 0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * (double) (i - lo) / span);
+                    sumSin += hann * e.attack[i] * s;
+                    sumCos += hann * e.attack[i] * c;
+                    const auto nc = c * dc - s * ds;
+                    s = s * dc + c * ds;
+                    c = nc;
+                }
+                e.attackSin[(size_t) k] = (float) sumSin;
+                e.attackCos[(size_t) k] = (float) sumCos;
+            }
         }
         return table;
     }
@@ -237,7 +350,7 @@ namespace
 
 const ModalPianoTable& ModalPianoTable::get()
 {
-    static const ModalPianoTable table = parse (WavetableData::modalpiano_bin, WavetableData::modalpiano_binSize);
+    static const ModalPianoTable table = parse (WavetableData::modalpiano_bin, WavetableData::modalpiano_binSize, false);
     return table;
 }
 
@@ -245,7 +358,7 @@ const ModalPianoTable& ModalPianoTable::guitar()
 {
     static const ModalPianoTable table = []
     {
-        auto t = parse (WavetableData::modalguitar_bin, WavetableData::modalguitar_binSize);
+        auto t = parse (WavetableData::modalguitar_bin, WavetableData::modalguitar_binSize, true);
         t.nearestAttack = true;
         return t;
     }();

@@ -816,33 +816,6 @@ private:
 // The right-hand cells of an oscillator's PITCH row: an oscillator in an FM
 // route says so in a chip in its source's colour (a link to the FM page), one
 // in none shows its output level as a bar.
-// The sample's name in the card header: a packed menu box ("SAMPLE  Rhodes C3.wav") whose click
-// opens the load menu instead of a list.
-class SampleNameBox : public juce::ComboBox
-{
-public:
-    SampleNameBox()
-    {
-        setInterceptsMouseClicks (true, false);
-        getProperties().set ("packedMenu", true);
-    }
-
-    std::function<void()> onPopup;
-    void showPopup() override { if (onPopup != nullptr) onPopup(); }
-
-    void setCaptionAndName (const juce::String& caption, const juce::String& name)
-    {
-        getProperties().set ("textPrefix", caption);
-        if (getText() != name)
-        {
-            clear (juce::dontSendNotification);
-            addItem (name, 1);
-            setSelectedId (1, juce::dontSendNotification);
-        }
-        repaint();
-    }
-};
-
 class OscStatusView : public juce::Component,
                       public juce::SettableTooltipClient
 {

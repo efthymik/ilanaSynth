@@ -53,6 +53,7 @@
 #include "gui/SubTabBar.h"
 #include "gui/TutorialOverlay.h"
 #include "gui/WaveDisplay.h"
+#include "gui/SampleNameBox.h"
 #include "gui/ModHoverPopup.h"
 #include "gui/StateTabs.h"
 #include "gui/ClipEditor.h"
