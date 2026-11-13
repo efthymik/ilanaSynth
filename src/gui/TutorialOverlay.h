@@ -26,6 +26,14 @@ public:
     static const std::vector<NewFeature>& whatsNew()
     {
         static const std::vector<NewFeature> list {
+            // (Newest first. UI review 30: the list had stopped at October's work.)
+            { "MODAL GUITAR + BOWED", "MAIN", "Two new Physical exciters, the last two icons: a measured nylon guitar and a bowed string. "
+                                              "SIZE flows violin, viola, cello; SCALE is the neck." },
+            { "VECTOR SHAPES", "VECTOR", "The pad takes the shape of the patch: a slider for two oscillators, a triangle for three, up to a hexagon for six." },
+            { "WARP 2 FM + RING", "MAIN", "WARP 2 can be FM, Ring or FM from Noise, and the wave picture now draws both warps." },
+            { "PATCH EDITING", "PATCH", "Drag over empty space to pick boxes; Ctrl+C, Ctrl+V and Ctrl+D copy them, Delete removes them in one undo step." },
+            { "PLAY FOLD", "MAIN", "The tab on the module block's top edge folds it away, so every oscillator shows at once." },
+            { "VULKAN", "MAIN", "The editor draws on the graphics card. If anything looks wrong, untick Vulkan rendering in the gear menu." },
             { "ONE-TAB PLAY", "MAIN", "The oscillators, filters, strings, west coast, envelopes, LFOs and the body are all on PLAY. "
                                       "The OSC, FILTER and MOD tabs are gone." },
             { "EDIT POP-UPS", "MAIN", "EDIT on the ENVELOPE or LFO card (or a click on a dock chip) opens that source's whole editor, on any page." },

@@ -876,6 +876,63 @@ public:
         startTimerHz (10);
     }
 
+    // (UI review 31, 29) The picture is a control too, as the filter, envelope and LFO graphs beside it: drag across
+    // for one of its card's two main knobs, up or down for the other (one drag, one undo step), Shift for fine;
+    // a double-click resets both. A ring marks where the two stand while the mouse is over it.
+    void setDragParameters (const juce::String& acrossId, const juce::String& upId)
+    {
+        acrossParameter = processorRef.apvts.getParameter (acrossId);
+        upParameter = processorRef.apvts.getParameter (upId);
+        const auto live = acrossParameter != nullptr || upParameter != nullptr;
+        setInterceptsMouseClicks (live, false);
+        setMouseCursor (live ? juce::MouseCursor::UpDownLeftRightResizeCursor : juce::MouseCursor::NormalCursor);
+        repaint();
+    }
+
+    void mouseEnter (const juce::MouseEvent&) override { repaint(); }
+    void mouseExit (const juce::MouseEvent&) override { repaint(); }
+
+    void mouseDown (const juce::MouseEvent&) override
+    {
+        beginDrag();
+        dragStart = { acrossParameter != nullptr ? acrossParameter->getValue() : 0.0f, upParameter != nullptr ? upParameter->getValue() : 0.0f };
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! dragging)
+            return;
+        // (A full sweep is the picture's size, at least 140 px: the small SUB and NOISE wells stay steady.)
+        const auto fine = e.mods.isShiftDown() ? 0.25f : 1.0f;
+        const auto offset = e.getOffsetFromDragStart().toFloat();
+        set (acrossParameter, dragStart.x + fine * offset.x / juce::jmax (140.0f, (float) getWidth()));
+        set (upParameter, dragStart.y - fine * offset.y / juce::jmax (140.0f, (float) getHeight()));
+    }
+
+    void mouseUp (const juce::MouseEvent&) override { endDrag(); }
+
+    void mouseDoubleClick (const juce::MouseEvent&) override
+    {
+        beginDrag();
+        for (auto* parameter : { acrossParameter, upParameter })
+            set (parameter, parameter != nullptr ? parameter->getDefaultValue() : 0.0f);
+        endDrag();
+    }
+
+    void paintOverChildren (juce::Graphics& g) override
+    {
+        if ((acrossParameter == nullptr && upParameter == nullptr) || ! (isMouseOverOrDragging() || dragging))
+            return;
+        const auto plot = getLocalBounds().toFloat().reduced (5.0f);
+        const auto x = acrossParameter != nullptr ? plot.getX() + acrossParameter->getValue() * plot.getWidth() : plot.getCentreX();
+        const auto y = upParameter != nullptr ? plot.getBottom() - upParameter->getValue() * plot.getHeight() : plot.getCentreY();
+        const auto ring = juce::Rectangle<float> (9.0f, 9.0f).withCentre ({ x, y });
+        g.setColour (IlanaTheme::Ui::well.withAlpha (0.8f));
+        g.fillEllipse (ring);
+        g.setColour (IlanaTheme::Ui::text);
+        g.drawEllipse (ring.reduced (1.0f), 1.5f);
+    }
+
 protected:
     float read (const char* id) const
     {
@@ -886,6 +943,42 @@ protected:
     IlanaSynthAudioProcessor& processorRef;
 
 private:
+    void beginDrag()
+    {
+        endDrag();
+        for (auto* parameter : { acrossParameter, upParameter })
+            if (parameter != nullptr)
+                parameter->beginChangeGesture();
+        dragging = acrossParameter != nullptr || upParameter != nullptr;
+    }
+
+    void endDrag()
+    {
+        if (! dragging)
+            return;
+        dragging = false;
+        for (auto* parameter : { acrossParameter, upParameter })
+            if (parameter != nullptr)
+                parameter->endChangeGesture();
+        repaint();
+    }
+
+    void set (juce::RangedAudioParameter* parameter, float normalised)
+    {
+        if (parameter == nullptr)
+            return;
+        // (Snapped to the parameter's own steps, as its knob is.)
+        const auto snapped = parameter->convertTo0to1 (parameter->convertFrom0to1 (juce::jlimit (0.0f, 1.0f, normalised)));
+        if (! juce::approximatelyEqual (snapped, parameter->getValue()))
+            parameter->setValueNotifyingHost (snapped);
+        repaint();
+    }
+
+    juce::RangedAudioParameter* acrossParameter = nullptr;
+    juce::RangedAudioParameter* upParameter = nullptr;
+    juce::Point<float> dragStart;
+    bool dragging = false;
+
     void timerCallback() override
     {
         auto signature = 0.0;
@@ -972,7 +1065,11 @@ class SubWaveDisplay : public ParamPicture
 {
 public:
     explicit SubWaveDisplay (IlanaSynthAudioProcessor& p)
-        : ParamPicture (p, { "sub_shape", "sub_octave", "subosc_on" }, "The sub oscillator's wave: sine, square or saw, an octave or two below the note.") {}
+        : ParamPicture (p, { "sub_shape", "sub_octave", "subosc_on", "subosc_level", "sub_colour" },
+                        "The sub oscillator's wave: sine, square or saw, an octave or two below the note.\nDrag: across for COLOUR, up or down for LEVEL. Double-click resets them.")
+    {
+        setDragParameters ("sub_colour", "subosc_level");
+    }
 
     void paint (juce::Graphics& g) override
     {
@@ -1006,7 +1103,11 @@ class NoiseColourDisplay : public ParamPicture
 {
 public:
     explicit NoiseColourDisplay (IlanaSynthAudioProcessor& p)
-        : ParamPicture (p, { "noise_type", "noise_on" }, "The noise colour's spectrum: low pitches left, high right.") {}
+        : ParamPicture (p, { "noise_type", "noise_on", "noise_level", "noise_color" },
+                        "The noise's spectrum, as high as its LEVEL: low pitches left, high right.\nDrag: across for COLOUR, up or down for LEVEL. Double-click resets them.")
+    {
+        setDragParameters ("noise_color", "noise_level");
+    }
 
     void paint (juce::Graphics& g) override
     {
@@ -1014,6 +1115,7 @@ public:
         IlanaTheme::paintWell (g, bounds, 4.0f);
         const auto plot = bounds.reduced (4.0f, 2.0f);
         const auto type = juce::jlimit (0, 5, juce::roundToInt (read ("noise_type")));
+        const auto level = juce::jlimit (0.0f, 1.0f, read ("noise_level"));
         const std::array<double, 6> slope { 0.0, -3.0, -6.0, 3.0, 6.0, 0.0 };
         juce::Path path;
         const auto steps = juce::jmax (16, (int) plot.getWidth());
@@ -1023,7 +1125,8 @@ public:
             auto db = slope[(size_t) type] * (x - 0.5) * 10.0;
             if (type == 5)
                 db = 9.0 * (std::cos (juce::MathConstants<double>::twoPi * x * 0.9 + 0.2) * 0.5 - 0.1);
-            const auto y = plot.getCentreY() - (float) juce::jlimit (-1.0, 1.0, db / 15.0) * plot.getHeight() * 0.5f;
+            // (UI review 31, 29: the spectrum stands as high as LEVEL, so LEVEL 0 reads as silence.)
+            const auto y = plot.getBottom() - level * (0.55f + 0.45f * (float) juce::jlimit (-1.0, 1.0, db / 15.0)) * plot.getHeight();
             const auto point = juce::Point<float> (plot.getX() + (float) x * plot.getWidth(), y);
             if (i == 0)
                 path.startNewSubPath (point);
@@ -1044,7 +1147,10 @@ class BoardResponseDisplay : public ParamPicture
 public:
     explicit BoardResponseDisplay (IlanaSynthAudioProcessor& p)
         : ParamPicture (p, { "sb_model", "sb_size", "sb_tone", "sb_on" },
-                        "The board's modes: low pitches left, each bar as tall as that mode rings. SIZE slides them, TONE darkens the top, MODEL Dense packs them closer.") {}
+                        "The board's modes: low pitches left, each bar as tall as that mode rings. SIZE slides them, TONE darkens the top, MODEL Dense packs them closer.\nDrag: across for SIZE, up or down for TONE. Double-click resets them.")
+    {
+        setDragParameters ("sb_size", "sb_tone");
+    }
 
     void paint (juce::Graphics& g) override
     {
@@ -1053,7 +1159,8 @@ public:
         const auto on = read ("sb_on") > 0.5f ? 1.0f : 0.45f;
         g.setColour (IlanaTheme::Ui::text3.withMultipliedAlpha (on));
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::packedLabel, true).withKerningFactor (0.09f));
-        g.drawText ("BOARD RESPONSE", bounds.reduced (6.0f, 3.0f), juce::Justification::topLeft, false);
+        // (UI review 31, 1: the tab above already says BOARD; "BOARD RESPONSE" lost its last letter in the well.)
+        IlanaTheme::drawFitted (g, "RESPONSE", bounds.reduced (6.0f, 3.0f).toNearestInt(), juce::Justification::topLeft);
 
         const auto plot = bounds.reduced (6.0f, 3.0f).withTrimmedTop (12.0f);
         const auto size = (double) juce::jlimit (0.0f, 1.0f, read ("sb_size"));
@@ -1094,15 +1201,19 @@ class StringsPicture : public ParamPicture
 public:
     explicit StringsPicture (IlanaSynthAudioProcessor& p)
         : ParamPicture (p, { "sym_on", "sym_amount", "sym_count", "sym_decay", "stretch", "pedal_res" },
-                        "The sympathetic strings: one line per string, as wide as they ring (AMOUNT), fading as fast as DECAY.") {}
+                        stringsTip)
+    {
+        setDragParameters ("sym_decay", "sym_amount");
+    }
 
     void setKeys (bool shouldShowKeys)
     {
         if (keys == shouldShowKeys)
             return;
         keys = shouldShowKeys;
-        setTooltip (keys ? "The piano string's partials: STRETCH pulls the upper ones sharp of the harmonic marks."
-                         : "The sympathetic strings: one line per string, as wide as they ring (AMOUNT), fading as fast as DECAY.");
+        setTooltip (keys ? "The piano string's partials: STRETCH pulls the upper ones sharp of the harmonic marks.\nDrag: across for STRETCH, up or down for RING. Double-click resets them."
+                         : stringsTip);
+        setDragParameters (keys ? "stretch" : "sym_decay", keys ? "pedal_res" : "sym_amount");
         repaint();
     }
 
@@ -1163,6 +1274,8 @@ public:
     }
 
 private:
+    static constexpr const char* stringsTip = "The sympathetic strings: one line per string, as wide as they ring (AMOUNT), fading as fast as DECAY.\n"
+                                              "Drag: across for DECAY, up or down for AMOUNT. Double-click resets them.";
     bool keys = false;
 };
 
@@ -1173,7 +1286,10 @@ class BodyPicture : public ParamPicture
 public:
     explicit BodyPicture (IlanaSynthAudioProcessor& p)
         : ParamPicture (p, { "res_on", "res_amount", "res_decay", "res_offset" },
-                        "The body's resonances: OFFSET tunes the peaks, DECAY sharpens them, AMOUNT raises them.") {}
+                        "The body's resonances: OFFSET tunes the peaks, DECAY sharpens them, AMOUNT raises them.\nDrag: across for DECAY, up or down for AMOUNT. Double-click resets them.")
+    {
+        setDragParameters ("res_decay", "res_amount");
+    }
 
     void paint (juce::Graphics& g) override
     {
@@ -1685,14 +1801,18 @@ public:
         addAndMakeVisible (boardTab);
         bodyOn = bareSwitch ("res_on", bodyColour(), "BODY on or off: the oscillator mix excites a resonant body");
         boardOn = bareSwitch ("sb_on", bodyColour(), "SOUNDBOARD on or off: a wooden board under the whole voice");
-        bodyType = menuFor ("body_type", "TYPE", "BODY TYPE\nClassic, bar, plate, bell, shell or guitar.");
-        bodyCoupling = menuFor ("body_coupling_mode", "COUPLING", "COUPLING\nWhich way the strings and the body push on each other.");
+        // (UI review 31, 20: in the header beside the two switches, where only the values fit: the coupling's
+        // say what they are, and the tooltips name both menus.)
+        bodyType = menuFor ("body_type", {}, "BODY TYPE\nClassic, bar, plate, bell, shell or guitar.");
+        bodyCoupling = menuFor ("body_coupling_mode", {}, "COUPLING\nWhich way the strings and the body push on each other.");
         {
             auto& box = bodyCoupling->getComboBox();
             const auto selectedId = box.getSelectedId();
             const auto arrow = juce::String::fromUTF8 (" \xe2\x86\x92 ");
+            box.changeItemText (1, "No coupling");
             box.changeItemText (2, "String" + arrow + "body");
             box.changeItemText (3, "Body" + arrow + "string");
+            box.changeItemText (4, juce::String::fromUTF8 ("String \xe2\x86\x94 string"));
             box.setSelectedId (selectedId, juce::dontSendNotification);
         }
         for (const auto& spec : { std::pair<const char*, const char*> { "res_amount", "AMOUNT" }, { "res_decay", "DECAY" }, { "body_coupling", "COUPLE" },
@@ -2504,8 +2624,11 @@ private:
         // (Cells a knob wide, the last one at the card's edge: its ring's ink then sits 6 px in, as the picture's does.)
         // (ilana, 2026-10-29: "f1/2 looks cramped vs west": three columns as wide as WEST's four, so the graph keeps one
         // width on every tab.)
-        const auto knobsX = card.getRight() - 2 * filterPitch - cell;
-        filterDisplay.setBounds (juce::Rectangle<int> (card.getX() + 6, body.getY() + 1, knobsX - gapToKnobs - card.getX() - 6, body.getHeight() - 2));
+        // (UI review 31, 8: the columns centred between the graph and the border, the dials' rings 4 px from either,
+        // so DRIVE's modulation ring no longer ends on the border and the card's ink keeps even margins.)
+        const auto knobsX = card.getRight() - 4 - 2 * filterPitch - cell + (cell - (int) dialSize) / 2;
+        const auto graphRight = knobsX + (cell - (int) dialSize) / 2 - 4;
+        filterDisplay.setBounds (juce::Rectangle<int> (card.getX() + 6, body.getY() + 1, graphRight - card.getX() - 6, body.getHeight() - 2));
         // (The rows at the body's top and bottom, as WEST's: ilana liked its spacing, F1 / F2's rows stood too close.)
         const auto filterRow1 = body.getY() + 1, filterRow2 = body.getBottom() - 1 - (int) dialSize - 10;
         const auto filterCell = [&] (int slot)
@@ -2544,40 +2667,66 @@ private:
         }
     }
 
-    // STRINGS and KEYS (ilana, 2026-10-29: no empty space): the picture at the left, a grid of three columns at the
-    // right. STRINGS: AMOUNT COUNT DECAY, then TUNING (AUTO / MANUAL over NOTES). KEYS: STRETCH and RING, then KEY
-    // DAMPER PEDAL under one NOISE name.
+    // STRINGS and KEYS (ilana, 2026-10-29: no empty space): the picture at the left, the knobs at the right.
+    // STRINGS (UI review 31, 20): TUNING's AUTO / MANUAL and NOTES in the header, AMOUNT COUNT DECAY one row of bigger
+    // dials in the body's full height. KEYS: STRETCH and RING, then KEY DAMPER PEDAL under one NOISE name.
+    // (Both centred between the picture and the border, UI review 31, 8.)
     void layoutStringsCard()
     {
         const auto card = stringsBounds;
         const auto centre = card.getY() + headerHeight / 2;
         stringsTabs.setBounds ({ card.getX() + 22, centre - 8, stringsTabs.idealWidth(), 16 });
         stringsOn->setBounds (switchIn (card));
+        const auto notesW = 58, manualW = 84;
+        tuneButton.setBounds ({ stringsOn->getX() - 8 - notesW, centre - 8, notesW, 16 });
+        stringsManual->setBounds ({ tuneButton.getX() - 4 - manualW, centre - 8, manualW, 16 });
+        // (No room for a TUNING word beside the tabs: the pills' tooltips name it.)
+        tuningGroup = {};
+
         const auto body = card.withTrimmedTop (headerHeight).reduced (0, 3);
-        const auto left = card.getRight() - 2 * stringsPitch - cell;
-        stringsPicture->setBounds ({ card.getX() + 6, body.getY() + 1, left - gapToKnobs - card.getX() - 6, body.getHeight() - 2 });
+        const auto pictureRight = card.getRight() - rightColumnWidth;
+        stringsPicture->setBounds ({ card.getX() + 6, body.getY() + 1, pictureRight - card.getX() - 6, body.getHeight() - 2 });
+        placeBigRow (stringsKnobs, pictureRight, card.getRight(), body);
+
         const auto knobH = (int) dialSize + 10;
+        const auto left = centredColumnsX (pictureRight, card.getRight(), 3, stringsPitch);
         const auto column = [left] (float i) { return left + juce::roundToInt (i * (float) stringsPitch); };
         const auto place = [knobH] (KnobControl& knob, int x, int y) { knob.setBounds (KnobControl::packedBoundsFor ({ x, y, cell, knobH })); };
         const auto row1 = body.getY() + 1, row2 = body.getBottom() - 1 - knobH;
-        // (TUNING sits centred between the knob names and AUTO / MANUAL: centred on the KEYS row's gap it stood
-        // 6 px under COUNT, UI review 27.)
-        const auto manualTop = body.getBottom() - 1 - 33;
-        const auto groupY = row1 + knobH + (manualTop - (row1 + knobH) - 10) / 2;
-        for (size_t i = 0; i < stringsKnobs.size(); ++i)
-            place (*stringsKnobs[i], column ((float) i), row1);
         place (*keysKnobs[0], column (0.5f), row1);
         place (*keysKnobs[1], column (1.5f), row1);
         for (size_t i = 2; i < keysKnobs.size(); ++i)
             place (*keysKnobs[i], column ((float) i - 2.0f), row2);
+        // (NOISE centred between the knob names and the lower row.)
         const auto groupW = 2 * stringsPitch + cell;
-        tuningGroup = { left, groupY, groupW, 10 };
-        noiseGroup = { left, groupY, groupW, 10 };
-        // (TUNING's two lines end where the knob row's names would.)
-        stringsManual->setBounds ({ left + 3, manualTop, groupW - 6, 15 });
-        tuneButton.setBounds ({ left + 3, body.getBottom() - 1 - 15, groupW - 6, 15 });
+        noiseGroup = juce::Rectangle<int> (left, row1 + knobH + (row2 - (row1 + knobH) - 10) / 2, groupW, 10).reduced (3, 0);
     }
 
+    // The right-hand column of STRINGS and BOARD (one width, so the two pictures line up): three dials of
+    // bigDial at bigPitch, centred with 7 px either side for the modulation rings.
+    static constexpr int bigDial = 36, bigPitch = 42, rightColumnWidth = 2 * bigPitch + bigDial + 2 * 7;
+
+    void placeBigRow (std::vector<std::unique_ptr<KnobControl>>& knobs, int fromX, int toX, juce::Rectangle<int> body)
+    {
+        const auto bigCell = bigPitch, knobH = bigDial + 10; // (cells side by side, the dial centred in each)
+        const auto first = (fromX + toX) / 2 - ((int) knobs.size() - 1) * bigPitch / 2 - bigCell / 2;
+        const auto y = body.getCentreY() - (knobH - KnobControl::packedPadTop) / 2;
+        for (size_t i = 0; i < knobs.size(); ++i)
+        {
+            knobs[i]->setPackedDial ((float) bigDial);
+            knobs[i]->setBounds (KnobControl::packedBoundsFor ({ first + (int) i * bigPitch, y, bigCell, knobH }));
+        }
+    }
+
+    // The x of the first of `count` knob cells at `pitch`, centred between two edges.
+    static int centredColumnsX (int fromX, int toX, int count, int pitch)
+    {
+        return (fromX + toX) / 2 - ((count - 1) * pitch + cell) / 2;
+    }
+
+    // BODY · BOARD (UI review 31, 20): the view's menus in the header, right of the two switches. BODY: TYPE and
+    // COUPLING, its response across the card over the seven knobs in one centred row. BOARD: MODEL, its response
+    // (as wide as the STRINGS picture above) beside SIZE TONE MIX in one row.
     void layoutBodyCard()
     {
         const auto card = bodyBounds;
@@ -2590,37 +2739,41 @@ private:
         boardTab.setBounds ({ x, centre - 8, boardTab.idealWidth(), 16 });
         x += boardTab.getWidth() + 4;
         boardOn->setBounds ({ x, centre - 8, 28, 16 });
+        x += 28 + 4;
 
-        // The picture at the left (ilana, 2026-10-29: no empty space), one grid of five columns at 42 px at the right,
-        // two rows; every name inside its menu or under its knob.
+        const auto right = card.getRight() - 4;
+        const auto couplingW = juce::jmin (couplingMenuWidth(), right - x);
+        bodyCoupling->setBounds ({ right - couplingW, centre - 8, couplingW, 16 });
+        // (+10: at 75 % the text floor makes the words wider than at the design size.)
+        const auto typeW = packedMenuWidth ({}, { "Classic", "Bar", "Plate", "Bell", "Shell", "Guitar" }) + 10;
+        bodyType->setBounds ({ juce::jmax (x, bodyCoupling->getX() - 3 - typeW), centre - 8, juce::jmin (typeW, bodyCoupling->getX() - 3 - x), 16 });
+        const auto modelW = juce::jmin (packedMenuWidth ("MODEL", { "Classic", "Dense" }) + 4, right - x);
+        boardModel->setBounds ({ right - modelW, centre - 8, modelW, 16 });
+
         const auto top = card.getY() + headerHeight;
-        // (9 px in from the edge: KEY TRACK is wider than its cell and touched the card's border, UI reviews 27 and 28;
-        // its name now ends as far from the border as the other cards' last names.)
-        const auto left = card.getRight() - 9 - 4 * bodyPitch - cell;
-        const auto pictureBounds = juce::Rectangle<int> (card.getX() + 6, top + 4, left - gapToKnobs - card.getX() - 6, card.getBottom() - 4 - top - 4);
-        bodyPicture->setBounds (pictureBounds);
-        const auto column = [left] (int i) { return left + i * bodyPitch; };
-        // (Rows from the top and from the bottom: the second row's names end 3 px above the card's edge at any band height.)
-        const auto row1 = top + 3, row2 = card.getBottom() - 3 - (int) dialSize - 10;
-        const auto place = [] (KnobControl& knob, int knobX, int y) { knob.setBounds (KnobControl::packedBoundsFor ({ knobX, y, cell, (int) dialSize + 10 })); };
-        const auto spanTo = [&column] (int last) { return column (last) + cell - column (0); };
+        const auto body = card.withTrimmedTop (headerHeight).reduced (0, 3);
+        // BODY: the knobs at the foot, their names 3 px above the card's edge; the response fills the rest.
+        const auto rowY = card.getBottom() - 3 - (int) dialSize - 10;
+        const auto first = centredColumnsX (card.getX(), card.getRight(), (int) bodyKnobs.size(), bodyPitch);
+        // (AMOUNT DECAY, then MATERIAL SIZE COUPLE OFFSET KEY TRACK, the old two rows' reading order.)
+        const std::array<size_t, 7> order { 0, 1, 3, 4, 2, 5, 6 };
+        for (size_t i = 0; i < order.size(); ++i)
+            bodyKnobs[order[i]]->setBounds (KnobControl::packedBoundsFor ({ first + (int) i * bodyPitch, rowY, cell, (int) dialSize + 10 }));
+        bodyPicture->setBounds ({ card.getX() + 6, top + 4, card.getWidth() - 12, rowY - KnobControl::packedPadTop - 3 - (top + 4) });
 
-        // BODY: TYPE over COUPLING beside AMOUNT and DECAY; then MATERIAL, SIZE, COUPLE, OFFSET, KEY TRK.
-        bodyType->setBounds ({ column (0), top + 4, spanTo (2), 16 });
-        bodyCoupling->setBounds ({ column (0), top + 23, spanTo (2), 16 });
-        place (*bodyKnobs[0], column (3), row1);
-        place (*bodyKnobs[1], column (4), row1);
-        const std::array<size_t, 5> second { 3, 4, 2, 5, 6 };
-        for (size_t i = 0; i < second.size(); ++i)
-            place (*bodyKnobs[second[i]], column ((int) i), row2);
+        // BOARD
+        const auto pictureRight = card.getRight() - rightColumnWidth;
+        boardResponse->setBounds ({ card.getX() + 6, top + 4, pictureRight - card.getX() - 6, card.getBottom() - 4 - top - 4 });
+        placeBigRow (boardKnobs, pictureRight, card.getRight(), body);
+    }
 
-        // BOARD: its response in the picture's place; MODEL (as wide as BODY's menus) beside TONE and MIX, SIZE under
-        // MODEL's middle.
-        boardResponse->setBounds (pictureBounds);
-        boardModel->setBounds ({ column (0), row1 + (int) dialSize / 2 - 8, spanTo (2), 16 });
-        place (*boardKnobs[1], column (3), row1);
-        place (*boardKnobs[2], column (4), row1);
-        place (*boardKnobs[0], column (1), row2);
+    int couplingMenuWidth() const
+    {
+        juce::StringArray values;
+        const auto& box = bodyCoupling->getComboBox();
+        for (int i = 0; i < box.getNumItems(); ++i)
+            values.add (box.getItemText (i));
+        return packedMenuWidth ({}, values) + 4;
     }
 
     void layoutSubNoise()
@@ -2737,7 +2890,7 @@ private:
     }
 
     // (UI review 26: FILTER back to mockup v4's width, its graph about 290 px; the knobs at 33 and WEST at 41 give the room.)
-    static constexpr int westPitch = 42, stringsPitch = 43, bodyPitch = 42, filterPitch = 52, gapToKnobs = 5;
+    static constexpr int westPitch = 42, stringsPitch = 43, bodyPitch = 42, filterPitch = 50, gapToKnobs = 5;
 
     IlanaSynthAudioProcessor& processorRef;
     EffectRules effectRules { processorRef };

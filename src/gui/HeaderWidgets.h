@@ -164,7 +164,9 @@ public:
         {
             // SAVE, the header's one main action (.btn.pri): the accent solid
             // with dark text, 8 px corners.
-            g.setColour (accent().brighter (0.12f * hovered).withMultipliedBrightness (isDown ? 0.9f : 1.0f));
+            // (On the two-colour skin, its gradient left to right.)
+            const auto shade = [&] (juce::Colour c) { return c.brighter (0.12f * hovered).withMultipliedBrightness (isDown ? 0.9f : 1.0f); };
+            g.setGradientFill (juce::ColourGradient (shade (accentAt (0.0f)), bounds.getTopLeft(), shade (accentAt (1.0f)), bounds.getTopRight(), false));
             g.fillRoundedRectangle (bounds, 8.0f);
         }
         else if (! flat)
@@ -306,6 +308,29 @@ public:
         });
     }
 
+    // The tuning's name while a scale (or MTS-ESP) retunes the notes, shown
+    // after the category ("BASS · 19-TET"); empty in 12-TET. A click on it
+    // opens the tuning menu, its tooltip says what it is.
+    std::function<void()> onTuningClick;
+
+    void setTuning (const juce::String& newTuning, const juce::String& newTip)
+    {
+        if (newTuning == tuning && newTip == tuningTip)
+            return;
+        tuning = newTuning;
+        tuningTip = newTip;
+        repaint();
+    }
+
+    juce::String getTuning() const { return tuning; }
+
+    juce::String getTooltip() override
+    {
+        if (tuning.isNotEmpty() && ! tuningBounds.isEmpty() && tuningBounds.contains (getMouseXYRelative()))
+            return tuningTip;
+        return juce::SettableTooltipClient::getTooltip();
+    }
+
     juce::String getNotice() const { return notice; }
     bool isShowingModified() const { return isModified; }
 
@@ -369,8 +394,33 @@ public:
         // (The sheet's .nm i: 9 px bold, tracked 0.1 em, always in the accent.)
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true).withKerningFactor (0.1f));
         g.setColour (IlanaTheme::accent());
-        g.drawText (notice.isNotEmpty() ? notice : categoryText + (isModified ? juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 EDITED")) : juce::String()),
-                    categoryRow, juce::Justification::centredLeft);
+        const auto dot = juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 "));
+        const auto edited = isModified ? dot + "EDITED" : juce::String();
+        tuningBounds = {};
+
+        if (notice.isNotEmpty() || tuning.isEmpty())
+        {
+            g.drawText (notice.isNotEmpty() ? notice : categoryText + edited, categoryRow, juce::Justification::centredLeft);
+        }
+        else
+        {
+            // "BASS · 19-TET · EDITED": the tuning between, in the light text
+            // colour (it is a button), cut to the room the live wave leaves.
+            const auto rowFont = juce::Font (IlanaTheme::font (IlanaTheme::TextSize::tiny, true).withKerningFactor (0.1f));
+            auto row = categoryRow;
+            const auto lead = categoryText + dot;
+            g.drawText (lead, row.removeFromLeft (juce::GlyphArrangement::getStringWidthInt (rowFont, lead) + 1), juce::Justification::centredLeft);
+            const auto editedWidth = edited.isNotEmpty() ? juce::GlyphArrangement::getStringWidthInt (rowFont, edited) + 1 : 0;
+            const auto tuningText = tuning.toUpperCase();
+            const auto tuningWidth = juce::jmin (juce::GlyphArrangement::getStringWidthInt (rowFont, tuningText) + 1,
+                                                 juce::jmax (0, juce::jmin (row.getWidth(), tuningRoom) - editedWidth));
+            tuningBounds = row.removeFromLeft (tuningWidth);
+            g.setColour (tuningHover ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2);
+            IlanaTheme::drawFitted (g, tuningText, tuningBounds, juce::Justification::centredLeft, 1, IlanaTheme::TextSize::tiny);
+            g.setColour (IlanaTheme::accent());
+            g.setFont (rowFont);
+            g.drawText (edited, row, juce::Justification::centredLeft);
+        }
 
         g.setColour (IlanaTheme::Ui::text);
         g.setFont (IlanaTheme::font (nameSize, true));
@@ -429,11 +479,54 @@ public:
     }
 
     void mouseEnter (const juce::MouseEvent&) override { hover = true; repaint(); }
-    void mouseExit (const juce::MouseEvent&) override { hover = false; repaint(); }
+    void mouseExit (const juce::MouseEvent&) override { hover = false; tuningHover = false; repaint(); }
+
+    void mouseMove (const juce::MouseEvent& event) override
+    {
+        const auto over = tuning.isNotEmpty() && tuningBounds.contains (event.getPosition());
+        if (over != tuningHover)
+        {
+            tuningHover = over;
+            setMouseCursor (over ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+            repaint();
+        }
+    }
+
+    // The wheel over the name steps through the presets (UI review 31, item
+    // 25: the one place the wheel does neither scroll a page nor need Ctrl
+    // for a knob). Down is the next preset. A trackpad's small steps add up
+    // to one notch, and a fling steps at most one preset per 150 ms; the
+    // editor's step asks first over an edited patch, as the arrows do.
+    std::function<void (int delta)> onWheelStep;
+
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
+    {
+        if (onWheelStep == nullptr)
+            return;
+
+        const auto now = juce::Time::getMillisecondCounter();
+        if (now - lastWheel > 400)
+            wheelSum = 0.0f;
+        lastWheel = now;
+        wheelSum += wheel.isReversed ? -wheel.deltaY : wheel.deltaY;
+
+        // (A mouse's notch is one step whatever its size; a trackpad's glide adds up.)
+        if (wheelSum == 0.0f || (wheel.isSmooth && std::abs (wheelSum) < 0.15f) || now - lastWheelStep < 150)
+            return;
+
+        const auto delta = wheelSum > 0.0f ? -1 : 1;
+        wheelSum = 0.0f;
+        lastWheelStep = now;
+        onWheelStep (delta);
+    }
 
     void mouseUp (const juce::MouseEvent& event) override
     {
-        if (event.mouseWasClicked() && onClick != nullptr)
+        if (! event.mouseWasClicked())
+            return;
+        if (tuning.isNotEmpty() && tuningBounds.contains (event.getPosition()) && onTuningClick != nullptr)
+            onTuningClick();
+        else if (onClick != nullptr)
             onClick();
     }
 
@@ -441,7 +534,7 @@ private:
     static juce::String tipFor (const juce::String& presetName)
     {
         return (presetName.isNotEmpty() ? presetName : juce::String ("Preset"))
-               + "\nClick to browse presets. Use the arrows to step through them.";
+               + "\nClick to browse presets (Ctrl+F). Use the arrows or the mouse wheel to step through them.";
     }
 
     // The preset name is the header's centrepiece: a size up from the type
@@ -454,6 +547,12 @@ private:
     int noticeCount = 0;
     bool hover = false;
     float flash = 0.0f;
+    float wheelSum = 0.0f;
+    juce::String tuning, tuningTip;
+    juce::Rectangle<int> tuningBounds; // (where paint put it, for the click and the tip)
+    bool tuningHover = false;
+    static constexpr int tuningRoom = 150; // (the category line runs under the live wave past this)
+    juce::uint32 lastWheel = 0, lastWheelStep = 0;
 };
 
 // The header's compare switch (A/B stays in the header, a settled
@@ -463,6 +562,26 @@ class ABButton : public juce::TextButton
 {
 public:
     ABButton() : juce::TextButton ("A") {}
+
+    // Right-click: the copy menu (UI review 31, item 24), not a flip.
+    std::function<void()> onMenu;
+
+    void mouseDown (const juce::MouseEvent& event) override
+    {
+        if (event.mods.isPopupMenu())
+        {
+            if (onMenu != nullptr)
+                onMenu();
+            return;
+        }
+        juce::TextButton::mouseDown (event);
+    }
+
+    void mouseUp (const juce::MouseEvent& event) override
+    {
+        if (! event.mods.isPopupMenu())
+            juce::TextButton::mouseUp (event);
+    }
 
     void paintButton (juce::Graphics& g, bool isHighlighted, bool isDown) override
     {
@@ -491,7 +610,8 @@ public:
                 g.fillRect (onB ? left : right);
             }
 
-            g.setColour (IlanaTheme::accent());
+            // (The tile takes the two-colour skin's gradient across the whole button, so it shifts as it slides.)
+            g.setGradientFill (IlanaTheme::accentGradient (bounds.getTopLeft(), bounds.getTopRight()));
             g.fillRect (left.withX (left.getX() + side * left.getWidth()));
         }
 

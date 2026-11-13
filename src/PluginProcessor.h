@@ -329,6 +329,11 @@ public:
     // changes and macro rewiring over the recipe, applied before the trims.
     // Off in tests that check what a recipe itself loads.
     static inline bool presetVoicingEnabled = true;
+    // A voicing line that clears a slot's source (modN_src=0) leaves its
+    // destination and amount: an inert route the matrix listed as "None >".
+    // loadFactoryPreset clears such slots as its last step (UI review 31,
+    // item 5). Off only in the test that checks this changes no sound.
+    static inline bool clearSourcelessRoutes = true;
     static void applyPresetVoicing (const char* presetName, std::vector<std::pair<juce::String, float>>& values,
                                     std::array<juce::String, 4>& macroNames);
     static void applyPresetTrims (const char* presetName, const juce::String& category,
@@ -422,11 +427,28 @@ public:
     static int migrateDenseBoardMix (const std::function<float (const juce::String&, float)>& get,
                                      const std::function<void (const juce::String&, float)>& set,
                                      bool mixKnob = true);
+    // Since 2026-11-12 the Dense board's MIX fades its colour in over the knob's
+    // first DenseSoundboard::colourReach (0 % is a true bypass) and its wood over
+    // the rest: a patch on the Dense board from before gets MIX moved to
+    // colourReach + MIX x (1 - colourReach), and every route or macro into MIX
+    // scaled by (1 - colourReach), so it sounds the same. Returns 1 if it changed.
+    // classic true does the same for a patch on the Classic board (its MIX
+    // works that way since boardMixSchema 5).
+    static int migrateDenseBoardBypass (const std::function<float (const juce::String&, float)>& get,
+                                        const std::function<void (const juce::String&, float)>& set,
+                                        bool classic = false);
     // GLIDE took 16 times its knob's time until 2026-11 (Voice::glideCoeff):
     // a patch or factory recipe from before gets GLIDE x16 (at most the knob's
     // 2 s), and its routes and macros into GLIDE reach as far in seconds, so
     // it glides as it did. Returns how many values it changed.
     static int migrateGlideTime (const std::function<float (const juce::String&, float)>& get,
+                                 const std::function<void (const juce::String&, float)>& set);
+    // The material bodies' levels changed on 2026-11-13 (MaterialBody: the
+    // Guitar body was 20-60 dB quiet, short notes lost level as DECAY rose,
+    // String to body at COUPLE 0 fed the body 14 dB down): a patch or factory
+    // recipe on a material body from before gets body_legacy_level on, so it
+    // sounds as it did. Returns 1 if it set it.
+    static int migrateBodyLevel (const std::function<float (const juce::String&, float)>& get,
                                  const std::function<void (const juce::String&, float)>& set);
     // The same on the live parameters (after a bounce or a factory preset).
     void migrateOperatorModes();
@@ -483,6 +505,14 @@ public:
     float getLfoCurveValue (int lfoIndex, double phase) const;
 
     void triggerPreviewNote (int midiNote, bool isOn, float velocity = 0.7f);
+    // The keyboard strip's wheels and the performance sources' pop-up bar
+    // (UI review 31, item 28): the value goes to the next block as the MIDI
+    // message a hardware wheel would send (CC 1, pitch bend, channel
+    // pressure), on channel 1 at the block's start. Lock-free; the newest
+    // value wins. Nothing is sent until one is moved.
+    void sendUiModWheel (float value) { uiModWheel.store (juce::jlimit (0, 127, juce::roundToInt (value * 127.0f))); }
+    void sendUiPitchBend (float value) { uiPitchBend.store (juce::jlimit (0, 16383, 8192 + juce::roundToInt (value * 8191.0f))); }
+    void sendUiPressure (float value) { uiPressure.store (juce::jlimit (0, 127, juce::roundToInt (value * 127.0f))); }
     void panic() { synth.allNotesOff (0, false); }
 
     // A whole patch's parameters swapped in under playing notes (the A/B
@@ -510,6 +540,14 @@ public:
     int getActiveVoiceCount() const { return activeVoiceCount.load(); }
     // Voices still rendering, tails included (getActiveVoiceCount counts only
     // those with their envelopes up). Audio thread or tests only.
+    // The voice playing `note`, or nullptr. Tests only.
+    const Voice* voicePlayingForTest (int note) const
+    {
+        for (int i = 0; i < synth.getNumVoices(); ++i)
+            if (synth.getVoice (i)->isVoiceActive() && synth.getVoice (i)->getCurrentlyPlayingNote() == note)
+                return dynamic_cast<const Voice*> (synth.getVoice (i));
+        return nullptr;
+    }
     int getRenderingVoiceCount() const
     {
         auto count = 0;
@@ -967,6 +1005,12 @@ public:
     // TIME's engines: copies still rendering, for the sample card.
     int getStretchRendersPending() const { return stretchRenderer != nullptr ? stretchRenderer->pendingCount() : 0; }
     void flushAsyncUpdates();
+    // A private renderer (bounce, resampled preset) runs its async updates only
+    // on the thread that owns it, through flushAsyncUpdates. The message
+    // thread's delivery of the same update is ignored: it raced the bounce
+    // thread on the renderer (sample loads taken from under it, oversampling
+    // rebuilt mid-render).
+    void keepAsyncUpdatesOnThisThread() { asyncOwnerThread.store (juce::Thread::getCurrentThreadId()); }
 
     // M8.6: resample to oscillator. The patch plays one note on a copy of
     // the processor, off the audio thread, and the result lands on an
@@ -1469,6 +1513,7 @@ private:
     std::array<ParamRef, Mod::numMacros> macroIds;
     std::array<std::pair<ParamRef, ParamRef>, Mod::numMacros> evolveIds;
     std::array<std::pair<ParamRef, ParamRef>, numVectorPoints> vectorPathIds;
+    ParamRef vectorSyncRef { "vec_sync" }, vectorDivRef { "vec_div" };
     std::array<LfoSmoother, (size_t) numLfos> lfoSmoothers;
     std::array<bool, (size_t) numLfos> lfoRoutedB {};
     std::array<std::atomic<float>, (size_t) numLfos> lfoLastValuesB {};
@@ -1553,6 +1598,7 @@ private:
     std::array<std::array<float, LfoCurve::tableSize>, (size_t) numLfos> lfoCurveTables {};
     std::array<std::array<float, LfoCurve::tableSize>, (size_t) numLfos> activeLfoCurveTables {};
     mutable juce::SpinLock lfoShapeLock;
+    std::atomic<juce::Thread::ThreadID> asyncOwnerThread { nullptr }; // keepAsyncUpdatesOnThisThread
 
     using RemapTable = std::array<float, (size_t) Mod::remapSize + 1>;
     std::array<LfoCurve, (size_t) Mod::maxSlots> modRemaps;
@@ -1571,6 +1617,8 @@ private:
     static constexpr int previewQueueSize = 128;
     juce::AbstractFifo previewFifo { previewQueueSize };
     std::array<PreviewEvent, (size_t) previewQueueSize> previewEvents {};
+    // The wheels' values waiting for the next block (-1: none).
+    std::atomic<int> uiModWheel { -1 }, uiPitchBend { -1 }, uiPressure { -1 };
     std::atomic<float> cpuUsage { 0.0f };
     std::atomic<int> activeVoiceCount { 0 };
     std::atomic<int> macroLearn { -1 };

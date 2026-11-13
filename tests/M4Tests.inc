@@ -333,7 +333,7 @@ void runM4Tests()
                 {
                     auto right = left;
                     for (size_t start = 0; start < left.size(); start += 256)
-                        board.process (left.data() + start, right.data() + start, 256, &left == &out[0] ? 0.0f : mix, 0.5f, 0.5f);
+                        board.process (left.data() + start, right.data() + start, 256, &left == &out[0] ? DenseSoundboard::colourReach : mix, 0.5f, 0.5f);
                     board.reset();
                 }
                 auto added = 0.0, total = 0.0;
@@ -346,6 +346,46 @@ void runM4Tests()
             };
             check (woodAdded (1.0f) > -8.0, "the Dense board's MIX at 100 % adds wood you can hear");
 
+            // MIX 0 % is a true bypass (2026-11-12, ilana: "when using it on 0% it
+            // still changes the sound"): the colour fades in over the knob's first
+            // quarter, from nothing.
+            {
+                DenseSoundboard board;
+                board.prepare (48000.0);
+                juce::Random random (2);
+                std::vector<float> left (4096), right (4096);
+                for (size_t i = 0; i < left.size(); ++i)
+                    left[i] = right[i] = random.nextFloat() - 0.5f;
+                const auto dry = left;
+                for (size_t start = 0; start < left.size(); start += 256)
+                    board.process (left.data() + start, right.data() + start, 256, 0.0f, 0.8f, 0.3f);
+                check (left == dry && right == dry, "the Dense board at MIX 0 % leaves the sound untouched");
+                const auto change = [] (float mix)
+                {
+                    DenseSoundboard b;
+                    b.prepare (48000.0);
+                    juce::Random r (3);
+                    std::vector<float> l (16384), rr;
+                    for (auto& x : l)
+                        x = r.nextFloat() - 0.5f;
+                    const auto d = l;
+                    rr = l;
+                    for (size_t start = 0; start < l.size(); start += 256)
+                        b.process (l.data() + start, rr.data() + start, 256, mix, 0.5f, 0.5f);
+                    auto diff = 0.0, total = 0.0;
+                    for (size_t i = 4096; i < l.size(); ++i)
+                    {
+                        diff += std::pow ((double) l[i] - d[i], 2.0);
+                        total += std::pow ((double) d[i], 2.0);
+                    }
+                    return 10.0 * std::log10 (diff / total + 1.0e-12);
+                };
+                const auto at2 = change (0.02f), at10 = change (0.10f), at25 = change (DenseSoundboard::colourReach);
+                check (at2 < at10 && at10 < at25 && at2 < -15.0,
+                       "the Dense board's colour fades in with MIX from 0 % (" + juce::String (at2, 1) + " / "
+                           + juce::String (at10, 1) + " / " + juce::String (at25, 1) + " dB)");
+            }
+
             // A patch saved before keeps its wood: MIX loads divided by the new reach.
             IlanaSynthAudioProcessor source, target;
             setParam (source, "sb_on", 1.0f);
@@ -354,7 +394,7 @@ void runM4Tests()
             auto old = source.captureWholePatch();
             old.removeProperty ("boardMixSchema", nullptr);
             target.restoreWholePatch (old);
-            check (std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.1f) < 0.002f,
+            check (std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.325f) < 0.002f,
                    "a Dense patch saved before the MIX change loads with MIX scaled to sound the same");
             target.restoreWholePatch (source.captureWholePatch());
             check (std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.56f) < 0.002f,
@@ -372,7 +412,7 @@ void runM4Tests()
                 auto routedOld = routed.captureWholePatch();
                 routedOld.removeProperty ("boardMixSchema", nullptr);
                 target.restoreWholePatch (routedOld);
-                check (std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.05f) < 0.002f,
+                check (std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.0375f) < 0.002f,
                        "a route into a Dense patch's MIX saved before loads scaled with the MIX");
                 target.restoreWholePatch (routed.captureWholePatch());
                 check (std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.28f) < 0.002f,
@@ -382,15 +422,23 @@ void runM4Tests()
                 auto halfMigrated = routed.captureWholePatch();
                 halfMigrated.setProperty ("boardMixSchema", 2, nullptr);
                 target.restoreWholePatch (halfMigrated);
-                check (std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.05f) < 0.002f
-                           && std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.56f) < 0.002f,
-                       "a Dense patch stamped schema 2 gets its MIX routes divided once and keeps its MIX");
+                check (std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.0375f) < 0.002f
+                           && std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.67f) < 0.002f,
+                       "a Dense patch stamped schema 2 gets its MIX routes divided once and its MIX only moved up");
                 const auto repaired = target.captureWholePatch();
-                check ((int) repaired.getProperty ("boardMixSchema") == 3, "a repaired Dense patch saves schema 3");
+                check ((int) repaired.getProperty ("boardMixSchema") == 5, "a repaired Dense patch saves schema 5");
                 target.restoreWholePatch (repaired);
-                check (std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.05f) < 0.002f
-                           && std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.56f) < 0.002f,
-                       "a Dense patch stamped schema 3 loads untouched");
+                check (std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.0375f) < 0.002f
+                           && std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.67f) < 0.002f,
+                       "a Dense patch stamped schema 4 loads untouched");
+
+                // Schema 3 (2026-11-06 to 11-12): MIX and routes only move for the colour's quarter.
+                auto beforeBypass = routed.captureWholePatch();
+                beforeBypass.setProperty ("boardMixSchema", 3, nullptr);
+                target.restoreWholePatch (beforeBypass);
+                check (std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.21f) < 0.002f
+                           && std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.67f) < 0.002f,
+                       "a Dense patch stamped schema 3 moves up the knob to keep its colour and wood");
 
                 // Dense Board Piano's BOARD macro (-0.3 on MIX in the recipe, x3.781 by its macro trim: -1) loads at the new reach's scale.
                 IlanaSynthAudioProcessor factory;
@@ -401,15 +449,83 @@ void runM4Tests()
                     if (juce::roundToInt (factory.apvts.getRawParameterValue ("mod" + juce::String (slot) + "_dst")->load())
                         == Mod::destinationForParamId ("sb_mix"))
                         depth = factory.apvts.getRawParameterValue ("mod" + juce::String (slot) + "_amt")->load();
-                check (index >= 0 && std::abs (depth + 1.0f / DenseSoundboard::mixRange) < 0.002f,
+                check (index >= 0 && std::abs (depth + (1.0f - DenseSoundboard::colourReach) / DenseSoundboard::mixRange) < 0.002f,
                        "Dense Board Piano's BOARD macro depth is scaled with its MIX (" + juce::String (depth, 4) + ")");
             }
             setParam (source, "sb_model", 0.0f);
             old = source.captureWholePatch();
             old.removeProperty ("boardMixSchema", nullptr);
             target.restoreWholePatch (old);
-            check (std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.56f) < 0.002f,
-                   "a Classic board patch keeps its MIX");
+            check (std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.67f) < 0.002f,
+                   "a Classic board patch saved before moves up the knob (keeps its lid and low cut)");
+
+            // The Classic board got the same bypass at 0 % a day later: a schema 4
+            // Classic patch moves up (routes x0.75), a schema 4 Dense one does not.
+            {
+                IlanaSynthAudioProcessor classic;
+                setParam (classic, "sb_on", 1.0f);
+                setParam (classic, "sb_model", 0.0f);
+                setParam (classic, "sb_mix", 0.56f);
+                setParam (classic, "mod40_src", 1.0f);
+                setParam (classic, "mod40_dst", (float) Mod::destinationForParamId ("sb_mix"));
+                setParam (classic, "mod40_amt", -0.28f);
+                auto stamped4 = classic.captureWholePatch();
+                stamped4.setProperty ("boardMixSchema", 4, nullptr);
+                target.restoreWholePatch (stamped4);
+                check (std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.67f) < 0.002f
+                           && std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.21f) < 0.002f,
+                       "a Classic patch stamped schema 4 moves up the knob, its routes scaled");
+                target.restoreWholePatch (classic.captureWholePatch());
+                check (std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.56f) < 0.002f,
+                       "a Classic patch saved now keeps its MIX");
+                setParam (classic, "sb_model", 1.0f);
+                stamped4 = classic.captureWholePatch();
+                stamped4.setProperty ("boardMixSchema", 4, nullptr);
+                target.restoreWholePatch (stamped4);
+                check (std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.56f) < 0.002f,
+                       "a Dense patch stamped schema 4 is not moved again");
+            }
+
+            // The Classic board at MIX 0 % leaves the sound untouched too.
+            {
+                Soundboard board;
+                board.prepare (48000.0);
+                juce::Random random (4);
+                std::vector<float> left (4096), right (4096);
+                for (size_t i = 0; i < left.size(); ++i)
+                {
+                    left[i] = random.nextFloat() - 0.5f;
+                    right[i] = random.nextFloat() - 0.5f;
+                }
+                const auto dryLeft = left, dryRight = right;
+                for (size_t start = 0; start < left.size(); start += 256)
+                    board.process (left.data() + start, right.data() + start, 256, 0.0f, 0.2f, 0.7f);
+                check (left == dryLeft && right == dryRight, "the Classic board at MIX 0 % leaves the sound untouched");
+                const auto change = [] (float mix)
+                {
+                    Soundboard b;
+                    b.prepare (48000.0);
+                    juce::Random r (5);
+                    std::vector<float> l (16384), rr;
+                    for (auto& x : l)
+                        x = r.nextFloat() - 0.5f;
+                    const auto d = l;
+                    rr = l;
+                    for (size_t start = 0; start < l.size(); start += 256)
+                        b.process (l.data() + start, rr.data() + start, 256, mix, 0.5f, 0.5f);
+                    auto diff = 0.0, total = 0.0;
+                    for (size_t i = 4096; i < l.size(); ++i)
+                    {
+                        diff += std::pow ((double) l[i] - d[i], 2.0);
+                        total += std::pow ((double) d[i], 2.0);
+                    }
+                    return 10.0 * std::log10 (diff / total + 1.0e-12);
+                };
+                const auto at2 = change (0.02f), at10 = change (0.10f), at25 = change (AcousticKeysDetail::BoardMix::colourReach);
+                check (at2 < at10 && at10 < at25 && at2 < -15.0,
+                       "the Classic board's colour fades in with MIX from 0 % (" + juce::String (at2, 1) + " / "
+                           + juce::String (at10, 1) + " / " + juce::String (at25, 1) + " dB)");
+            }
         }
 
         // Brightness: energy of the first difference (a gentle high-pass)

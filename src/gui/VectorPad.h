@@ -271,8 +271,11 @@ public:
             // Each corner names its oscillator on a small pill with the
             // oscillator's dot, as the design draws it.
             const auto font = IlanaTheme::font (IlanaTheme::TextSize::label, true);
-            const auto label = getCornerLabel (c, weights[(size_t) c]);
             const auto osc = processorRef.getVectorCorner (c);
+            // A corner on an oscillator the patch doesn't have offers to add it (it took its share of the
+            // mix for nothing, UI review 30): "+ ADD OSC 4", a button.
+            const auto missing = osc >= 0 && osc < OscillatorIds::count && ! processorRef.isOscillatorShown (osc);
+            const auto label = missing ? "+ ADD OSC " + juce::String (osc + 1) : getCornerLabel (c, weights[(size_t) c]);
             const auto tint = osc >= 0 && osc < OscillatorIds::count ? IlanaTheme::oscColour (osc) : IlanaTheme::Ui::text3;
             const auto textWidth = (float) juce::GlyphArrangement::getStringWidthInt (juce::Font (font), label);
             auto pill = juce::Rectangle<float> (textWidth + 28.0f, 20.0f);
@@ -287,13 +290,15 @@ public:
                 pill.setPosition (juce::jlimit (inside.getX(), inside.getRight() - pill.getWidth(), pill.getX()),
                                   juce::jlimit (inside.getY(), inside.getBottom() - pill.getHeight(), pill.getY()));
             }
-            g.setColour (IlanaTheme::Ui::raised.withAlpha (0.85f));
+            addPills[(size_t) c] = missing ? pill : juce::Rectangle<float>();
+            const auto hot = missing && hoverAdd == c;
+            g.setColour (hot ? IlanaTheme::Ui::raised.brighter (0.15f) : IlanaTheme::Ui::raised.withAlpha (0.85f));
             g.fillRoundedRectangle (pill, 10.0f);
-            g.setColour ((sounding ? tint : IlanaTheme::Ui::line).withAlpha (sounding ? 0.7f : 1.0f));
+            g.setColour (hot ? tint : (sounding ? tint : IlanaTheme::Ui::line).withAlpha (sounding ? 0.7f : 1.0f));
             g.drawRoundedRectangle (pill.reduced (0.5f), 10.0f, 1.0f);
             g.setColour (sounding ? tint : IlanaTheme::Ui::text3);
             g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ pill.getX() + 11.0f, pill.getCentreY() }));
-            g.setColour (sounding ? IlanaTheme::Ui::text : IlanaTheme::Ui::text3);
+            g.setColour (sounding || hot ? IlanaTheme::Ui::text : missing ? IlanaTheme::Ui::text2 : IlanaTheme::Ui::text3);
             g.setFont (font);
             IlanaTheme::drawFitted (g, label, pill.withTrimmedLeft (18.0f).withTrimmedRight (4.0f).toNearestInt(),
                                     juce::Justification::centredLeft, 1);
@@ -419,28 +424,47 @@ public:
         return found;
     }
 
+    // An empty corner's "+ ADD OSC n" pill as last painted (empty: the corner has its oscillator).
+    juce::Rectangle<float> addPillBounds (int corner) const
+    {
+        return corner >= 0 && corner < VectorShape::maxCorners ? addPills[(size_t) corner] : juce::Rectangle<float>();
+    }
+
     void mouseMove (const juce::MouseEvent& event) override
     {
         const auto point = pointAt (event.position);
+        const auto add = addPillAt (event.position);
 
-        if (point != hoverPoint)
+        if (point != hoverPoint || add != hoverAdd)
         {
             hoverPoint = point;
+            hoverAdd = add;
             repaint();
         }
 
-        setMouseCursor (point >= 0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+        setMouseCursor (point >= 0 || add >= 0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
     }
 
     void mouseExit (const juce::MouseEvent&) override
     {
-        hoverPoint = -1;
+        hoverPoint = hoverAdd = -1;
         setMouseCursor (juce::MouseCursor::NormalCursor);
         repaint();
     }
 
     void mouseDown (const juce::MouseEvent& event) override
     {
+        // "+ ADD OSC n" on an empty corner: the oscillator, in one undo step; no drag follows.
+        if (const auto add = addPillAt (event.position); add >= 0)
+        {
+            const auto osc = processorRef.getVectorCorner (add);
+            addClick = true;
+            processorRef.performEdit ("Add OSC " + juce::String (osc + 1), [this, osc] { processorRef.addOscillator (osc); });
+            hoverAdd = -1;
+            repaint();
+            return;
+        }
+
         dragPoint = pointAt (event.position);
         processorRef.beginEdit (dragPoint >= 0 ? "Vector path point " + juce::String (dragPoint + 1) : juce::String ("Vector position"));
         beginGesture();
@@ -449,7 +473,7 @@ public:
 
     void mouseDrag (const juce::MouseEvent& event) override
     {
-        if (gestures.cancelled())
+        if (addClick || gestures.cancelled())
             return;
 
         auto p = fromScreen (event.position);
@@ -474,6 +498,12 @@ public:
 
     void mouseUp (const juce::MouseEvent&) override
     {
+        if (addClick)
+        {
+            addClick = false;
+            return;
+        }
+
         endGesture();
         processorRef.endEdit();
         dragPoint = -1;
@@ -590,6 +620,18 @@ private:
     IlanaAnim::ChangeGate changeGate;
 
     IlanaSynthAudioProcessor& processorRef;
+    // The empty corners' "+ ADD OSC n" pills as last painted (empty: the corner has its oscillator).
+    int addPillAt (juce::Point<float> position) const
+    {
+        for (int c = 0; c < VectorShape::maxCorners; ++c)
+            if (c < processorRef.getVectorCornerCount() && addPills[(size_t) c].contains (position))
+                return c;
+        return -1;
+    }
+
+    mutable std::array<juce::Rectangle<float>, VectorShape::maxCorners> addPills {};
+    int hoverAdd = -1;
+    bool addClick = false;
     IlanaDrag::Gestures gestures;
     int dragPoint = -1, hoverPoint = -1;
 };

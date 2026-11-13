@@ -349,8 +349,9 @@ public:
         };
 
         nameField.setBounds (row (32).withTrimmedLeft (labelWidth));
-        noteArea = area.removeFromTop (16).withTrimmedLeft (labelWidth);
-        area.removeFromTop (4);
+        // The note's line under NAME only while there is a note (UI review 31,
+        // item 10: the empty line left a 28 px hole); the panel grows by it.
+        noteArea = note.isNotEmpty() ? area.removeFromTop (noteHeight).withTrimmedLeft (labelWidth).withHeight (16) : juce::Rectangle<int>();
         auto second = row (28).withTrimmedLeft (labelWidth);
         categoryBox.setBounds (second.removeFromLeft (150));
         second.removeFromLeft (16);
@@ -366,6 +367,7 @@ public:
         area.removeFromTop (10);
         commentField.setBounds (row (54).withTrimmedLeft (labelWidth));
 
+        // (The panel is as tall as its rows, so the buttons sit buttonGap under COMMENT.)
         auto bottom = panelBounds().reduced (22, 18).removeFromBottom (30);
         saveButton.setBounds (bottom.removeFromRight (120));
         bottom.removeFromRight (8);
@@ -487,7 +489,16 @@ private:
 
     juce::Rectangle<int> panelBounds() const
     {
-        return getLocalBounds().withSizeKeepingCentre (juce::jmin (540, getWidth() - 32), 392);
+        return getLocalBounds().withSizeKeepingCentre (juce::jmin (540, getWidth() - 32), panelHeight());
+    }
+
+    // The rows' height (resized), so no band is held for a line that is not
+    // showing: title 48, NAME 40, the note 20 while it shows, CATEGORY 36,
+    // TAGS 36 and its chips 46 + 10, COMMENT 54, then the buttons (UI review 31, item 10).
+    static constexpr int noteHeight = 20, buttonGap = 16;
+    int panelHeight() const
+    {
+        return 18 + 48 + 40 + (note.isNotEmpty() ? noteHeight : 0) + 36 + 36 + (2 * 20 + 6) + 10 + 54 + buttonGap + 30 + 18;
     }
 
     static juce::Font chipFont() { return juce::Font (IlanaTheme::font (IlanaTheme::TextSize::minInteractive, true)); }
@@ -635,8 +646,11 @@ private:
 
     void setNote (const juce::String& text, bool warning)
     {
+        const auto lineChanges = note.isEmpty() != text.isEmpty();
         note = text;
         noteIsWarning = warning;
+        if (lineChanges)
+            resized();
         repaint();
     }
 

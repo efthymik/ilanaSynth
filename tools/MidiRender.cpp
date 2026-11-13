@@ -8,6 +8,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <iostream>
 #include "PluginProcessor.h"
+#include "dsp/ModalBowedLayers.h"
 
 int main (int argc, char** argv)
 {
@@ -51,6 +52,7 @@ int main (int argc, char** argv)
         }
     processor.setPlayConfigDetails (0, 2, rate, blockSize);
     processor.prepareToPlay (rate, blockSize);
+    ModalBowedLayers::waitUntilBuilt();   // (Modal Bowed's residual layers: the same render every time)
 
     // ILANA_WARMUP=1: first play 32 high notes at once and let them die out
     // (voices with a history, as in a live session), then render.
@@ -64,6 +66,21 @@ int main (int argc, char** argv)
             if (b == 0) for (int n = 0; n < 32; ++n) midi.addEvent (juce::MidiMessage::noteOn (1, 76 + n, (juce::uint8) 100), 0);
             if (b == 10) for (int n = 0; n < 32; ++n) midi.addEvent (juce::MidiMessage::noteOff (1, 76 + n), 0);
             processor.processBlock (scratch, midi);
+        }
+    }
+    // ILANA_SWEEP="id=from:to": that parameter glides from one value to the
+    // other (exponentially; both above 0) over the MIDI file's length, a step a block.
+    juce::RangedAudioParameter* sweep = nullptr;
+    double sweepFrom = 1.0, sweepTo = 1.0;
+    {
+        const auto text = juce::SystemStats::getEnvironmentVariable ("ILANA_SWEEP", "");
+        if (text.isNotEmpty())
+        {
+            sweep = processor.apvts.getParameter (text.upToFirstOccurrenceOf ("=", false, false).trim());
+            const auto ends = text.fromFirstOccurrenceOf ("=", false, false);
+            sweepFrom = ends.upToFirstOccurrenceOf (":", false, false).getDoubleValue();
+            sweepTo = ends.fromFirstOccurrenceOf (":", false, false).getDoubleValue();
+            if (sweep == nullptr || ! (sweepFrom > 0.0 && sweepTo > 0.0)) { std::cerr << "bad ILANA_SWEEP\n"; return 1; }
         }
     }
     const auto seconds = seq.getEndTime() + 4.0;
@@ -82,6 +99,11 @@ int main (int argc, char** argv)
             if (at >= start + blockSize) break;
             if (! m.isMetaEvent()) midi.addEvent (m, (int) juce::jmax (0LL, at - start));
             ++next;
+        }
+        if (sweep != nullptr)
+        {
+            const auto t = juce::jlimit (0.0, 1.0, (double) start / rate / juce::jmax (1.0e-3, seq.getEndTime()));
+            sweep->setValueNotifyingHost (sweep->convertTo0to1 ((float) (sweepFrom * std::pow (sweepTo / sweepFrom, t))));
         }
         processor.processBlock (buffer, midi);
         for (int c = 0; c < 2; ++c) out.copyFrom (c, (int) start, buffer, c, 0, blockSize);

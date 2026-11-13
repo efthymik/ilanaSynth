@@ -220,6 +220,7 @@ public:
             }
         }
 
+        paintGradientFill (g, path, plot, centreY, halfHeight);
         IlanaTrace::paintTrace (g, path, traceColour);
 
         auto phase = (double) phaseSmoother.get (processorRef.getLfoPhase (index), currentRate());
@@ -771,6 +772,29 @@ private:
 
     // One cycle's ruler under the graph: its time at RATE in Hz, or note
     // values while SYNC is on, at the quarters.
+    // (UI review 31, 38) A soft gradient under the line in the LFO's colour: strongest at the wave's peaks, gone at
+    // the zero line, mirrored below it, so the shape reads as a body of light and not a bare 2 px line.
+    void paintGradientFill (juce::Graphics& g, const juce::Path& path, juce::Rectangle<float> plot, float centreY, float halfHeight) const
+    {
+        if (path.isEmpty())
+            return;
+        auto filled = path;
+        const auto end = path.getCurrentPosition();
+        filled.lineTo (end.x, centreY);
+        filled.lineTo (plot.getX(), centreY);
+        filled.closeSubPath();
+        for (const auto above : { true, false })
+        {
+            const juce::Graphics::ScopedSaveState state (g);
+            const auto whole = getLocalBounds().toFloat();
+            g.reduceClipRegion ((above ? whole.withBottom (centreY) : whole.withTop (centreY)).toNearestIntEdges());
+            const auto peakY = above ? centreY - halfHeight : centreY + halfHeight;
+            g.setGradientFill (juce::ColourGradient (traceColour.withAlpha (0.24f), plot.getX(), peakY,
+                                                     traceColour.withAlpha (0.0f), plot.getX(), centreY, false));
+            g.fillPath (filled);
+        }
+    }
+
     void paintTimeRuler (juce::Graphics& g, juce::Rectangle<float> plot) const
     {
         if (minimal)
@@ -1278,7 +1302,10 @@ private:
         g.setColour (IlanaTheme::Ui::text3);
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny));
         // The whole hint at any width: the longest wording that fits (nothing cut).
-        const auto hintBox = wellArea().toNearestInt().reduced (10, 2).removeFromBottom (12);
+        // (The ruler inside the well, as in the EDIT pop-up, owns the foot: the hint then sits in the top
+        // margin, left of the GRID chip, instead of on top of the times. UI review 30.)
+        const auto hintBox = rulerInside ? wellArea().toNearestInt().reduced (10, 2).removeFromTop (12).withRight ((int) gridChipBounds().getX() - 8)
+                                         : wellArea().toNearestInt().reduced (10, 2).removeFromBottom (12);
         const auto hintFont = IlanaTheme::font (IlanaTheme::TextSize::tiny);
         juce::String hint;
         for (const auto* wording : { "click: add   drag: move   dot on a line: curve   double-click: delete   right-click: shapes",

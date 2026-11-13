@@ -41,7 +41,7 @@ def envelope_rate(e, fs, lo, hi):
     return bp(e, lo, hi, fs=fs, order=2)
 
 
-def measure(x, f0, top=8000):
+def measure(x, f0, top=8000, rows=False):
     a, b = int(0.9 * SR), int(3.9 * SR)
     seg = x[a:b]
     keep = slice(int(0.1 * SR), int(2.9 * SR))  # 1.0 to 3.8 s, edges of the filters left out
@@ -77,6 +77,8 @@ def measure(x, f0, top=8000):
             cents.append((h, 1200 * np.log2(np.maximum(inst, 1) / fh), db.mean()))
     L = np.array(levels)
     mean = L.mean(1)
+    # each partial's frequency, level and fast flutter (10-40 Hz), for wood.py
+    flut_rows = np.array([((h + 1) * f0, l.mean(), envelope_rate(l, fs, 10, 40).std()) for h, l in enumerate(L)])
     w = (mean > mean.max() - 30).astype(float)
     w /= w.sum()
     out = {}
@@ -127,7 +129,7 @@ def measure(x, f0, top=8000):
         nfl.append(envelope_rate(db, fs, 2, 40).std())
     out["noise_under"] = float(np.mean(noise))
     out["noise_flutter"] = float(np.mean(nfl))
-    return out
+    return (out, flut_rows) if rows else out
 
 
 def one(args):

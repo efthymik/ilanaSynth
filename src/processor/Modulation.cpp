@@ -495,7 +495,11 @@ void IlanaSynthAudioProcessor::updateEvolveAndVector (int numSamples)
     auto position = juce::Point<float> (getParam ("vec_x"), getParam ("vec_y"));
     if (isVectorPathOn())
     {
-        vectorPathPhase = std::fmod (vectorPathPhase + seconds * (double) getParam ("vec_rate"), 1.0);
+        // SYNC (appended, off in every older patch): one trip round the path per DIV at the host tempo, as an
+        // LFO's SYNC reads it (UI review 31, item 36).
+        const auto pathRate = getParam (vectorSyncRef) > 0.5f ? (currentBpm.load() / 60.0) / getSyncDivisionBeats ((int) getParam (vectorDivRef))
+                                                              : (double) getParam ("vec_rate");
+        vectorPathPhase = std::fmod (vectorPathPhase + seconds * pathRate, 1.0);
         std::array<juce::Point<float>, numVectorPoints> points;
         for (int i = 0; i < numVectorPoints; ++i)
             points[(size_t) i] = getVectorPathPoint (i);
@@ -1228,6 +1232,7 @@ float IlanaSynthAudioProcessor::globalSourceValue (Mod::Source source) const
 void IlanaSynthAudioProcessor::evaluateGlobalModulation (const Mod::Slot* slots, int numSlots)
 {
     float totals[maxDestinations] {};
+    std::array<float, (size_t) maxDestinations> voiceKnobShown {};
 
     // Param destinations are applied inside getParam(), so clear them first
     // or the source values read below would include last block's offsets.
@@ -1252,6 +1257,14 @@ void IlanaSynthAudioProcessor::evaluateGlobalModulation (const Mod::Slot* slots,
         if (slot.aux != Mod::Source::None)
             value *= Mod::auxScale (slot.aux, globalSourceValue (slot.aux));
 
+        // So is a knob a voice reads (VoiceParams::voiceKnobs): the ring
+        // still shows the newest note's swing, the knob itself stays put.
+        if (isVoiceKnobSlot (slot))
+        {
+            voiceKnobShown[(size_t) slot.destination] += slot.depth * value;
+            continue;
+        }
+
         // A stereo route into a string knob moves the sides apart, not the knob.
         if (slot.stereo)
             if (const auto target = Mod::StereoString::targetFor (slot.destination); target.osc >= 0)
@@ -1267,7 +1280,7 @@ void IlanaSynthAudioProcessor::evaluateGlobalModulation (const Mod::Slot* slots,
     // (Relaxed: the editor only shows these; a sequentially consistent
     // store is a locked exchange, and this was 1024 of them every block.)
     for (int d = 0; d < maxDestinations; ++d)
-        modDisplayValues[(size_t) d].store (totals[d], std::memory_order_relaxed);
+        modDisplayValues[(size_t) d].store (totals[d] + voiceKnobShown[(size_t) d], std::memory_order_relaxed);
 
     // Which parameter destinations take the synth-wide offset, and their
     // signs, worked out once: the OSC 4-6 FM cells are modulated per voice

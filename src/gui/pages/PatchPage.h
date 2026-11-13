@@ -1092,6 +1092,21 @@ private:
     // The selected box's row on the 10 px grid: name and detail, the
     // controls (one label line above one control line), the actions at the
     // right.
+    // A control in the bottom strip's row (the row's full height): a knob is
+    // the standard ring with its value inside and its name under it (UI
+    // review 31, item 42: the strip was the last place with pointer knobs
+    // and the value beside them); anything else keeps its 116 x 44 cell.
+    static void placeStripControl (juce::Component& control, juce::Rectangle<int> cell)
+    {
+        if (auto* knob = dynamic_cast<KnobControl*> (&control))
+        {
+            knob->setInlineKnob (false);
+            knob->placeAsRing (cell, 34);
+            return;
+        }
+        control.setBounds (cell.withSizeKeepingCentre (116, 44));
+    }
+
     void layoutInspector()
     {
         auto row = inspector.reduced (20, 10);
@@ -1108,9 +1123,9 @@ private:
             auto actions = row.removeFromRight (340);
             removeCableButton.setBounds (actions.removeFromRight (130).withSizeKeepingCentre (130, 28));
             row.removeFromLeft (20);
-            loopKnobs->level->setBounds (row.removeFromLeft (120).withSizeKeepingCentre (116, 44));
+            placeStripControl (*loopKnobs->level, row.removeFromLeft (120));
             row.removeFromLeft (20);
-            loopKnobs->delay->setBounds (row.removeFromLeft (120).withSizeKeepingCentre (116, 44));
+            placeStripControl (*loopKnobs->delay, row.removeFromLeft (120));
             return;
         }
         // A selected LFO cable: name and detail, an AMOUNT per knob it moves,
@@ -1129,7 +1144,7 @@ private:
             row.removeFromLeft (20);
             for (int k = 0; k < lfoAmounts->numShown(); ++k)
             {
-                lfoAmounts->knobs[(size_t) k]->setBounds (row.removeFromLeft (120).withSizeKeepingCentre (116, 44));
+                placeStripControl (*lfoAmounts->knobs[(size_t) k], row.removeFromLeft (120));
                 lfoAmounts->knobs[(size_t) k]->setVisible (true);
                 row.removeFromLeft (20);
             }
@@ -1151,7 +1166,7 @@ private:
             const auto items = lfoControls->windowItems();
             for (size_t k = 0; k < 4 && row.getWidth() >= 116; ++k)
             {
-                items[k]->setBounds (row.removeFromLeft (116).withSizeKeepingCentre (116, 44));
+                placeStripControl (*items[k], row.removeFromLeft (116));
                 items[k]->setVisible (true);
                 row.removeFromLeft (8); // (the windows' cell gap)
             }
@@ -1194,7 +1209,7 @@ private:
         soloButton.setBounds (soloArea);
         band.setBounds (bandArea);
         if (mixKnob != nullptr)
-            mixKnob->setBounds (controlRow (120).withSizeKeepingCentre (116, 44));
+            placeStripControl (*mixKnob, controlRow (120));
     }
 
     // The inspector follows the selected box.

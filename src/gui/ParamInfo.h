@@ -361,15 +361,11 @@ inline juce::String offAtZero (const juce::String&, float value) { return juce::
 
 inline juce::String rotate (const juce::String&, float value) { return "+" + juce::String (juce::roundToInt (value)); }
 
-// The modal exciters' SIZE (x0.25..x4) and SCALE (x0.5..x2) as factors;
-// SIZE names the violin family's sizes on the way.
+// The modal exciters' SIZE (x0.25..x4) and SCALE (x0.5..x2) as factors.
+// (The instrument at a factor depends on the engine: the picture and the drag's info line name it, ModalMarks.h.)
 inline juce::String modalSize (const juce::String&, float factor)
 {
-    const auto text = juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) + juce::String (factor, 2);
-    for (const auto& [at, name] : { std::pair { 1.0f, "violin" }, std::pair { 1.17f, "viola" }, std::pair { 2.1f, "cello" } })
-        if (juce::String (factor, 2) == juce::String (at, 2))
-            return text + " " + name;
-    return text;
+    return juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) + juce::String (factor, 2);
 }
 inline juce::String modalScale (const juce::String&, float factor)
 {
@@ -817,7 +813,8 @@ inline const HelpRow helpRows[] {
     { starts ("sym_note"), "Manual tuning for this drone string, used when MANUAL is on." },
     { ends ("_bow_pressure"), "Bow grip on the string. MPE pressure and channel aftertouch add to it." },
     { ends ("_bow_speed"), "Bow travel speed; changes the sustained tone and scrape." },
-    { ends ("_bridge_buzz"), "Nonlinear bridge contact, from clean to sitar-like buzz." },
+    { ends ("_bridge_buzz"), "Nonlinear bridge contact, from clean to sitar-like buzz. On Modal Bowed it is WOLF: the body's main resonance pushes back on the string; "
+      "low adds a little life, high makes a note near that resonance beat and howl (a cello's wolf)." },
     { ends ("_string_split"), "A sideways string movement that beats. Zero is the plain string." },
     { ends ("_string_click"), "The sharp snap of the pluck. Zero is a clean pluck, full is a hard slap." },
     { ends ("_fret_rattle"), "Fret noise that follows the string. Faint buzz to loose fret; zero is clean." },
@@ -1044,6 +1041,8 @@ inline const HelpRow helpRows[] {
                         "a pentagon for five, a hexagon for six." },
     { is ("vec_path"), "Moves the dot round the drawn path at PATH RATE (X / Y then offset the whole path)." },
     { is ("vec_rate"), "How fast the dot goes round the path." },
+    { is ("vec_sync"), "Locks the path to the host tempo: one trip round it per PATH RATE note value." },
+    { is ("vec_div"), "One trip round the path per this note value at the host tempo (while SYNC is on)." },
     { starts ("vec_px|vec_py"), "A point of the vector path; drag the points on the pad." },
     { is ("vec_drift"), "Lets the dot wander on its own around where it is." },
     { is ("vec_drift_rate"), "How fast the drift wanders." },
@@ -1071,6 +1070,7 @@ inline const HelpRow helpRows[] {
     { is ("body_size"), "Body tuning in whole semitones; larger rings lower." },
     { is ("body_coupling_mode"), "Direction of energy transfer. String to body, body to string, or between strings." },
     { is ("body_coupling"), "Strength of the selected coupling path." },
+    { is ("body_legacy_level"), "On in patches saved before 2026-11-13 on a material body: they keep the body's old levels." },
     { is ("res_amount"), "Wet amount of the selected body." },
     { is ("res_decay"), "How long the resonances ring." },
     { is ("res_offset"), "Resonator tuning in semitones. Inharmonic = metallic." },

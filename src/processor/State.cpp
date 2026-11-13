@@ -9,7 +9,7 @@ namespace
     constexpr SavedSchema savedSchemas[] = {
         { "osc3Schema", 2 }, { "grainPosSchema", 2 }, { "lorenzSchema", 2 }, { "stringSchema", 2 },
         { "redundantKnobsSchema", 2 }, { "modRangeSchema", 2 }, { "destSchema", 2 }, { "tableSchema", 4 },
-        { "boardMixSchema", 3 }, { "glideSchema", 2 },
+        { "boardMixSchema", 5 }, { "glideSchema", 2 }, { "bodyLevelSchema", 2 },
     };
 
     bool savedByNewerBuild (const juce::ValueTree& state)
@@ -605,6 +605,28 @@ int IlanaSynthAudioProcessor::migrateDenseBoardMix (const std::function<float (c
             continue;
         if (const auto depth = get (prefix + "_amt", 0.0f); depth != 0.0f)
             set (prefix + "_amt", depth / DenseSoundboard::mixRange);
+    }
+    return 1;
+}
+
+int IlanaSynthAudioProcessor::migrateDenseBoardBypass (const std::function<float (const juce::String&, float)>& get,
+                                                      const std::function<void (const juce::String&, float)>& set,
+                                                      bool classic)
+{
+    if ((juce::roundToInt (get ("sb_model", 0.0f)) == 1) == classic)
+        return 0;
+
+    constexpr auto reach = DenseSoundboard::colourReach;
+    set ("sb_mix", reach + juce::jlimit (0.0f, 1.0f, get ("sb_mix", 0.5f)) * (1.0f - reach));
+
+    const auto mixDestination = Mod::destinationForParamId ("sb_mix");
+    for (int slot = 1; slot <= Mod::maxSlots && mixDestination > 0; ++slot)
+    {
+        const auto prefix = "mod" + juce::String (slot);
+        if (juce::roundToInt (get (prefix + "_dst", 0.0f)) != mixDestination)
+            continue;
+        if (const auto depth = get (prefix + "_amt", 0.0f); depth != 0.0f)
+            set (prefix + "_amt", depth * (1.0f - reach));
     }
     return 1;
 }
@@ -1546,6 +1568,56 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
                               boardMixSchema < 2);
         state.setProperty ("boardMixSchema", 3, nullptr);
     }
+    // ...and its colour, which was on even at MIX 0 %, now fades in on the knob's
+    // first quarter: older patches move up the knob so they sound the same.
+    if ((int) state.getProperty ("boardMixSchema", 1) < 4)
+    {
+        const auto find = [&state] (const juce::String& id)
+        {
+            for (int i = 0; i < state.getNumChildren(); ++i)
+                if (state.getChild (i).getProperty ("id").toString() == id)
+                    return state.getChild (i);
+            return juce::ValueTree();
+        };
+        migrateDenseBoardBypass ([&find] (const juce::String& id, float fallback)
+                                 {
+                                     const auto child = find (id);
+                                     return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
+                                 },
+                                 [&find, &state] (const juce::String& id, float value)
+                                 {
+                                     if (auto child = find (id); child.isValid())
+                                         child.setProperty ("value", value, nullptr);
+                                     else
+                                         state.appendChild (juce::ValueTree ("PARAM", { { "id", id }, { "value", value } }), nullptr);
+                                 });
+        state.setProperty ("boardMixSchema", 4, nullptr);
+    }
+    // The Classic board's MIX got the same bypass at 0 % a day later (schema 5).
+    if ((int) state.getProperty ("boardMixSchema", 1) < 5)
+    {
+        const auto find = [&state] (const juce::String& id)
+        {
+            for (int i = 0; i < state.getNumChildren(); ++i)
+                if (state.getChild (i).getProperty ("id").toString() == id)
+                    return state.getChild (i);
+            return juce::ValueTree();
+        };
+        migrateDenseBoardBypass ([&find] (const juce::String& id, float fallback)
+                                 {
+                                     const auto child = find (id);
+                                     return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
+                                 },
+                                 [&find, &state] (const juce::String& id, float value)
+                                 {
+                                     if (auto child = find (id); child.isValid())
+                                         child.setProperty ("value", value, nullptr);
+                                     else
+                                         state.appendChild (juce::ValueTree ("PARAM", { { "id", id }, { "value", value } }), nullptr);
+                                 },
+                                 true);
+        state.setProperty ("boardMixSchema", 5, nullptr);
+    }
 
     // A patch saved before 100 % meant the knob's whole range keeps its
     // routes' sound (after the step above, whose cutoff routes are old-scale).
@@ -1614,6 +1686,32 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
                                   child.setProperty ("value", value, nullptr);
                           });
         state.setProperty ("glideSchema", 2, nullptr);
+    }
+
+    // A patch on a material body saved before its levels changed (2026-11-13)
+    // keeps the old body.
+    if ((int) state.getProperty ("bodyLevelSchema", 1) < 2)
+    {
+        const auto find = [&state] (const juce::String& id)
+        {
+            for (int i = 0; i < state.getNumChildren(); ++i)
+                if (state.getChild (i).getProperty ("id").toString() == id)
+                    return state.getChild (i);
+            return juce::ValueTree();
+        };
+        migrateBodyLevel ([&find] (const juce::String& id, float fallback)
+                                {
+                                    const auto child = find (id);
+                                    return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
+                                },
+                                [&find, &state] (const juce::String& id, float value)
+                                {
+                                    if (auto child = find (id); child.isValid())
+                                        child.setProperty ("value", value, nullptr);
+                                    else
+                                        state.appendChild (juce::ValueTree ("PARAM", { { "id", id }, { "value", value } }), nullptr);
+                                });
+        state.setProperty ("bodyLevelSchema", 2, nullptr);
     }
 
     apvts.replaceState (state);

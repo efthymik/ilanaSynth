@@ -18,7 +18,9 @@ EDGES = np.geomspace(80, 16000, 49)  # 1/6-octave bands
 def bandgram(x):
     f, t, Z = stft(x, SR, nperseg=2048, noverlap=1536)
     P = np.abs(Z) ** 2
-    B = np.array([P[(f >= a) & (f < b)].sum(0) for a, b in zip(EDGES, EDGES[1:])])
+    # (bands with no STFT bin in them, three at the bottom, are left out: an
+    # empty band's level would only follow the render's overall loudness)
+    B = np.array([P[(f >= a) & (f < b)].sum(0) for a, b in zip(EDGES, EDGES[1:]) if ((f >= a) & (f < b)).any()])
     return t, 10 * np.log10(B + 1e-14)
 
 

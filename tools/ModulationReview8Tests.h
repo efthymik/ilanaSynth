@@ -76,14 +76,51 @@ void runModulationReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthA
     // Operator Env's chips lead their regions on a DX7 voice and are absent
     // elsewhere; no patch-level MSEG chip on a patch that doesn't route it.
     {
+        // The gaps between chip groups: every chip and folded group chip in
+        // the bar, left to right; a gap wider than 10 px is between groups.
+        const auto groupGaps = [&editor, &barChips]
+        {
+            std::vector<juce::Rectangle<int>> boxes;
+            for (const auto& [source, box] : barChips())
+                boxes.push_back (box);
+            std::vector<ModSourceGroupChip*> groups;
+            findAll<ModSourceGroupChip> (editor, groups);
+            for (auto* group : groups)
+                if (visibleInTree (group) && group->getWidth() > 0)
+                    boxes.push_back (editor.getLocalArea (group, group->getLocalBounds()));
+            std::sort (boxes.begin(), boxes.end(), [] (const auto& a, const auto& b) { return a.getX() < b.getX(); });
+            std::vector<int> gaps;
+            for (size_t i = 1; i < boxes.size(); ++i)
+                if (const auto gap = boxes[i].getX() - boxes[i - 1].getRight(); gap > 10)
+                    gaps.push_back (gap);
+            return gaps;
+        };
+        const auto sameGaps = [] (const std::vector<int>& a, const std::vector<int>& b)
+        {
+            for (const auto x : a)
+                for (const auto y : b)
+                    if (std::abs (x - y) > 1)
+                        return false;
+            return true;
+        };
+        const auto gapText = [] (const std::vector<int>& gaps)
+        {
+            juce::StringArray text;
+            for (const auto gap : gaps)
+                text.add (juce::String (gap));
+            return text.joinIntoString (",");
+        };
         loadNamed ("Neuro Wobble");
         const auto neuro = barChips();
         const auto neuroFolded = foldedSources();
+        const auto neuroGaps = groupGaps();
         loadNamed ("Init");
         const auto init = barChips();
+        const auto initGaps = groupGaps();
         loadNamed ("E.PIANO 1 (ROM1A)");
         const auto dx7 = barChips();
         const auto dx7Folded = foldedSources();
+        const auto dx7Gaps = groupGaps();
 
         const auto absent = [] (const std::map<int, juce::Rectangle<int>>& chips, const std::vector<int>& folded, S source)
         {
@@ -95,13 +132,14 @@ void runModulationReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthA
                     && xOf (dx7, S::OpLfo) < xOf (dx7, S::Lfo1) && xOf (dx7, S::OpPitchEnv) < xOf (dx7, S::FilterEnv)
                     && absent (dx7, dx7Folded, S::AmpEnv),
                 "a DX7 voice shows OP LFO and OP PITCH unfolded, first in their groups, and no unused AMP ENV (S8-2, I8-9, S9-17)");
-        expect (xOf (neuro, S::Velocity) > 0 && xOf (neuro, S::Velocity) == xOf (init, S::Velocity)
-                    && xOf (init, S::Velocity) == xOf (dx7, S::Velocity)
-                    && xOf (neuro, S::AmpEnv) == xOf (init, S::AmpEnv) && xOf (neuro, S::Lfo1) == xOf (init, S::Lfo1)
-                    && xOf (neuro, S::Lfo1) == xOf (dx7, S::OpLfo) && xOf (neuro, S::AmpEnv) == xOf (dx7, S::OpPitchEnv),
-                "the chip regions start at the same x on every patch (VELOCITY " + juce::String (xOf (neuro, S::Velocity)) + " / "
-                    + juce::String (xOf (init, S::Velocity)) + " / " + juce::String (xOf (dx7, S::Velocity)) + ", AMP ENV "
-                    + juce::String (xOf (neuro, S::AmpEnv)) + " / " + juce::String (xOf (init, S::AmpEnv)) + ")");
+        // (UI review 31, item 10: the regions no longer hold fixed places; the
+        // groups pack from the same start with one fixed gap between them, on
+        // every patch.)
+        expect (xOf (neuro, S::Lfo1) > 0 && xOf (neuro, S::Lfo1) == xOf (init, S::Lfo1) && xOf (neuro, S::Lfo1) == xOf (dx7, S::OpLfo)
+                    && neuroGaps.size() >= 2 && initGaps.size() >= 2 && dx7Gaps.size() >= 2
+                    && sameGaps (neuroGaps, initGaps) && sameGaps (neuroGaps, dx7Gaps),
+                "the chip groups start at the same x and pack with one gap on every patch (gaps " + gapText (neuroGaps) + " / "
+                    + gapText (initGaps) + " / " + gapText (dx7Gaps) + ")");
         expect (neuro.count ((int) S::Random) == 1 && neuro.count ((int) S::Aftertouch) == 1 && neuro.count ((int) S::Lfo3) == 1
                     && neuro.count ((int) S::FilterEnv2) == 1,
                 "Neuro Wobble's bar shows its three LFOs, three envelopes and all five performance sources");

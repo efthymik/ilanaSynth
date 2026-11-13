@@ -29,7 +29,40 @@ public:
     // The hovered key's name leads the tooltip.
     juce::String getTooltip() override
     {
+        if (const auto wheel = wheelAt (getMouseXYRelative().toFloat()); wheel >= 0)
+            return wheel == 0 ? "Pitch bend\nDrag up or down to bend; it springs back to the middle when let go."
+                              : "Mod wheel\nDrag up or down; it stays where it is left.  Moves MOD WHEEL as a hardware wheel would (CC 1).";
         return hoverNote >= 0 ? noteName (hoverNote) + "\n" + generalTip() : generalTip();
+    }
+
+    // The pitch-bend and mod wheels at the strip's left (UI review 31,
+    // item 28, as Serum 2 and Vital have them), three white keys wide: the
+    // keys keep their six octaves, a little narrower. 0 bend, 1 mod.
+    juce::Rectangle<float> wheelBounds (int wheel) const
+    {
+        auto area = getLocalBounds().toFloat().withWidth ((float) wheelsWidth()).reduced (2.0f, 2.0f).withTrimmedRight (4.0f);
+        const auto width = (area.getWidth() - 4.0f) * 0.5f;
+        return wheel == 0 ? area.withWidth (width) : area.withTrimmedLeft (width + 4.0f);
+    }
+
+    float getBend() const { return bend; }
+    float getModWheel() const { return modWheel; }
+
+    // Moves a wheel as a drag would (bend -1..1, mod 0..1); the tests.
+    void moveWheel (int wheel, float value)
+    {
+        if (wheel == 0)
+        {
+            bend = juce::jlimit (-1.0f, 1.0f, value);
+            processorRef.sendUiPitchBend (bend);
+        }
+        else
+        {
+            modWheel = juce::jlimit (0.0f, 1.0f, value);
+            modHeldUntil = juce::Time::getMillisecondCounterHiRes() + 400.0;
+            processorRef.sendUiModWheel (modWheel);
+        }
+        repaint (wheelBounds (wheel).expanded (2.0f).getSmallestIntegerContainer());
     }
 
     // The computer keyboard (the editor forwards its keys here): a note
@@ -84,9 +117,11 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        const auto area = getLocalBounds().toFloat();
+        IlanaTheme::paintWell (g, getLocalBounds().toFloat(), 4.0f);
+        paintWheel (g, 0, bend * 0.5f + 0.5f, true);
+        paintWheel (g, 1, modWheel, false);
 
-        IlanaTheme::paintWell (g, area, 4.0f);
+        const auto area = keysArea();
 
         const auto whiteWidth = area.getWidth() / (float) whiteCount;
 
@@ -157,6 +192,13 @@ public:
         if (event.mods.isPopupMenu())
             return;
 
+        if (const auto wheel = wheelAt (event.position); wheel >= 0)
+        {
+            draggedWheel = wheel;
+            mouseDrag (event);
+            return;
+        }
+
         // Shift- or Ctrl/Cmd-click holds a note on (click it again to let it
         // go), so a chord can be built one key at a time.
         if (event.mods.isShiftDown() || event.mods.isCommandDown())
@@ -177,6 +219,14 @@ public:
 
     void mouseDrag (const juce::MouseEvent& event) override
     {
+        if (draggedWheel >= 0)
+        {
+            const auto track = wheelBounds (draggedWheel).reduced (0.0f, 3.0f);
+            const auto up = juce::jlimit (0.0f, 1.0f, (track.getBottom() - event.position.y) / juce::jmax (1.0f, track.getHeight()));
+            moveWheel (draggedWheel, draggedWheel == 0 ? up * 2.0f - 1.0f : up);
+            return;
+        }
+
         if (latching || event.mods.isPopupMenu() || pressedNote < 0)
             return;
 
@@ -190,6 +240,15 @@ public:
 
     void mouseUp (const juce::MouseEvent&) override
     {
+        // The bend springs back to the middle; the mod wheel stays.
+        if (draggedWheel == 0)
+            moveWheel (0, 0.0f);
+        if (draggedWheel >= 0)
+        {
+            draggedWheel = -1;
+            return;
+        }
+
         latching = false;
 
         if (pressedNote >= 0)
@@ -202,7 +261,7 @@ public:
 
     void mouseMove (const juce::MouseEvent& event) override
     {
-        if (const auto note = noteAt (event.position); note != hoverNote)
+        if (const auto note = wheelAt (event.position) >= 0 ? -1 : noteAt (event.position); note != hoverNote)
         {
             hoverNote = note;
             repaint();
@@ -216,6 +275,48 @@ public:
     }
 
 private:
+    int wheelsWidth() const { return juce::roundToInt ((float) getWidth() * 3.0f / (float) (whiteCount + 3)); }
+    juce::Rectangle<float> keysArea() const { return getLocalBounds().toFloat().withTrimmedLeft ((float) wheelsWidth()); }
+
+    int wheelAt (juce::Point<float> position) const
+    {
+        for (int wheel = 0; wheel < 2; ++wheel)
+            if (wheelBounds (wheel).expanded (2.0f, 2.0f).contains (position))
+                return wheel;
+        return -1;
+    }
+
+    // A wheel: a dark slot with ridges, lit from the rest point (the middle
+    // for the bend, the bottom for the mod wheel) to its value, and a bright
+    // line where it stands.
+    void paintWheel (juce::Graphics& g, int wheel, float value, bool centred) const
+    {
+        const auto box = wheelBounds (wheel);
+        g.setColour (IlanaTheme::Ui::bg);
+        g.fillRoundedRectangle (box, 3.0f);
+        g.setColour (IlanaTheme::Ui::line);
+        g.drawRoundedRectangle (box.reduced (0.5f), 3.0f, 1.0f);
+
+        const auto track = box.reduced (0.0f, 3.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.06f));
+        for (auto y = track.getY() + 3.0f; y < track.getBottom(); y += 4.0f)
+            g.fillRect (box.getX() + 3.0f, y, box.getWidth() - 6.0f, 1.0f);
+
+        const auto accent = IlanaTheme::accent();
+        const auto at = track.getBottom() - track.getHeight() * juce::jlimit (0.0f, 1.0f, value);
+        const auto rest = centred ? track.getCentreY() : track.getBottom();
+        g.setColour (accent.withAlpha (0.35f));
+        g.fillRect (juce::Rectangle<float>::leftTopRightBottom (box.getX() + 2.0f, juce::jmin (at, rest), box.getRight() - 2.0f, juce::jmax (at, rest)));
+        if (centred)
+        {
+            g.setColour (IlanaTheme::Ui::text3);
+            g.fillRect (box.getX() + 1.0f, track.getCentreY() - 0.5f, 3.0f, 1.0f);
+            g.fillRect (box.getRight() - 4.0f, track.getCentreY() - 0.5f, 3.0f, 1.0f);
+        }
+        g.setColour (accent.interpolatedWith (juce::Colours::white, 0.5f));
+        g.fillRoundedRectangle (juce::Rectangle<float> (box.getWidth() - 4.0f, 3.0f).withCentre ({ box.getCentreX(), at }), 1.5f);
+    }
+
     // A lit key: the accent over it as strong as the note was hit, a
     // brighter top edge, and a soft wash down from it.
     static void paintLit (juce::Graphics& g, juce::Rectangle<float> key, float lit)
@@ -237,11 +338,12 @@ private:
     // their repaint, since a black key sits over two whites).
     juce::Rectangle<int> keyColumn (int note) const
     {
-        const auto whiteWidth = (float) getWidth() / (float) whiteCount;
+        const auto keys = keysArea();
+        const auto whiteWidth = keys.getWidth() / (float) whiteCount;
         static const int whiteBefore[] = { 0, 1, 1, 2, 2, 3, 4, 4, 5, 5, 6, 6 };
         const auto offset = note - firstNote;
         const auto index = (offset / 12) * 7 + whiteBefore[offset % 12];
-        const auto x = (float) index * whiteWidth;
+        const auto x = keys.getX() + (float) index * whiteWidth;
         return juce::Rectangle<float> (x - whiteWidth * 0.5f, 0.0f, whiteWidth * 2.0f, (float) getHeight()).getSmallestIntegerContainer();
     }
 
@@ -258,6 +360,14 @@ private:
     {
         if (! IlanaAnim::showing (*this))
             return;
+
+        // The mod wheel follows MIDI too (not while it is being moved here).
+        if (draggedWheel != 1 && juce::Time::getMillisecondCounterHiRes() > modHeldUntil)
+            if (const auto live = juce::jlimit (0.0f, 1.0f, processorRef.getSourceDisplayValue ((int) Mod::Source::ModWheel)); std::abs (live - modWheel) > 0.004f)
+            {
+                modWheel = live;
+                repaint (wheelBounds (1).expanded (2.0f).getSmallestIntegerContainer());
+            }
 
         const auto epoch = processorRef.getUiNoteEpoch();
         if (epoch == shownEpoch && ! fading)
@@ -318,7 +428,7 @@ private:
 
     int noteAt (juce::Point<float> position) const
     {
-        const auto area = getLocalBounds().toFloat();
+        const auto area = keysArea();
         const auto whiteWidth = area.getWidth() / (float) whiteCount;
         const auto blackZone = area.getY() + area.getHeight() * 0.62f;
 
@@ -380,5 +490,8 @@ private:
     float pressedVelocity = 0.7f;
     std::array<float, 128> light {};
     juce::uint32 shownEpoch = ~0u;
+    int draggedWheel = -1;
+    float bend = 0.0f, modWheel = 0.0f;
+    double modHeldUntil = 0.0;
     bool fading = false;
 };

@@ -2,7 +2,10 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include <algorithm>
 #include <cmath>
+#include <optional>
+#include <vector>
 
 #include "../PluginProcessor.h"
 #include "AnimationUtils.h"
@@ -11,6 +14,7 @@
 #include "ParamInfo.h"
 #include "ModulePool.h"
 #include "InfoStrip.h"
+#include "HeldSliderAttachment.h"
 
 struct ModRingConfig
 {
@@ -227,6 +231,55 @@ inline int& pinnedModSource()
     return source;
 }
 
+// Click to assign (UI review 31, item 26): + ASSIGN on a macro, or "Assign
+// by clicking a knob" on any chip, arms a source; the next knob clicked gets
+// the route at the drop's depth, as if the chip had been dragged there. Esc,
+// or a click anywhere else, disarms (the editor shows the hint while armed).
+// Message thread only. 0: nothing armed.
+inline int& armedModSource()
+{
+    static int source = 0;
+    return source;
+}
+
+// Called when a source is armed or disarmed (the editor shows its hint).
+inline std::function<void()>& armedModSourceChanged()
+{
+    static std::function<void()> callback;
+    return callback;
+}
+
+// While armed, a press anywhere but on a knob (a component marked
+// "takesArmedClick", or inside one) disarms.
+struct ArmedClickCanceller : public juce::MouseListener
+{
+    void mouseDown (const juce::MouseEvent& event) override;
+};
+
+inline void setArmedModSource (int source)
+{
+    static ArmedClickCanceller canceller;
+    auto& armed = armedModSource();
+    if (armed == source)
+        return;
+    if (armed == 0)
+        juce::Desktop::getInstance().addGlobalMouseListener (&canceller);
+    else if (source == 0)
+        juce::Desktop::getInstance().removeGlobalMouseListener (&canceller);
+    armed = source;
+    if (armedModSourceChanged() != nullptr)
+        armedModSourceChanged()();
+}
+
+inline void ArmedClickCanceller::mouseDown (const juce::MouseEvent& event)
+{
+    for (auto* component = event.originalComponent; component != nullptr; component = component->getParentComponent())
+        if (component->getProperties().contains ("takesArmedClick"))
+            return;
+    // (Not from inside the global listener's own call.)
+    juce::MessageManager::callAsync ([] { setArmedModSource (0); });
+}
+
 // The source a drag under way carries ("modsource:N" from a chip, a macro,
 // an LFO or envelope card), 0 while none is dragged. Knobs poll it to show
 // every drop target as soon as a drag starts (review 8, V8-10).
@@ -370,14 +423,18 @@ public:
 
     // A routing's right-click menu, on its ring or its badge (Vital's):
     // polarity, stereo, then the amount, bypass and remove.
-    static void addRouteItems (juce::PopupMenu& menu, const Dot& dot)
+    // idBase offsets the item ids (the knob's own menu lists every routing
+    // as a submenu of these, each with its own base); handleRouteChoice takes
+    // the id minus that base.
+    static void addRouteItems (juce::PopupMenu& menu, const Dot& dot, int idBase = 0, bool withHeader = true)
     {
-        menu.addSectionHeader (ModNames::source (dot.source) + "  (" + juce::String (Mod::shownPercent (dot.depth, dot.bipolar)) + "%)");
+        if (withHeader)
+            menu.addSectionHeader (ModNames::source (dot.source) + "  (" + juce::String (Mod::shownPercent (dot.depth, dot.bipolar)) + "%)");
 
-        const auto add = [&menu] (int id, const juce::String& text, const juce::String& hint, bool enabled, bool ticked)
+        const auto add = [&menu, idBase] (int id, const juce::String& text, const juce::String& hint, bool enabled, bool ticked)
         {
             juce::PopupMenu::Item item (text);
-            item.itemID = id;
+            item.itemID = idBase + id;
             item.shortcutKeyDescription = hint;
             item.isEnabled = enabled;
             item.isTicked = ticked;
@@ -905,6 +962,12 @@ public:
 
     void mouseDown (const juce::MouseEvent& event) override
     {
+        // A press the knob takes for itself (click to assign, Alt-drag a new
+        // route: UI review 31, item 26): the value doesn't move.
+        claimed = claimPress != nullptr && claimPress (event);
+        if (claimed)
+            return;
+
         juce::Slider::mouseDown (event);
 
         // (a popup-menu press or a ctrl-click reset is not the start of a drag)
@@ -928,6 +991,8 @@ public:
     // moves by itself (the look-and-feel glides while this is recent).
     void mouseDoubleClick (const juce::MouseEvent& event) override
     {
+        if (claimed)
+            return;
         getProperties().set ("resetGlideAt", juce::Time::getMillisecondCounterHiRes());
         juce::Slider::mouseDoubleClick (event);
     }
@@ -941,7 +1006,7 @@ public:
 
     void mouseDrag (const juce::MouseEvent& event) override
     {
-        if (! dragging)
+        if (claimed || ! dragging)
             return;
 
         setFine (wantsFine (event.mods));
@@ -955,7 +1020,9 @@ public:
         if (std::abs (step) > 0.0f)
             lastEnd = end;
         proportion = juce::jlimit (0.0, 1.0, wanted);
-        setValue (proportionOfLengthToValue (proportion), juce::sendNotificationSync);
+        // (Named places on the ring catch the drag; Alt held moves freely past them.)
+        const auto mark = event.mods.isAltDown() ? std::optional<double>() : markNear (proportion, wantsFine (event.mods));
+        setValue (mark.has_value() ? *mark : proportionOfLengthToValue (proportion), juce::sendNotificationSync);
         if (onDragValue != nullptr)
             onDragValue();
 
@@ -965,6 +1032,12 @@ public:
 
     void mouseUp (const juce::MouseEvent& event) override
     {
+        if (claimed)
+        {
+            claimed = false;
+            return;
+        }
+
         if (dragging && getProperties().contains ("dragGhostPos"))
         {
             getProperties().set ("dragGhostRelease", juce::Time::getMillisecondCounterHiRes());
@@ -990,8 +1063,45 @@ public:
     std::function<void (int end)> onEndHit;
     // Each step of a drag, and once more on the release (isGrabbed false).
     std::function<void()> onDragValue;
+    // Asked on each press: true takes it (no turn, no reset; the owner
+    // follows the drag as the slider's mouse listener).
+    std::function<bool (const juce::MouseEvent&)> claimPress;
+
+    // The knob's named places ("ringMarks": real values, comma-separated; the modal SIZE / SCALE's
+    // instruments, ModalMarks.h) catch a drag that comes within snapPixels of them (a tenth of that
+    // while fine), or half the way to a neighbour where they sit closer: the mark's exact value.
+    static constexpr float snapPixels = 4.0f;
+    std::optional<double> markNear (double atProportion, bool fineDrag)
+    {
+        const auto text = getProperties()["ringMarks"].toString();
+        if (text.isEmpty())
+            return {};
+        std::vector<std::pair<double, double>> marks; // (proportion, value)
+        for (const auto& token : juce::StringArray::fromTokens (text, ",", ""))
+        {
+            const auto value = token.getDoubleValue();
+            const auto at = valueToProportionOfLength (value);
+            if (std::isfinite (at) && at >= 0.0 && at <= 1.0)
+                marks.emplace_back (at, value);
+        }
+        std::sort (marks.begin(), marks.end());
+        const auto reach = snapPixels / fullRangePixels / (fineDrag ? fineDivisor : 1.0f);
+        for (size_t i = 0; i < marks.size(); ++i)
+        {
+            auto window = (double) reach;
+            if (i > 0)
+                window = juce::jmin (window, (marks[i].first - marks[i - 1].first) * 0.5);
+            if (i + 1 < marks.size())
+                window = juce::jmin (window, (marks[i + 1].first - marks[i].first) * 0.5);
+            if (std::abs (atProportion - marks[i].first) <= window)
+                return marks[i].second;
+        }
+        return {};
+    }
 
 private:
+    bool claimed = false;
+
     void setFine (bool shouldBeFine)
     {
         if (shouldBeFine == fine)
@@ -1029,6 +1139,8 @@ public:
         slider.setColour (juce::Slider::rotarySliderFillColourId, accent);
         addAndMakeVisible (slider);
         slider.addMouseListener (this, false);
+        slider.claimPress = [this] (const juce::MouseEvent& event) { return claimPress (event); };
+        getProperties().set ("takesArmedClick", true);
 
         label.setText (labelText, juce::dontSendNotification);
         label.setJustificationType (juce::Justification::centred);
@@ -1062,7 +1174,14 @@ public:
             auto text = slider.getTextFromValue (slider.getValue());
             if (slider.isDoubleClickReturnEnabled())
                 text << juce::String::fromUTF8 ("  \xc2\xb7  default ") << slider.getTextFromValue (slider.getDoubleClickReturnValue());
-            text << juce::String::fromUTF8 ("  \xc2\xb7  hold Shift for fine, double-click to reset");
+            // (A knob with named places, the modal SIZE / SCALE: the one it is on, and how to pass them.)
+            const auto markValues = juce::StringArray::fromTokens (slider.getProperties()["ringMarks"].toString(), ",", "");
+            const auto markNames = juce::StringArray::fromTokens (slider.getProperties()["ringMarkNames"].toString(), ",", "");
+            for (int i = 0; i < juce::jmin (markValues.size(), markNames.size()); ++i)
+                if (std::abs (markValues[i].getDoubleValue() - slider.getValue()) < 1.0e-4)
+                    text << juce::String::fromUTF8 ("  \xc2\xb7  ") << markNames[i];
+            text << juce::String::fromUTF8 (markValues.isEmpty() ? "  \xc2\xb7  hold Shift for fine, double-click to reset"
+                                                                 : "  \xc2\xb7  snaps to instruments, hold Alt to move freely");
             InfoStrip::say (*this, name, text);
         };
 
@@ -1120,7 +1239,7 @@ public:
         // (one inside it still turns the knob).
         addChildComponent (ringOverlay);
 
-        attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (state, parameterID, slider);
+        attachment = std::make_unique<HeldSliderAttachment> (state, parameterID, slider);
 
         parameter = state.getParameter (parameterID);
 
@@ -1159,11 +1278,96 @@ public:
     {
         closeModCard();
 
+        if (altDragSlot >= 0)
+            return; // (the slider's press, taken by claimPress)
+
+        // A press on the name or around the dial while a source is armed.
+        if (! event.mods.isPopupMenu() && event.originalComponent == this && takeArmedClick())
+            return;
+
         if (event.mods.isPopupMenu())
         {
             startPulse (IlanaTheme::accent());
             showModMenu();
         }
+    }
+
+    // Alt-drag with a source pinned and no ring from it yet: the route is
+    // made on the press and the drag sets its depth (UI review 31, item 26).
+    void mouseDrag (const juce::MouseEvent& event) override
+    {
+        if (altDragSlot < 0 || processorRef == nullptr)
+            return;
+        const auto fine = event.mods.isShiftDown() ? 0.2f : 1.0f;
+        const auto travel = (float) (event.getDistanceFromDragStartX() - event.getDistanceFromDragStartY());
+        const auto depth = juce::jlimit (-1.0f, 1.0f, travel * 0.006f * fine);
+        processorRef->setModSlotValue (altDragSlot, "amt", Mod::storedDepth (processorRef->readModSlot (altDragSlot), depth));
+        refreshRoutings();
+        repaint();
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (altDragSlot < 0)
+            return;
+        altDragSlot = -1;
+        if (processorRef != nullptr)
+            processorRef->endEdit();
+        refreshRoutings();
+        updateNameInk();
+        repaint();
+    }
+
+    // Click to assign: the armed source goes to this knob, as a drop would
+    // put it (one route per source and knob). True when the click was taken.
+    bool takeArmedClick()
+    {
+        const auto source = armedModSource();
+        if (source == 0 || processorRef == nullptr)
+            return false;
+
+        if (! isModulatable())
+        {
+            FloatingNote::show (*this, refusalText());
+            repaint();
+            return true; // (still armed: pick a knob that takes it)
+        }
+
+        setArmedModSource (0);
+        if (! showExistingRouting (source))
+        {
+            processorRef->performEdit ("Add modulation", [this, source] { processorRef->assignModSlot (source, ringConfig.destination, 0.35f); });
+            startPulse (modSourceColour (source));
+        }
+        refreshRoutings();
+        repaint();
+        return true;
+    }
+
+    // The slider's presses the knob takes: an armed source's click, and
+    // Alt-drag making a route from the pinned source.
+    bool claimPress (const juce::MouseEvent& event)
+    {
+        if (event.mods.isPopupMenu())
+            return false;
+        if (armedModSource() != 0)
+            return takeArmedClick();
+
+        const auto pinned = pinnedModSource();
+        if (! event.mods.isAltDown() || pinned == 0 || processorRef == nullptr || ! isModulatable() || routesFrom (pinned))
+            return false;
+
+        processorRef->beginEdit ("Add " + ModNames::source (pinned, processorRef) + " modulation");
+        altDragSlot = processorRef->assignModSlot (pinned, ringConfig.destination, 0.0f);
+        if (altDragSlot < 0)
+        {
+            processorRef->endEdit();
+            return false;
+        }
+        startPulse (modSourceColour (pinned));
+        refreshRoutings();
+        repaint();
+        return true;
     }
 
     juce::Slider& getSlider() { return slider; }
@@ -1433,7 +1637,7 @@ public:
     float packedNameDevicePx() const { return IlanaTheme::font (packedNameUnits(), true).getHeight() * IlanaTheme::uiScaleRef(); }
     // The packed number's height on screen in device pixels, and the dial's (a layout test's measure:
     // the number keeps its share of the dial at every zoom).
-    float packedNumberDevicePx() const { return IlanaTheme::font (packedD * kPackedValueScale, true, true).getHeight() * IlanaTheme::uiScaleRef(); }
+    float packedNumberDevicePx() const { return IlanaTheme::font (packedValueUnits(), true, true).getHeight() * IlanaTheme::uiScaleRef(); }
     float packedDialDevicePx() const { return packedD * IlanaTheme::uiScaleRef(); }
     // A packed name too wide for its cell breaks at its first space onto a second line ("KEY" over "TRACK"),
     // in full words; the cell the page gives the knob must leave the room (about 9 px under the name).
@@ -1449,6 +1653,14 @@ public:
         packedNameSize = size;
         repaint();
     }
+    // The packed number's size in units, when a page wants it apart from the dial's own share (the FX
+    // rack's: a bigger ring round the same number keeps it clear of the ring, UI review 31); 0: the dial's.
+    void setPackedValueSize (float units)
+    {
+        packedValueSize = units;
+        repaint();
+    }
+    float packedValueUnits() const { return packedValueSize > 0.0f ? packedValueSize : packedD * kPackedValueScale; }
     // Pixels a packed value may run past the dial's width before its unit is dropped ("1.20 kHz").
     void setPackedValueRoom (int pixels)
     {
@@ -1839,11 +2051,19 @@ public:
             if (unit.length() > 3)
                 unit = {};
         }
+        // (A zero needs no sign: "+0.0" is "0.0", UI review 31.)
+        if ((value.startsWithChar ('+') || value.startsWithChar ('-')) && value.length() > 1 && value.substring (1).containsOnly ("0."))
+            value = value.substring (1);
         if (value.length() > 4 && value.containsChar ('.'))
             value = value.dropLastCharacters (value.length() - 4).trimCharactersAtEnd (".");
         // ("5.00" is "5.0": two decimals in one digit's dial came within 2 px of the ring, UI review 25.)
         if (value.length() == 4 && juce::CharacterFunctions::isDigit (value[0]) && value[1] == '.')
             value = juce::String (value.getDoubleValue(), 1);
+
+        // A small dial (the wave card's AMT knobs, 19 units) has no room for two lines: the number
+        // came to sit on the ring (UI review 30). A % there goes without saying, so the number stands alone.
+        if (packedValueUnits() < 22.0f * kPackedValueScale && unit == "%")
+            unit = {};
 
         // (While a value is typed over the dial, the box is the value.)
         if (valueEditor != nullptr)
@@ -1855,14 +2075,14 @@ public:
         if (hot != nullptr)
         {
             value = hotDepthText (*hot);
-            unit = "%";
+            unit = packedValueUnits() < 22.0f * kPackedValueScale ? "" : "%";
             hotColour = modSourceColour (hot->source);
         }
 
         // Grabbed, the number grows a little and the name turns white; released, both settle back (~150 ms).
         const auto grab = IlanaTheme::fade (const_cast<KnobControl&> (*this), 77, slider.isGrabbed() ? 1.0f : 0.0f, 24.0f);
         g.setColour ((hot != nullptr ? hotColour : IlanaTheme::Ui::text).withMultipliedAlpha (on));
-        const auto drawn = IlanaTheme::font (packedD * kPackedValueScale * (1.0f + 0.07f * grab), true, true);
+        const auto drawn = IlanaTheme::font (packedValueUnits() * (1.0f + 0.07f * grab), true, true);
         g.setFont (drawn);
         if (unit.isNotEmpty())
         {
@@ -2426,6 +2646,8 @@ private:
         void mouseDown (const juce::MouseEvent& event) override
         {
             owner.closeModCard();
+            if (! event.mods.isPopupMenu() && owner.takeArmedClick())
+                return;
             const auto ring = ringUnder (event);
 
             if (! juce::isPositiveAndBelow (ring, (int) owner.routings.size()))
@@ -2839,13 +3061,20 @@ public:
 
             if (! routings.empty())
             {
-                juce::PopupMenu removeMenu;
+                // Each routing into the knob: its polarity, stereo, amount,
+                // bypass and remove (the ring's own menu), so none of it
+                // needs the thin ring or the MATRIX.
+                for (size_t i = 0; i < routings.size() && i < (size_t) maxRouteSubmenus; ++i)
+                {
+                    const auto& dot = routings[i];
+                    juce::PopupMenu routeMenu;
+                    ModDotStrip::addRouteItems (routeMenu, dot, routeMenuBase + (int) i * routeMenuStride, false);
+                    menu.addSubMenu (ModNames::source (dot.source, processorRef) + "  " + polaritySymbol (dot) + " "
+                                         + juce::String (Mod::shownPercent (dot.depth, dot.bipolar)) + "%"
+                                         + (dot.bypass ? "  (bypassed)" : ""),
+                                     routeMenu, true, nullptr, false, 0);
+                }
 
-                for (const auto& dot : routings)
-                    removeMenu.addItem (5000 + dot.slot, ModNames::source (dot.source, processorRef) + "  ("
-                                                             + juce::String (Mod::shownPercent (dot.depth, dot.bipolar)) + "%)");
-
-                menu.addSubMenu ("Remove modulation", removeMenu);
                 menu.addItem (1000, "Clear all modulation to this knob");
             }
 
@@ -2881,6 +3110,23 @@ public:
     }
 
 private:
+    // The knob menu's routing submenus: ids routeMenuBase + index * stride + the
+    // route item's own id (1..15), clear of the menu's other ids (up to 6116).
+    static constexpr int routeMenuBase = 7000, routeMenuStride = 100, maxRouteSubmenus = 64;
+
+    // How the routing's polarity reads in a menu: up, down, both ways, or
+    // the source's own range.
+    static juce::String polaritySymbol (const ModDotStrip::Dot& dot)
+    {
+        switch ((Mod::Polarity) dot.polarity)
+        {
+            case Mod::Polarity::Unipolar: return "+";
+            case Mod::Polarity::Negative: return juce::String (juce::CharPointer_UTF8 ("\xe2\x88\x92"));
+            case Mod::Polarity::Bipolar:  return juce::String (juce::CharPointer_UTF8 ("\xc2\xb1"));
+            default:                      return dot.bipolar ? juce::String (juce::CharPointer_UTF8 ("\xc2\xb1")) : "+";
+        }
+    }
+
     void showModMenu()
     {
         if (processorRef == nullptr && ! extraMenu)
@@ -2890,10 +3136,19 @@ private:
         juce::Component::SafePointer<KnobControl> safeThis (this);
 
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
-                            [safeThis] (int result)
+                            [safeThis, routes = routings] (int result)
                             {
                                 if (safeThis == nullptr || result == 0)
                                     return;
+
+                                // A routing's submenu: the ring menu's choice.
+                                if (result >= routeMenuBase && result < routeMenuBase + routeMenuStride * maxRouteSubmenus)
+                                {
+                                    const auto index = (size_t) ((result - routeMenuBase) / routeMenuStride);
+                                    if (index < routes.size())
+                                        safeThis->dotStrip.handleRouteChoice ((result - routeMenuBase) % routeMenuStride, routes[index]);
+                                    return;
+                                }
 
                                 auto& processor = *safeThis->processorRef;
 
@@ -3008,7 +3263,7 @@ private:
             repaint();
         }
 
-        if (const auto dragged = modSourceBeingDragged (*this); dragged != dragSource)
+        if (const auto dragged = modSourceBeingDragged (*this) != 0 ? modSourceBeingDragged (*this) : armedModSource(); dragged != dragSource)
         {
             dragSource = dragged;
             repaint();
@@ -3122,7 +3377,7 @@ private:
     bool diffMark = false;
     int endHit = 0;
     double endHitAt = 0.0;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
+    std::unique_ptr<HeldSliderAttachment> attachment;
 
     IlanaSynthAudioProcessor* processorRef = nullptr;
     juce::RangedAudioParameter* parameter = nullptr;
@@ -3175,6 +3430,7 @@ private:
     float activity = 0.0f;
     double lastSliderValue = 0.0;
     bool dragHover = false;
+    int altDragSlot = -1; // the route an Alt-drag is making (-1: none)
     int dragSource = 0; // the source being dragged anywhere (V8-10)
     float pulse = 0.0f; // the right-click / assign ring, 1 to 0
     std::unique_ptr<juce::TextEditor> amountEditor;
@@ -3185,6 +3441,7 @@ private:
     int packedValueRoom = 0;
     bool packedNameWrap = false, packedNameAlwaysWraps = false;
     float packedNameSize = 0.0f;
+    float packedValueSize = 0.0f; // (0: the dial's share)
     juce::Rectangle<int> packedNameArea;
     std::unique_ptr<juce::TextEditor> valueEditor;
     juce::Rectangle<int> inlineValueArea;
@@ -3750,6 +4007,8 @@ public:
         juce::String name, tip;
         // The glyph in an 18 x 16 box: SVG path data, each with its stroke width (0 fills).
         std::vector<std::pair<juce::String, float>> paths;
+        // Its family's tint (the exciters: pluck, strike, bow...); transparent draws it in the label grey.
+        juce::Colour tint {};
     };
 
     std::function<int()> getChosen;
@@ -3800,12 +4059,20 @@ public:
             const auto r = tile (i).reduced (0.5f);
             const auto lit = i == chosen;
             const auto hover = i == hovered && isMouseOver();
-            g.setColour ((lit ? IlanaTheme::Ui::well.interpolatedWith (colour, 0.2f) : IlanaTheme::Ui::well).withMultipliedAlpha (on));
+            // (A tinted set fills the chosen tile in the colour and draws its glyph dark on it, UI review 31, item 42;
+            // the others keep the well, their glyph in the family's tint.)
+            const auto tint = items[(size_t) i].tint;
+            const auto tinted = ! tint.isTransparent();
+            const auto fill = lit ? (tinted ? colour.withAlpha (0.92f) : IlanaTheme::Ui::well.interpolatedWith (colour, 0.2f))
+                                  : (tinted ? IlanaTheme::Ui::well.interpolatedWith (tint, 0.1f) : IlanaTheme::Ui::well);
+            g.setColour (fill.withMultipliedAlpha (on));
             g.fillRoundedRectangle (r, 3.0f);
             g.setColour ((lit ? colour : hover ? IlanaTheme::Ui::text3 : IlanaTheme::Ui::line).withMultipliedAlpha (on));
             g.drawRoundedRectangle (r, 3.0f, 1.0f);
 
-            const auto ink = (lit ? colour : hover ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2).withMultipliedAlpha (on);
+            const auto ink = (lit ? (tinted ? IlanaTheme::Ui::well : colour)
+                              : tinted ? (hover ? tint.brighter (0.3f) : tint)
+                              : hover ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2).withMultipliedAlpha (on);
             const auto transform = juce::AffineTransform::scale (tileScale())
                                        .translated (r.getX() + 1.5f * tileScale(), r.getY() + 0.5f * tileScale());
             g.setColour (ink);
@@ -3859,6 +4126,139 @@ private:
     std::vector<Item> items;
     std::vector<std::vector<std::pair<juce::Path, float>>> glyphs;
     juce::Colour colour = IlanaTheme::accent();
+    int hovered = -1;
+};
+
+// A multi-position slide switch (the exciter type's engines: ilana, 2026-11-11, "like the minilogue, 3 or 4 way
+// switches"): a track split into labelled positions, the lever lit under the chosen one. Click a position, or drag
+// the lever along. One position draws as a plain lit pill (nothing to switch).
+class PositionSwitch : public juce::Component,
+                       public juce::SettableTooltipClient,
+                       private IlanaAnim::FrameTimer
+{
+public:
+    std::function<int()> getChosen;
+    std::function<void (int)> onChoose;
+
+    void setPositions (juce::StringArray labels)
+    {
+        if (labels != positions)
+        {
+            positions = std::move (labels);
+            lever = (float) juce::jlimit (0, juce::jmax (0, positions.size() - 1), chosen());
+            repaint();
+        }
+    }
+    void setColour (juce::Colour newColour) { colour = newColour; repaint(); }
+    // (A preset load or another control moved it: the lever jumps there; only a click slides it.)
+    void refresh()
+    {
+        if (! isTimerRunning())
+            lever = (float) juce::jlimit (0, juce::jmax (0, positions.size() - 1), chosen());
+        repaint();
+    }
+    int size() const { return positions.size(); }
+
+    // The width the labels need at the header's segment size (every position as wide as the widest word, so the
+    // lever is one size), measured at the design zoom as SegmentBar does.
+    int idealWidth() const
+    {
+        auto widest = 0;
+        for (const auto& label : positions)
+            widest = juce::jmax (widest, SegmentBar::measure (label));
+        return (widest + 14) * juce::jmax (1, positions.size()) + 4;
+    }
+
+    juce::Rectangle<float> cell (int index) const
+    {
+        const auto r = getLocalBounds().toFloat().reduced (2.0f);
+        const auto w = r.getWidth() / (float) juce::jmax (1, positions.size());
+        return { r.getX() + w * (float) index, r.getY(), w, r.getHeight() };
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto on = isEnabled() ? 1.0f : 0.5f;
+        const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
+        const auto radius = bounds.getHeight() * 0.5f;
+        g.setColour (IlanaTheme::Ui::well.withMultipliedAlpha (on));
+        g.fillRoundedRectangle (bounds, radius);
+        g.setColour (IlanaTheme::Ui::line.withMultipliedAlpha (on));
+        g.drawRoundedRectangle (bounds, radius, 1.0f);
+        if (positions.isEmpty())
+            return;
+
+        // The detents between positions (the slots a minilogue lever clicks into).
+        g.setColour (IlanaTheme::Ui::line.withMultipliedAlpha (on));
+        for (int i = 1; i < positions.size(); ++i)
+        {
+            const auto x = cell (i).getX();
+            g.fillRect (juce::Rectangle<float> (x - 0.5f, bounds.getCentreY() - 3.0f, 1.0f, 6.0f));
+        }
+
+        // The lever, slid to the chosen position.
+        const auto first = cell (0);
+        const auto leverRect = first.withX (first.getX() + first.getWidth() * lever).reduced (0.5f);
+        g.setColour (colour.withAlpha (0.92f).withMultipliedAlpha (on));
+        g.fillRoundedRectangle (leverRect, leverRect.getHeight() * 0.5f);
+
+        g.setFont (SegmentBar::segmentFont());
+        const auto at = juce::roundToInt (lever);
+        for (int i = 0; i < positions.size(); ++i)
+        {
+            const auto lit = i == at;
+            const auto hover = i == hovered && isMouseOver() && ! lit;
+            g.setColour ((lit ? IlanaTheme::Ui::well : hover ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2).withMultipliedAlpha (on));
+            g.drawText (positions[i], cell (i), juce::Justification::centred, false);
+        }
+    }
+
+    void mouseMove (const juce::MouseEvent& event) override { setHovered (cellAt (event.position)); }
+    void mouseExit (const juce::MouseEvent&) override { setHovered (-1); }
+    void mouseDown (const juce::MouseEvent& event) override { pick (cellAt (event.position)); }
+    void mouseDrag (const juce::MouseEvent& event) override { pick (cellAt (event.position)); }
+
+private:
+    int chosen() const { return getChosen != nullptr ? getChosen() : 0; }
+    int cellAt (juce::Point<float> point) const
+    {
+        for (int i = 0; i < positions.size(); ++i)
+            if (cell (i).expanded (0.0f, 3.0f).contains (point))
+                return i;
+        return point.x < 0.0f ? 0 : positions.size() - 1;
+    }
+    void pick (int index)
+    {
+        if (! isEnabled() || index < 0 || index >= positions.size() || index == chosen() || onChoose == nullptr)
+            return;
+        onChoose (index);
+        startFrames();
+        repaint();
+    }
+    void startFrames() { startTimerHz (60); }
+    void timerCallback() override
+    {
+        const auto target = (float) juce::jlimit (0, juce::jmax (0, positions.size() - 1), chosen());
+        lever += (target - lever) * juce::jmin (1.0f, frameSeconds() * 18.0f);
+        if (std::abs (target - lever) < 0.01f)
+        {
+            lever = target;
+            stopTimer();
+        }
+        repaint();
+    }
+    void setHovered (int index)
+    {
+        if (index != hovered)
+        {
+            hovered = index;
+            repaint();
+        }
+    }
+
+    juce::StringArray positions;
+    juce::Colour colour = IlanaTheme::accent();
+    float lever = 0.0f;
     int hovered = -1;
 };
 
@@ -4247,7 +4647,7 @@ public:
     {
         setSliderStyle (juce::Slider::LinearBar);
         setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
-        attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (state, parameterID, *this);
+        attachment = std::make_unique<HeldSliderAttachment> (state, parameterID, *this);
 
         if (auto* parameter = state.getParameter (parameterID))
         {
@@ -4301,7 +4701,7 @@ private:
 
     juce::String name;
     juce::Colour accent { juce::Colours::orange };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
+    std::unique_ptr<HeldSliderAttachment> attachment;
 };
 
 class ValueSliderControl : public juce::Component
@@ -4314,7 +4714,7 @@ public:
         slider.setColour (juce::Slider::rotarySliderFillColourId, IlanaTheme::accent());
         addAndMakeVisible (slider);
 
-        attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (state, parameterID, slider);
+        attachment = std::make_unique<HeldSliderAttachment> (state, parameterID, slider);
 
         if (auto* parameter = state.getParameter (parameterID))
         {
@@ -4335,7 +4735,7 @@ public:
 private:
     juce::String parameterId;
     KeyboardSlider slider;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
+    std::unique_ptr<HeldSliderAttachment> attachment;
 };
 
 // One dimming rule for every page (UI review 4, V12 and S10). A control

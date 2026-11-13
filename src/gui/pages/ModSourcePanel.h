@@ -204,9 +204,13 @@ public:
         {
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
             g.setColour (IlanaTheme::Ui::text3);
-            IlanaTheme::drawFitted (g, "Nothing yet. Drag " + ModNames::sourceUpper (source, &processorRef)
-                                           + " onto any knob; its routes and depths show here.",
-                                    rowArea (0), juce::Justification::centredLeft, 1);
+            // (The compact pop-up is 300 px wide: the short line there, never cut off.)
+            const auto line = rowArea (0);
+            const juce::String full = "Nothing yet. Drag " + ModNames::sourceUpper (source, &processorRef)
+                                      + " onto any knob; its routes and depths show here.";
+            const auto fits = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), full) <= line.getWidth();
+            IlanaTheme::drawFitted (g, fits ? full : juce::String ("Nothing yet. Drag it onto any knob."),
+                                    line, juce::Justification::centredLeft, 1);
             return;
         }
 
@@ -702,7 +706,11 @@ private:
     enum class Kind { lfo, envelope, opEnv, other };
     static constexpr int gap = 10, menuHeight = 13 + 4 + 28, knobRowHeight = 70, minGraphHeight = 90;
 
-    juce::String describeOther() const
+    juce::String describeOther() const { return describe (source); }
+
+public:
+    // What a source with no settings is, in one line (its pop-up and PLAY's card).
+    static juce::String describe (int source)
     {
         using S = Mod::Source;
         const auto s = (S) source;
@@ -714,6 +722,8 @@ private:
         if (Mod::macroIndexFor (s) >= 0) return "A macro knob in the dock: one knob that moves every route it drives.";
         return "A modulation source. Its settings, if it has any, open from its chip in the dock.";
     }
+
+private:
 
     // An envelope nothing plays dims, and says so over its graph (UI review
     // 6, I6-2; one wording with MOD: S8-17).
@@ -801,6 +811,97 @@ private:
     size_t historyPos = 0;
 };
 
+// A performance source's live value as a bar (its pop-up, UI review 31,
+// items 19 and 28). MOD WHEEL and PRESSURE are also moved here with the mouse:
+// drag along it (a click jumps there), double-click for 0. What it sends is
+// what a hardware wheel would (IlanaSynthAudioProcessor::sendUiModWheel), so
+// the next MIDI message takes over again.
+class SourceValueBar : public juce::Component,
+                       public juce::SettableTooltipClient,
+                       private juce::Timer
+{
+public:
+    explicit SourceValueBar (IlanaSynthAudioProcessor& p) : processorRef (p) { startTimerHz (30); }
+
+    static constexpr int height = 22;
+
+    void setSource (int newSource, juce::Colour newColour)
+    {
+        source = newSource;
+        colour = newColour;
+        const auto movable = isMovable();
+        setMouseCursor (movable ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
+        setTooltip (movable ? "Drag to move " + ModNames::sourceUpper (source, &processorRef) + " with the mouse (as the hardware would); "
+                                  "double-click for 0.  The next MIDI message takes over."
+                            : juce::String ("Its value now."));
+        repaint();
+    }
+
+    bool isMovable() const { return source == (int) Mod::Source::ModWheel || source == (int) Mod::Source::Aftertouch; }
+    float getShownValue() const { return shown; }
+
+    // Sets the value as a drag would (0..1); the tests.
+    void moveTo (float value)
+    {
+        if (! isMovable())
+            return;
+        held = juce::jlimit (0.0f, 1.0f, value);
+        heldUntil = juce::Time::getMillisecondCounterHiRes() + 400.0;
+        if (source == (int) Mod::Source::ModWheel)
+            processorRef.sendUiModWheel (held);
+        else
+            processorRef.sendUiPressure (held);
+        shown = held;
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto area = getLocalBounds().toFloat().reduced (0.5f);
+        IlanaTheme::paintWell (g, area, 5.0f);
+        const auto track = area.reduced (3.0f);
+        const auto fill = track.withWidth (track.getWidth() * juce::jlimit (0.0f, 1.0f, shown));
+        g.setColour (colour.withAlpha (isMouseOverOrDragging() ? 0.95f : 0.75f));
+        g.fillRoundedRectangle (fill, 3.0f);
+        if (isMovable())
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.9f));
+            g.fillRoundedRectangle (juce::Rectangle<float> (3.0f, track.getHeight() + 2.0f).withCentre ({ fill.getRight(), track.getCentreY() }), 1.5f);
+        }
+        g.setColour (IlanaTheme::Ui::text);
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true));
+        g.drawText (juce::String (juce::roundToInt (shown * 100.0f)) + "%", area.reduced (8.0f, 0.0f), juce::Justification::centredRight);
+    }
+
+    void mouseDown (const juce::MouseEvent& event) override { mouseDrag (event); }
+    void mouseDrag (const juce::MouseEvent& event) override
+    {
+        moveTo (((float) event.x - 3.0f) / (float) juce::jmax (1, getWidth() - 6));
+    }
+    void mouseDoubleClick (const juce::MouseEvent&) override { moveTo (0.0f); }
+
+private:
+    void timerCallback() override
+    {
+        if (! IlanaAnim::showing (*this))
+            return;
+        // (While held, the value the mouse sent, until the synth reports it.)
+        const auto live = juce::jlimit (0.0f, 1.0f, std::abs (processorRef.getSourceDisplayValue (source)));
+        const auto value = juce::Time::getMillisecondCounterHiRes() < heldUntil || isMouseButtonDown() ? held : live;
+        if (std::abs (value - shown) > 0.002f)
+        {
+            shown = value;
+            repaint();
+        }
+    }
+
+    IlanaSynthAudioProcessor& processorRef;
+    int source = 0;
+    juce::Colour colour { IlanaTheme::accent() };
+    float shown = 0.0f, held = 0.0f;
+    double heldUntil = 0.0;
+};
+
 // The dock's pop-out editor: a click on a source chip (or EDIT on PLAY's
 // ENVELOPE and LFO cards) opens it above the dock on whatever page is
 // showing, so a source is shaped and its depths set beside the knobs it
@@ -815,8 +916,9 @@ class SourcePopover : public juce::Component
 {
 public:
     SourcePopover (IlanaSynthAudioProcessor& p, juce::PropertiesFile& settingsRef)
-        : processorRef (p), settings (settingsRef), editor (p), routes (p)
+        : processorRef (p), settings (settingsRef), editor (p), routes (p), valueBar (p)
     {
+        addChildComponent (valueBar);
         // The assignment bars wait behind DRIVES, as on PLAY.
         editor.setRoutesFolded (true);
         addAndMakeVisible (editor);
@@ -878,38 +980,48 @@ public:
             envSection->select (env);
         }
 
-        editor.setVisible (kind == Kind::other);
+        // A performance source or a macro (UI review 31, item 19): a compact
+        // card of its one line, its live value (MOD WHEEL and PRESSURE move
+        // with the mouse there, item 28) and DRIVES open, the reason to open it.
+        editor.setVisible (false);
         if (lfoSection != nullptr)
             lfoSection->setVisible (kind == Kind::lfo);
         if (envSection != nullptr)
             envSection->setVisible (kind == Kind::envelope);
-        routes.setVisible (kind != Kind::other);
-        if (kind != Kind::other)
-            routes.setSource (source, modSourceColour (source));
+        valueBar.setVisible (kind == Kind::other);
+        valueBar.setSource (source, modSourceColour (source));
+        routes.setVisible (true);
+        routes.setSource (source, modSourceColour (source));
+        if (kind == Kind::other)
+            routes.setCollapsed (false);
         resized();
         repaint();
     }
 
     // The short editor's size; the full ones compact (ilana's mockup, 2026-10-25): an envelope's card
     // 330 wide, an LFO's 400, as tall as their controls and DRIVES.
-    static constexpr int preferredWidth = 620, preferredHeight = 340, headerHeight = 38;
+    // (A performance source's: 300 wide, its line, its value and DRIVES; UI review 31, item 19. It was 620 x 340.)
+    static constexpr int preferredWidth = 300, describeHeight = 32, headerHeight = 38;
     static constexpr int padding = 4, sideInset = 14, bottomInset = 14;
     static constexpr int compactHeader = 26, compactInset = 8, compactTop = 6, routesGap = 6;
     // (390: the envelope's graph about as wide as the LFO's, ilana 2026-10-29; 410: five switch pills in the LFO column at the real fonts.)
     static constexpr int envCardWidth = 390, lfoCardWidth = 410;
+    // (A drawn LFO shape or the MSEG: the graph twice as wide, UI review 30.)
+    static constexpr int lfoWideExtra = 210;
     // (OP PITCH's and OP LFO's DX7 editors, compact as the others (UI review 26): the graph and a column of ring knobs.)
     static constexpr int operatorGraphWidth = 196;
 
     juce::Point<int> preferredSize() const
     {
         if (kind == Kind::other)
-            return { preferredWidth, preferredHeight };
+            return { 2 * padding + preferredWidth,
+                     2 * padding + compactHeader + compactTop + describeHeight + routesGap + SourceValueBar::height + routesGap + routesHeight() + compactInset };
         const auto opPitch = kind == Kind::envelope && source == (int) Mod::Source::OpPitchEnv;
         const auto opLfo = source == (int) Mod::Source::OpLfo;
         const auto editorHeight = opPitch ? OperatorEnvEditor::compactHeight : kind == Kind::lfo ? (lfoSection != nullptr ? lfoSection->compactHeight() : 120) : EnvSection::compactHeight;
         const auto width = opPitch ? 2 * compactInset + operatorGraphWidth + OperatorEnvEditor::compactGap + OperatorEnvEditor::compactColumn
                          : opLfo   ? 2 * compactInset + operatorGraphWidth + OperatorLfoEditor::compactGap + OperatorLfoEditor::compactColumn
-                         : kind == Kind::lfo ? lfoCardWidth : envCardWidth;
+                         : kind == Kind::lfo ? lfoCardWidth + (lfoSection != nullptr && lfoSection->compactWantsWideGraph() ? lfoWideExtra : 0) : envCardWidth;
         return { 2 * padding + width,
                  2 * padding + compactHeader + compactTop + editorHeight + routesGap + routesHeight() + compactInset };
     }
@@ -937,32 +1049,43 @@ public:
         const auto colour = modSourceColour (source);
         IlanaTheme::paintCard (g, bounds, 10.0f, colour.withAlpha (0.55f));
 
-        auto header = bounds.toNearestInt().reduced (kind == Kind::other ? 16 : 10, 0).removeFromTop (kind == Kind::other ? headerHeight : compactHeader);
+        auto header = bounds.toNearestInt().reduced (10, 0).removeFromTop (compactHeader);
         const auto count = modRouteCount (processorRef, source);
         const auto lfo = Mod::lfoIndexFor ((Mod::Source) source);
         // (Compact, DRIVES counts the routes: the header says what the source is doing.)
         const auto caption = kind == Kind::envelope ? juce::String ("drag the graph or the knobs")
                              : kind == Kind::lfo && lfo >= 0 ? LfoShapeMenu::runCaption (processorRef, lfo)
                              : count == 0 ? juce::String ("drag its chip onto a knob") : juce::String (count) + (count == 1 ? " route" : " routes");
-        IlanaTheme::paintCardHeader (g, header, ModNames::sourceUpper (source, &processorRef), caption, colour, kind == Kind::lfo ? 212 : 200); // (an LFO's SHAPE sits right of it)
+        IlanaTheme::paintCardHeader (g, header, ModNames::sourceUpper (source, &processorRef), caption, colour,
+                                     kind == Kind::lfo ? 212 : kind == Kind::other ? 30 : 200); // (an LFO's SHAPE sits right of it)
+
+        if (kind == Kind::other && ! describeArea.isEmpty())
+        {
+            g.setColour (IlanaTheme::Ui::text2);
+            g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
+            IlanaTheme::drawFitted (g, SourceEditor::describe (source), describeArea, juce::Justification::centredLeft, 2);
+        }
     }
+
+    SourceValueBar& getValueBar() { return valueBar; }
 
     void resized() override
     {
         auto area = getLocalBounds().reduced (padding);
-        if (kind == Kind::other)
-        {
-            auto header = area.removeFromTop (headerHeight).reduced (12, 0).withSizeKeepingCentre (area.getWidth() - 24, 22);
-            closeButton.setBounds (header.removeFromRight (24));
-            editor.setBounds (area.reduced (sideInset, 0).withTrimmedBottom (bottomInset));
-            return;
-        }
         // One title (the pop-up's), then the editor and DRIVES as one line under it.
         const auto header = area.removeFromTop (compactHeader);
         closeButton.setBounds (juce::Rectangle<int> (18, 18).withCentre ({ header.getRight() - 6 - 9, header.getCentreY() }));
         auto body = area.reduced (compactInset, 0).withTrimmedBottom (compactInset).withTrimmedTop (compactTop);
         routes.setBounds (body.removeFromBottom (routesHeight()));
         body.removeFromBottom (routesGap);
+        describeArea = {};
+        if (kind == Kind::other)
+        {
+            valueBar.setBounds (body.removeFromBottom (SourceValueBar::height));
+            body.removeFromBottom (routesGap);
+            describeArea = body.withTrimmedLeft (2);
+            return;
+        }
         // (ilana's layout, 2026-10-29: the LFO's SHAPE sits in the title row, right of the caption; the envelope's
         // graph starts a little higher than its knobs.)
         if (kind == Kind::lfo && lfoSection != nullptr)
@@ -1013,7 +1136,7 @@ public:
 private:
     enum class Kind { lfo, envelope, other };
 
-    int headerBottom() const { return padding + (kind == Kind::other ? headerHeight : compactHeader); }
+    int headerBottom() const { return padding + compactHeader; }
 
     // DRIVES folded to its header line, or open to its whole list (up to 200 px).
     int routesHeight() const
@@ -1027,6 +1150,8 @@ private:
     Kind kind = Kind::other;
     SourceEditor editor;
     SourceRouteList routes;
+    SourceValueBar valueBar;
+    juce::Rectangle<int> describeArea;
     std::unique_ptr<LfoSection> lfoSection;
     std::unique_ptr<EnvSection> envSection;
     juce::TextButton closeButton;
