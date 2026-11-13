@@ -426,7 +426,7 @@ void runM4Tests()
                            && std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.67f) < 0.002f,
                        "a Dense patch stamped schema 2 gets its MIX routes divided once and its MIX only moved up");
                 const auto repaired = target.captureWholePatch();
-                check ((int) repaired.getProperty ("boardMixSchema") == 4, "a repaired Dense patch saves schema 4");
+                check ((int) repaired.getProperty ("boardMixSchema") == 5, "a repaired Dense patch saves schema 5");
                 target.restoreWholePatch (repaired);
                 check (std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.0375f) < 0.002f
                            && std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.67f) < 0.002f,
@@ -456,8 +456,76 @@ void runM4Tests()
             old = source.captureWholePatch();
             old.removeProperty ("boardMixSchema", nullptr);
             target.restoreWholePatch (old);
-            check (std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.56f) < 0.002f,
-                   "a Classic board patch keeps its MIX");
+            check (std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.67f) < 0.002f,
+                   "a Classic board patch saved before moves up the knob (keeps its lid and low cut)");
+
+            // The Classic board got the same bypass at 0 % a day later: a schema 4
+            // Classic patch moves up (routes x0.75), a schema 4 Dense one does not.
+            {
+                IlanaSynthAudioProcessor classic;
+                setParam (classic, "sb_on", 1.0f);
+                setParam (classic, "sb_model", 0.0f);
+                setParam (classic, "sb_mix", 0.56f);
+                setParam (classic, "mod40_src", 1.0f);
+                setParam (classic, "mod40_dst", (float) Mod::destinationForParamId ("sb_mix"));
+                setParam (classic, "mod40_amt", -0.28f);
+                auto stamped4 = classic.captureWholePatch();
+                stamped4.setProperty ("boardMixSchema", 4, nullptr);
+                target.restoreWholePatch (stamped4);
+                check (std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.67f) < 0.002f
+                           && std::abs (target.apvts.getRawParameterValue ("mod40_amt")->load() + 0.21f) < 0.002f,
+                       "a Classic patch stamped schema 4 moves up the knob, its routes scaled");
+                target.restoreWholePatch (classic.captureWholePatch());
+                check (std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.56f) < 0.002f,
+                       "a Classic patch saved now keeps its MIX");
+                setParam (classic, "sb_model", 1.0f);
+                stamped4 = classic.captureWholePatch();
+                stamped4.setProperty ("boardMixSchema", 4, nullptr);
+                target.restoreWholePatch (stamped4);
+                check (std::abs (target.apvts.getRawParameterValue ("sb_mix")->load() - 0.56f) < 0.002f,
+                       "a Dense patch stamped schema 4 is not moved again");
+            }
+
+            // The Classic board at MIX 0 % leaves the sound untouched too.
+            {
+                Soundboard board;
+                board.prepare (48000.0);
+                juce::Random random (4);
+                std::vector<float> left (4096), right (4096);
+                for (size_t i = 0; i < left.size(); ++i)
+                {
+                    left[i] = random.nextFloat() - 0.5f;
+                    right[i] = random.nextFloat() - 0.5f;
+                }
+                const auto dryLeft = left, dryRight = right;
+                for (size_t start = 0; start < left.size(); start += 256)
+                    board.process (left.data() + start, right.data() + start, 256, 0.0f, 0.2f, 0.7f);
+                check (left == dryLeft && right == dryRight, "the Classic board at MIX 0 % leaves the sound untouched");
+                const auto change = [] (float mix)
+                {
+                    Soundboard b;
+                    b.prepare (48000.0);
+                    juce::Random r (5);
+                    std::vector<float> l (16384), rr;
+                    for (auto& x : l)
+                        x = r.nextFloat() - 0.5f;
+                    const auto d = l;
+                    rr = l;
+                    for (size_t start = 0; start < l.size(); start += 256)
+                        b.process (l.data() + start, rr.data() + start, 256, mix, 0.5f, 0.5f);
+                    auto diff = 0.0, total = 0.0;
+                    for (size_t i = 4096; i < l.size(); ++i)
+                    {
+                        diff += std::pow ((double) l[i] - d[i], 2.0);
+                        total += std::pow ((double) d[i], 2.0);
+                    }
+                    return 10.0 * std::log10 (diff / total + 1.0e-12);
+                };
+                const auto at2 = change (0.02f), at10 = change (0.10f), at25 = change (AcousticKeysDetail::BoardMix::colourReach);
+                check (at2 < at10 && at10 < at25 && at2 < -15.0,
+                       "the Classic board's colour fades in with MIX from 0 % (" + juce::String (at2, 1) + " / "
+                           + juce::String (at10, 1) + " / " + juce::String (at25, 1) + " dB)");
+            }
         }
 
         // Brightness: energy of the first difference (a gentle high-pass)

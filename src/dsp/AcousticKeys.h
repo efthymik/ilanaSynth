@@ -54,6 +54,19 @@ struct Mode
         return y;
     }
 };
+
+// Both boards' MIX (2026-11-12, ilana: "when using it on 0% it still changes
+// the sound"): the board's colour (its EQ, low cut, lid) used to be on whatever
+// MIX said, and MIX only scaled the wood. Now the knob's first colourReach fades
+// the colour in from nothing (0 % = the strings untouched), and the rest brings
+// the wood in as the whole knob used to. A patch saved before loads with MIX at
+// colourReach + its old MIX x (1 - colourReach), so it sounds the same.
+struct BoardMix
+{
+    static constexpr float colourReach = 0.25f;
+    static float colour (float knob) { return juce::jlimit (0.0f, 1.0f, knob / colourReach); }
+    static float wood (float knob) { return juce::jlimit (0.0f, 1.0f, (knob - colourReach) / (1.0f - colourReach)); }
+};
 } // namespace AcousticKeysDetail
 
 // The soundboard: a bank of wooden modes the strings drive, with SIZE
@@ -88,17 +101,24 @@ public:
 
     void process (float* left, float* right, int numSamples, float mix, float tone, float size)
     {
-        mix = juce::jlimit (0.0f, 1.0f, mix);
+        const auto knob = juce::jlimit (0.0f, 1.0f, mix);
+        const auto colour = AcousticKeysDetail::BoardMix::colour (knob);
+        mix = AcousticKeysDetail::BoardMix::wood (knob);
         tone = juce::jlimit (0.0f, 1.0f, tone);
         updateModes (juce::jlimit (0.0f, 1.0f, size));
 
         // One-pole low-pass for the lid: its corner opens up with TONE.
         const auto corner = 450.0 + 6000.0 * (double) (tone * tone);
         const auto toneCoefficient = (float) (1.0 - std::exp (-juce::MathConstants<double>::twoPi * corner / sampleRate));
-        const auto brightness = 0.05f + 1.35f * tone; // how much of the unfiltered top end passes
+        const auto fullBrightness = 0.05f + 1.35f * tone; // how much of the unfiltered top end passes
+        // Below full colour the lid opens towards no filtering at all (brightness 1).
+        const auto brightness = colour >= 1.0f ? fullBrightness : 1.0f + (fullBrightness - 1.0f) * colour;
+        // At 0 % the strings pass untouched; the filters still run so turning
+        // MIX up from 0 doesn't start them from stale state.
+        const auto bypass = colour <= 0.0f;
         // A soundboard barely radiates the lowest fundamentals: the deep bass
         // is heard mostly through its overtones.
-        updateRadiation();
+        updateRadiation (colour);
 
         for (int i = 0; i < numSamples; ++i)
         {
@@ -128,6 +148,8 @@ public:
                 out = state[1] + (out - state[1]) * brightness;
                 out = std::isfinite (out) ? juce::jlimit (-8.0f, 8.0f, out) : 0.0f;
 
+                if (bypass)
+                    out = input[channel];
                 if (channel == 0)
                     left[i] = out;
                 else
@@ -214,19 +236,24 @@ private:
     };
     std::array<Peak, 2> boardBump;
     double radiationRate = 0.0;
-    void updateRadiation()
+    float radiationColour = -1.0f;
+    // colour (0..1) slides the low cut up from 1 Hz and scales the bump in dB.
+    void updateRadiation (float colour)
     {
-        if (radiationRate == sampleRate)
+        if (radiationRate == sampleRate && radiationColour == colour)
             return;
         radiationRate = sampleRate;
+        radiationColour = colour;
+        const auto cut = colour >= 1.0f ? (double) PianoTuning::get().radiationCut
+                                        : std::pow (juce::jmax (1.0, (double) PianoTuning::get().radiationCut), (double) colour);
         for (auto& channel : radiation)
         {
-            channel[0].set (sampleRate, (double) PianoTuning::get().radiationCut, 0.5412);
-            channel[1].set (sampleRate, (double) PianoTuning::get().radiationCut, 1.3066);
+            channel[0].set (sampleRate, cut, 0.5412);
+            channel[1].set (sampleRate, cut, 1.3066);
         }
         for (auto& filter : boardBump)
             filter.set (sampleRate, (double) PianoTuning::get().bumpFrequency, (double) PianoTuning::get().bumpQ,
-                        (double) PianoTuning::get().bumpGain);
+                        (double) PianoTuning::get().bumpGain * (double) colour);
     }
     double sampleRate = 48000.0;
     float lastSize = -1.0f;
@@ -255,9 +282,10 @@ public:
     // strings untouched), and the rest brings the wood in as the whole knob
     // used to. A patch saved before loads with MIX at colourReach + its old
     // MIX x (1 - colourReach) (migrateDenseBoardBypass), so it sounds the same.
-    static constexpr float colourReach = 0.25f;
-    static float colourAmount (float knob) { return juce::jlimit (0.0f, 1.0f, knob / colourReach); }
-    static float woodAmount (float knob) { return juce::jlimit (0.0f, 1.0f, (knob - colourReach) / (1.0f - colourReach)); }
+    // (The Classic board's MIX works the same way since: AcousticKeysDetail::BoardMix.)
+    static constexpr float colourReach = AcousticKeysDetail::BoardMix::colourReach;
+    static float colourAmount (float knob) { return AcousticKeysDetail::BoardMix::colour (knob); }
+    static float woodAmount (float knob) { return AcousticKeysDetail::BoardMix::wood (knob); }
 
     void prepare (double rate)
     {

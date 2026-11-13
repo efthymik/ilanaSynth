@@ -432,8 +432,11 @@ public:
     // the rest: a patch on the Dense board from before gets MIX moved to
     // colourReach + MIX x (1 - colourReach), and every route or macro into MIX
     // scaled by (1 - colourReach), so it sounds the same. Returns 1 if it changed.
+    // classic true does the same for a patch on the Classic board (its MIX
+    // works that way since boardMixSchema 5).
     static int migrateDenseBoardBypass (const std::function<float (const juce::String&, float)>& get,
-                                        const std::function<void (const juce::String&, float)>& set);
+                                        const std::function<void (const juce::String&, float)>& set,
+                                        bool classic = false);
     // GLIDE took 16 times its knob's time until 2026-11 (Voice::glideCoeff):
     // a patch or factory recipe from before gets GLIDE x16 (at most the knob's
     // 2 s), and its routes and macros into GLIDE reach as far in seconds, so
