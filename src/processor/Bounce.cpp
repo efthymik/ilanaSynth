@@ -94,6 +94,7 @@ juce::AudioBuffer<float> IlanaSynthAudioProcessor::playOneNote (const juce::Valu
     constexpr double bounceRate = 48000.0;
     constexpr int blockSize = 512;
     auto renderer = std::make_unique<IlanaSynthAudioProcessor>();
+    renderer->keepAsyncUpdatesOnThisThread();
     renderer->applyFullState (state);
     renderer->flushAsyncUpdates(); // file-backed samples and tables, now
     renderer->setNonRealtime (true);
