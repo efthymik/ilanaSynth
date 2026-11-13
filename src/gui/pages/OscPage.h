@@ -4834,11 +4834,24 @@ private:
             physical[(size_t) index]->hammer.setLabelText (exciteNow == 12 ? "PLUCK" : exciteNow == 13 ? "VIBRATO" : "HAMMER");
             physical[(size_t) index]->slap.setLabelText (exciteNow == 13 ? "PIZZ" : "SLAP");
             physical[(size_t) index]->bridgeBuzz.setLabelText (exciteNow == 13 ? "WOLF" : "BUZZ");
-            // (SIZE's ring carries the bowed body's marks: violin, viola, cello. The STRING picture names them.)
-            if (auto& sizeSlider = physical[(size_t) index]->modalSize.getSlider(); exciteNow == 13)
-                sizeSlider.getProperties().set ("ringMarks", "1," + juce::String (PhysicalView::violaSize) + "," + juce::String (PhysicalView::celloSize));
-            else
-                sizeSlider.getProperties().remove ("ringMarks");
+            // (SIZE's and SCALE's rings carry the real instruments, which a drag snaps to unless Alt is held
+            // (ModalMarks.h); the STRING picture and the drag's info line name them.)
+            for (auto* knob : { &physical[(size_t) index]->modalSize, &physical[(size_t) index]->modalScale })
+            {
+                const auto scale = knob == &physical[(size_t) index]->modalScale;
+                auto& properties = knob->getSlider().getProperties();
+                if (const auto marks = ModalMarks::ringMarks (exciteNow, scale); marks.isNotEmpty())
+                {
+                    properties.set ("ringMarks", marks);
+                    properties.set ("ringMarkNames", ModalMarks::ringMarkNames (exciteNow, scale));
+                }
+                else
+                {
+                    properties.remove ("ringMarks");
+                    properties.remove ("ringMarkNames");
+                }
+                knob->getSlider().repaint();
+            }
 
             for (const auto& slot : slotsFor (index))
                 slot.item->setVisible (true);

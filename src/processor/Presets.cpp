@@ -1119,6 +1119,16 @@ void IlanaSynthAudioProcessor::moveLevelToTrim (std::vector<std::pair<juce::Stri
     values.push_back ({ "output_trim", level });
 }
 
+int IlanaSynthAudioProcessor::migrateBodyLevel (const std::function<float (const juce::String&, float)>& get,
+                                               const std::function<void (const juce::String&, float)>& set)
+{
+    // (Classic, body_type 0, keeps its own resonator and never changed.)
+    if (juce::roundToInt (get ("body_type", 0.0f)) == 0 || get ("body_legacy_level", 0.0f) > 0.5f)
+        return 0;
+    set ("body_legacy_level", 1.0f);
+    return 1;
+}
+
 int IlanaSynthAudioProcessor::migrateGlideTime (const std::function<float (const juce::String&, float)>& get,
                                                const std::function<void (const juce::String&, float)>& set)
 {
@@ -1386,24 +1396,25 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
                               values.push_back ({ id, value });
                           });
 
-    // ...and its colour was on even at MIX 0 % (moved up the knob, same sound).
-    migrateDenseBoardBypass ([&values] (const juce::String& id, float fallback)
-                             {
-                                 for (const auto& entry : values)
-                                     if (entry.first == id)
-                                         return entry.second;
-                                 return fallback;
-                             },
-                             [&values] (const juce::String& id, float value)
-                             {
-                                 for (auto& entry : values)
-                                     if (entry.first == id)
-                                     {
-                                         entry.second = value;
-                                         return;
-                                     }
-                                 values.push_back ({ id, value });
-                             });
+    // ...and either board's colour was on even at MIX 0 % (moved up the knob, same sound).
+    for (const auto classicBoard : { false, true })
+        migrateDenseBoardBypass ([&values] (const juce::String& id, float fallback)
+                                 {
+                                     for (const auto& entry : values)
+                                         if (entry.first == id)
+                                             return entry.second;
+                                     return fallback;
+                                 },
+                                 [&values] (const juce::String& id, float value)
+                                 {
+                                     for (auto& entry : values)
+                                         if (entry.first == id)
+                                         {
+                                             entry.second = value;
+                                             return;
+                                         }
+                                     values.push_back ({ id, value });
+                                 }, classicBoard);
 
     // Its operators (a wavetable tuned by ratio or fixed Hz, or on the
     // Operator EG) load as FM / DX7, which renders the same.
@@ -1443,6 +1454,25 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
                           for (auto& entry : values)
                               if (entry.first == id)
                                   entry.second = value;
+                      });
+
+    // The factory recipes on a material body were heard at its old level.
+    migrateBodyLevel ([&values] (const juce::String& id, float fallback)
+                      {
+                          for (const auto& entry : values)
+                              if (entry.first == id)
+                                  return entry.second;
+                          return fallback;
+                      },
+                      [&values] (const juce::String& id, float value)
+                      {
+                          for (auto& entry : values)
+                              if (entry.first == id)
+                              {
+                                  entry.second = value;
+                                  return;
+                              }
+                          values.push_back ({ id, value });
                       });
 
     // Step 45: a preset written before Grain Position existed plays its

@@ -9071,6 +9071,51 @@ int runUiTests()
         parameter->setValueNotifyingHost (original);
         settle (30);
     }
+    // The modal SIZE / SCALE knobs snap to real instruments (2026-11-12, ilana: "snap to the real instrument
+    // sizes ... holding alt while draggin"): a drag that comes within a few pixels of a ring mark lands on its
+    // exact value; Alt held passes it.
+    {
+        expect (ModalMarks::markAt (13, false, 1.17f) != nullptr && ModalMarks::markAt (13, false, 2.1f) != nullptr
+                    && ModalMarks::markAt (13, false, 1.0f) != nullptr,
+                "snap marks: the bowed SIZE marks hold the engine's violin / viola / cello (the presets' 1, 1.17, 2.1)");
+        expect (ModalMarks::name (13, false, 1.17f) == "VIOLA" && ModalMarks::name (12, false, 1.0f) == "CLASSICAL"
+                    && ModalMarks::name (12, true, 0.51f) == "SOPRANO UKE" && ModalMarks::name (11, false, 1.0f) == "CONCERT GRAND",
+                "snap marks: each engine names its instruments");
+        expect (ModalMarks::marks (3, false).empty() && ModalMarks::ringMarks (3, true).isEmpty(), "snap marks: other exciters have none");
+
+        KnobSlider knob;
+        knob.setBounds (0, 0, 60, 60);
+        knob.setNormalisableRange ({ 0.25, 4.0, 0.0, 0.4307 });
+        knob.setValue (1.0, juce::dontSendNotification);
+        knob.getProperties().set ("ringMarks", ModalMarks::ringMarks (13, false));
+        const auto drag = [&knob] (float pixelsUp, juce::ModifierKeys mods)
+        {
+            const auto at = [&knob, mods] (float y)
+            {
+                return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), { 30.0f, y }, mods.withFlags (juce::ModifierKeys::leftButtonModifier),
+                                         1.0f, 0.0f, 0.0f, 0.0f, 0.0f, &knob, &knob, juce::Time::getCurrentTime(), { 30.0f, 30.0f },
+                                         juce::Time::getCurrentTime(), 1, false);
+            };
+            knob.mouseDown (at (30.0f));
+            knob.mouseDrag (at (30.0f - pixelsUp * 0.5f));
+            knob.mouseDrag (at (30.0f - pixelsUp));
+            knob.mouseUp (at (30.0f - pixelsUp));
+        };
+        // From the violin, the viola is log2 (1.17) / 4 of the travel up: about 11.3 px of KnobSlider's 200.
+        const auto violaPixels = (float) (knob.valueToProportionOfLength (1.17) - knob.valueToProportionOfLength (1.0)) * KnobSlider::fullRangePixels;
+        drag (violaPixels - 2.0f, {});
+        expect (std::abs (knob.getValue() - 1.17) < 1.0e-6, "snap marks: a drag 2 px short of the viola lands on x1.17 exactly");
+        knob.setValue (1.0, juce::dontSendNotification);
+        drag (violaPixels - 2.0f, juce::ModifierKeys (juce::ModifierKeys::altModifier));
+        expect (std::abs (knob.getValue() - 1.17) > 0.005 && knob.getValue() > 1.1, "snap marks: with Alt held the drag passes the mark");
+        knob.setValue (1.0, juce::dontSendNotification);
+        drag (violaPixels * 0.5f, {});
+        expect (knob.getValue() > 1.03 && knob.getValue() < 1.14, "snap marks: halfway between marks the knob moves freely");
+        knob.getProperties().remove ("ringMarks");
+        knob.setValue (1.0, juce::dontSendNotification);
+        drag (violaPixels - 2.0f, {});
+        expect (std::abs (knob.getValue() - 1.17) > 0.005, "snap marks: a knob without marks never snaps");
+    }
     // UI review 8, R6: text fitting, header, browser, SEQ, dialogs.
     runGlobalReview8Tests (processor, *pages);
     // UI review 31 (builder C): MATRIX, + ASSIGN, the dock, the wheels.

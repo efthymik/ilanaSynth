@@ -3111,8 +3111,12 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
                 bodyExciteR += chunkLive[slot] * params.inputToBody;
                 if (params.bodyCouplingMode == 1)
                 {
-                    bodyExciteL *= 0.2f;
-                    bodyExciteR *= 0.2f;
+                    // The mix reaches the body at 20 % and the string's bridge force at
+                    // COUPLE; at COUPLE 0 that left the body 14 dB down. Now the mix's share
+                    // rises to the whole as COUPLE falls (old patches: body_legacy_level).
+                    const auto mixShare = params.bodyLegacyLevel ? 0.2f : 0.2f + 0.8f * (1.0f - params.bodyCoupling);
+                    bodyExciteL *= mixShare;
+                    bodyExciteR *= mixShare;
                     for (int osc = 0; osc < numOsc; ++osc)
                     {
                         const auto drive = driveOut[osc][slot];
@@ -3662,8 +3666,12 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
             bodyExciteR += liveSample * params.inputToBody;
             if (params.bodyCouplingMode == 1)
             {
-                bodyExciteL *= 0.2f;
-                bodyExciteR *= 0.2f;
+                // The mix reaches the body at 20 % and the string's bridge force at
+                // COUPLE; at COUPLE 0 that left the body 14 dB down. Now the mix's share
+                // rises to the whole as COUPLE falls (old patches: body_legacy_level).
+                const auto mixShare = params.bodyLegacyLevel ? 0.2f : 0.2f + 0.8f * (1.0f - params.bodyCoupling);
+                bodyExciteL *= mixShare;
+                bodyExciteR *= mixShare;
                 for (int k = 0; k < numDrivingOscs; ++k)
                 {
                     const auto drive = stringDrive[drivingOscs[k]];
@@ -4364,10 +4372,14 @@ void Voice::tuneBody (double driftedFrequency)
                                  + 220.0 * (1.0 - (double) params.resonatorKeytrack))
                                 * std::exp2 ((double) offset / 12.0);
             const auto decay = juce::jlimit (0.0f, 1.0f, params.resonatorDecay + blockMod (D::ResDecay));
+            // A fixed-pitch body (the guitar) ignores KEY TRACK and OFFSET; it
+            // levels itself on the note actually played.
+            const auto fixedPitch = BodyTuning::shapes[(size_t) juce::jlimit (0, 4, params.bodyType - 1)].fixedPitch;
+            const auto bodyNote = fixedPitch ? driftedFrequency : noteHz;
             materialBodyL.configure (params.bodyType - 1, params.bodyMaterial, params.bodySize,
-                                     decay, noteHz, params.quality, -1.0f);
+                                     decay, bodyNote, params.quality, -1.0f, params.bodyLegacyLevel);
             materialBodyR.configure (params.bodyType - 1, params.bodyMaterial, params.bodySize,
-                                     decay, noteHz, params.quality, 1.0f);
+                                     decay, bodyNote, params.quality, 1.0f, params.bodyLegacyLevel);
         }
     }
 }
