@@ -83,6 +83,7 @@
 #include <algorithm>
 #include <array>
 #include <complex>
+#include <mutex>
 #include <cmath>
 
 #if defined(_M_X64) || defined(__x86_64__) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2) || defined(__SSE2__)
@@ -133,7 +134,7 @@ public:
         sampleRate = newSampleRate;
         useAvx(); // (its first call reads the environment: here, not on the audio thread)
         ModalPianoTable::guitar(); // (parsed here too, not on the audio thread)
-        designNoise();
+        designNoiseShared();
         reset();
     }
 
@@ -1618,6 +1619,53 @@ private:
     // over log-spaced points misses by 3 to 7 dB).
     bool pluckNoise = false;
     float noiseMedian[ModalPianoTable::noiseBandCount] {};
+
+    // designNoise's results depend on the sample rate alone: designed once
+    // per rate and copied to every voice (each voice's prepare designing
+    // its own made a plugin load or rate change take seconds).
+    void designNoiseShared()
+    {
+        struct Design
+        {
+            double rate = 0.0;
+            float coefs[ModalPianoTable::noiseBandCount][5] {};
+            float leak[ModalPianoTable::noiseBandCount][ModalPianoTable::noiseBandCount] {};
+            float median[ModalPianoTable::noiseBandCount] {}, gain[ModalPianoTable::noiseBandCount] {};
+        };
+        static std::mutex lock;
+        static std::vector<Design> designs;
+        const std::lock_guard<std::mutex> hold (lock);
+        constexpr int bands = ModalPianoTable::noiseBandCount;
+        for (const auto& d : designs)
+            if (d.rate == sampleRate)
+            {
+                for (int j = 0; j < bands; ++j)
+                {
+                    auto& f = noise[(size_t) j];
+                    f.b0 = d.coefs[j][0]; f.b1 = d.coefs[j][1]; f.b2 = d.coefs[j][2]; f.a1 = d.coefs[j][3]; f.a2 = d.coefs[j][4];
+                    for (int b = 0; b < bands; ++b)
+                        noiseLeak[j][b] = d.leak[j][b];
+                    noiseMedian[j] = d.median[j];
+                    noiseGain[j] = d.gain[j];
+                }
+                return;
+            }
+        designNoise();
+        Design d;
+        d.rate = sampleRate;
+        for (int j = 0; j < bands; ++j)
+        {
+            const auto& f = noise[(size_t) j];
+            d.coefs[j][0] = f.b0; d.coefs[j][1] = f.b1; d.coefs[j][2] = f.b2; d.coefs[j][3] = f.a1; d.coefs[j][4] = f.a2;
+            for (int b = 0; b < bands; ++b)
+                d.leak[j][b] = noiseLeak[j][b];
+            d.median[j] = noiseMedian[j];
+            d.gain[j] = noiseGain[j];
+        }
+        if (designs.size() >= 8)
+            designs.erase (designs.begin());
+        designs.push_back (d);
+    }
 
     void designNoise()
     {
