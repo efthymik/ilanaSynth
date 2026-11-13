@@ -46,7 +46,11 @@ Recorded notes are often cut short (Iowa's by the next note after 1 to 3 s):
 each level curve past the end of its note carries on along the slope of its
 last measured half second, so the table's time grid reaches 5.5 s for every
 note. The partials' frequencies are kept as ratios to the note's measured
-pitch (Iowa's guitar sits about 40 cents flat), so the engine plays in tune.
+pitch (Iowa's guitar sits about 40 cents flat), so the engine plays in tune:
+the median over the first six partials of f_k / (k sqrt(1 + B k^2)), not the
+fundamental's peak, which the body pulls flat (round 4: 43, 44, 52 and 55
+played 10 to 20 cents sharp). A render's entries carry the velocities its
+MIDI played (40/80/120); Iowa's keep 35/80/120.
 
     tools/build_modal_guitar.py --iowa ~/iowa-guitar [--out content/guitar/modal-guitar.bin]
 
@@ -78,7 +82,8 @@ RISE_SCALE = 1 / 0.6  # its rise's length over the recording's 10-90 % time (a r
 BURST_FROM = 1  # the first noise band with a burst (under 500 Hz the fits leave the body's own boom)
 EARLY_TRACK = 30.0  # dB under the strongest partial at 0.25 s from which a partial's frequency is the pluck's
 OPEN = {"sulE": 40, "sulA": 45, "sulD": 50, "sulG": 55, "sulB": 59, "sul_E": 64}
-DYNAMICS = {"pp": 35, "mf": 80, "ff": 120}
+DYNAMICS = {"pp": 35, "mf": 80, "ff": 120}  # (Iowa: velocities the takes are stored at)
+RENDER_DYNAMICS = {"pp": 40, "mf": 80, "ff": 120}  # (a render: the velocities the MIDI played)
 
 
 def highpass(x, rate, hz=60.0):
@@ -104,6 +109,10 @@ def onsets(x, rate):
 
 
 def pitch(x, rate):
+    """The note's f0: the median of f_k / (k sqrt(1 + B k^2)) over its first
+    six partials (B fitted to the stretch of k >= 3). The
+    fundamental's own peak is pulled off by the body (55 ff sat 17 ct under
+    its harmonics' k x 196 Hz), and ratios to it played the note sharp."""
     seg = x[int(0.15 * rate):int(0.65 * rate)]
     seg = seg.mean(axis=1) if seg.ndim > 1 else seg
     n = 1 << 17
@@ -112,8 +121,36 @@ def pitch(x, rate):
     cands = np.arange(70, 1400, 0.25)
     score = [np.sum(np.interp(f0 * np.arange(1, 6), fr, sp)) for f0 in cands]
     f0 = cands[int(np.argmax(score))]
-    k = (fr > f0 * 0.97) & (fr < f0 * 1.03)
-    return float(fr[k][np.argmax(sp[k])])
+    found, amps = [], []
+    for k in range(1, 9):
+        near = np.where((fr > k * f0 * 0.97) & (fr < k * f0 * 1.03))[0]
+        if len(near) == 0 or fr[near[-1]] > 0.45 * rate:
+            break
+        j = near[int(np.argmax(sp[near]))]
+        if 0 < j < len(sp) - 1:  # (parabolic, in dB)
+            a, b, c = 20 * np.log10(sp[j - 1:j + 2] + 1e-12)
+            d = 0.5 * (a - c) / (a - 2 * b + c) if a - 2 * b + c < 0 else 0.0
+            found.append((k, fr[j] + d * (fr[1] - fr[0])))
+        else:
+            found.append((k, fr[j]))
+        amps.append(sp[j])
+    if len(found) < 3:
+        return float(found[0][1]) if found else float(f0)
+    k = np.array([q for q, _ in found], float)
+    f = np.array([q for _, q in found])
+    # The partials within 40 dB of the loudest count alike (weighted by
+    # level, the fundamental alone outweighed the rest on 43, 44 and 55,
+    # and with the 2nd on 43/44 it is the one the body pulls off).
+    db = 20 * np.log10(np.array(amps) + 1e-12)
+    heard = db > db.max() - 40.0
+    # (f_k / k)^2 = f0^2 (1 + B k^2): a line in k^2 (B >= 0), from k >= 3.
+    upper = (k >= 3) & heard
+    stretch = 0.0
+    if upper.sum() >= 3:
+        slope, intercept = np.polyfit(k[upper] ** 2, (f[upper] / k[upper]) ** 2, 1)
+        stretch = max(0.0, slope / intercept) if intercept > 0 else 0.0
+    use = (k <= 6) & heard
+    return float(np.median((f / (k * np.sqrt(1 + stretch * k * k)))[use]))
 
 
 def carry_on(levels, valid):
@@ -440,7 +477,7 @@ def render_notes(path, midi_path):
         elif msg.type in ("note_off", "note_on") and msg.note in held:
             start, velocity = held.pop(msg.note)
             events.append((start, t, msg.note, velocity))
-    level = {40: "pp", 80: "mf", 120: "ff"}
+    level = {v: d for d, v in RENDER_DYNAMICS.items()}
     found = {}
     for start, end, note, velocity in events:
         seg = x[int(start * rate):min(len(x), int((end + 0.9) * rate))]
@@ -456,8 +493,10 @@ def main():
     parser.add_argument("--midi", help="the MIDI file the render played")
     parser.add_argument("--out", default="content/guitar/modal-guitar.bin")
     args = parser.parse_args()
+    dynamics = DYNAMICS
     if args.render and args.midi:
         found = render_notes(args.render, args.midi)
+        dynamics = RENDER_DYNAMICS
     elif args.iowa:
         found = iowa_notes(args.iowa)
     else:
@@ -476,7 +515,7 @@ def main():
 
     mp.TIMES = TIMES  # (the mode and noise readers use the piano tool's grid)
     entries = []
-    for dyn, velocity in DYNAMICS.items():
+    for dyn, velocity in dynamics.items():
         for note in notes:
             fret, string, seg, _, f0 = found[(note, dyn)]
             onset = pluck_onset(seg, rate)

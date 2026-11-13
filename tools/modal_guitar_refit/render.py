@@ -1,6 +1,6 @@
 """Render render-midi/guitar-full-range.mid (E2..E6, 7 s slots, velocities
 40/80/120) through the plugin (ilanaMidiRender, Init + osc 1 Modal Guitar with
-the "as recorded" knobs) and cut it into out/<tag>/<note>-<pp|mf|ff>.wav
+the "as recorded" knobs, clean gain staging) and cut it into out/<tag>/<note>-<pp|mf|ff>.wav
 exactly like refs.py cuts a reference render.
     render.py MIDI TAG [extra ILANA_SET pairs]
 """
@@ -9,7 +9,11 @@ import subprocess
 import sys
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
-KNOBS = "osc1_excite=12,osc1_string_damp=0,osc1_string_decay=0.5,osc1_string_stiffness=0.5,osc1_hammer_hard=0.5"
+# The Init patch's tanh stages (F1 DRIVE 1.5, the master soft clip) are off,
+# and osc 1 and the master low, so an ff note is not distorted (at trim 12.5
+# the voice still squashed ff peaks by ~4 dB at OSC 1 LEVEL 0.8; at 0.2 the
+# score does not move with the level).
+KNOBS = "master_clip=0,f1_drive=1,master=-18,osc1_level=0.2,osc1_excite=12,osc1_string_damp=0,osc1_string_decay=0.5,osc1_string_stiffness=0.5,osc1_hammer_hard=0.5"
 
 
 def main():
