@@ -409,7 +409,7 @@ void runTests()
                                 std::memcpy (&bits, &v, sizeof (bits));
                                 hash = (hash ^ bits) * 1099511628211ull;
                             }
-                const auto expected = ModalPiano::useAvx() ? 0xf2c84ade5464a270ull : 0xbc7d8ade81d7ded0ull;
+                const auto expected = ModalPiano::useAvx() ? 0x6bb5520dae85b0eeull : 0x99d38e3f2a221689ull;
                 check (hash == expected, "the Modal Piano and Guitar from SIZE x1.25 to x2 are bit for bit as pinned (hash "
                                              + juce::String::toHexString ((juce::int64) hash) + ")");
             }

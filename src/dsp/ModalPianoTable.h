@@ -33,6 +33,13 @@ struct ModalPianoTable
         std::vector<float> balance, phase;         // [partials]
         std::vector<float> modeBalance, modePhase; // [modes]
         float attackDb = -200.0f; // the attack's level over its first 80 ms (both channels), dB
+        // Each partial in the attack (left channel) where it hands over to
+        // the partials, 20-80 ms: its sine and cosine parts (sin (w t + p)
+        // = s sin w t + c cos w t, t from the attack's start), so the
+        // partials start in step with it; out of step they cancel it
+        // mid-crossfade, a hole heard as a blip before the note
+        // (2026-11-13). Empty: none (no attack).
+        std::vector<float> attackSin, attackCos; // [partials]
         // The modelled pluck (version 5; the table has no attack samples):
         // when the pluck starts after the note's start and how long it
         // rises (one raised cosine swells over both), each partial's and

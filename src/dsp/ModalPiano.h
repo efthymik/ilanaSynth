@@ -313,6 +313,27 @@ public:
                 re[k] = std::cos (phase);
                 im[k] = std::sin (phase);
             }
+        // The recorded attack (the grand): each partial starts in step with
+        // the attack it takes over from (the two layers' as they're mixed),
+        // or the crossfade cancels them halfway, a hole heard as a blip
+        // before the note. (Resampled to the pitch, the attack's partial
+        // turns as the partial does: aligned at the start, aligned after.)
+        alignedAttack = plucked == nullptr && ! modeA->attackSin.empty() && ! modeB->attackSin.empty();
+        if (alignedAttack)
+            for (int k = 0; k < count; ++k)
+            {
+                const auto i = (size_t) k;
+                if (i >= modeA->attackSin.size() || i >= modeB->attackSin.size())
+                    break;
+                const auto w = at.velocityWeight;
+                const auto s = modeA->attackSin[i] + w * (modeB->attackSin[i] - modeA->attackSin[i]);
+                const auto c = modeA->attackCos[i] + w * (modeB->attackCos[i] - modeA->attackCos[i]);
+                if (s * s + c * c < 1.0e-14f)
+                    continue;
+                const auto phase = std::atan2 (c, s) - std::atan2 (rotSin[k], rotCos[k]);
+                re[k] = std::cos (phase);
+                im[k] = std::sin (phase);
+            }
 
         // The stereo picture: the nearest note's, per partial and mode.
         for (int k = 0; k < roundedCount(); ++k)
@@ -1496,8 +1517,10 @@ private:
         if (atEnd > fadeStart)
         {
             const auto x = juce::jlimit (0.0f, 1.0f, (float) (atEnd - fadeStart) / (float) juce::jmax (1, attackLength - fadeStart));
-            fadeTarget = std::cos (x * juce::MathConstants<float>::halfPi);
-            rampTarget = std::sin (x * juce::MathConstants<float>::halfPi);
+            // In step (alignedAttack), the two add as amplitudes: a straight
+            // crossfade (equal power would swell 3 dB halfway).
+            fadeTarget = alignedAttack ? 1.0f - x : std::cos (x * juce::MathConstants<float>::halfPi);
+            rampTarget = alignedAttack ? x : std::sin (x * juce::MathConstants<float>::halfPi);
         }
         attackFadeStep = (fadeTarget - attackFade) / (float) blockSize;
         partialRampStep = (rampTarget - partialRamp) / (float) blockSize;
@@ -1710,6 +1733,7 @@ private:
     const std::vector<float>* attackRightA = nullptr;
     const std::vector<float>* attackRightB = nullptr;
     float attackMix = 0.0f, attackGain = 1.0f, attackFade = 1.0f, partialRamp = 0.0f;
+    bool alignedAttack = false; // (the partials start in step with the recorded attack)
     float attackFadeStep = 0.0f, partialRampStep = 0.0f;
     double attackPosition = 0.0, attackStep = 1.0;
     int attackLength = 1, attackLeft = 0, fadeStart = 0;

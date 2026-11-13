@@ -313,6 +313,36 @@ namespace
             for (size_t i = 0; i < n; ++i)
                 power += 0.5 * ((double) e.attack[i] * e.attack[i] + (double) e.attackRight[i] * e.attackRight[i]);
             e.attackDb = (float) (10.0 * std::log10 (power / (double) juce::jmax ((size_t) 1, n)));
+
+            // Each partial's sine and cosine parts over 20-80 ms (Hann).
+            const auto lo = (size_t) (0.02 * table.rate), hi = juce::jmin (e.attack.size(), (size_t) (0.08 * table.rate));
+            if (hi <= lo + 16)
+                continue;
+            const auto f0 = 440.0 * std::exp2 ((e.note - 69) / 12.0);
+            e.attackSin.assign ((size_t) e.partials, 0.0f);
+            e.attackCos.assign ((size_t) e.partials, 0.0f);
+            for (int k = 0; k < e.partials; ++k)
+            {
+                const auto w = juce::MathConstants<double>::twoPi * e.ratios[(size_t) k] * f0 / table.rate;
+                if (w >= juce::MathConstants<double>::pi)
+                    break;
+                // (The sine and cosine by rotation: no sin/cos per sample.)
+                auto c = std::cos (w * (double) lo), s = std::sin (w * (double) lo);
+                const auto dc = std::cos (w), ds = std::sin (w);
+                auto sumSin = 0.0, sumCos = 0.0;
+                const auto span = (double) (hi - lo);
+                for (size_t i = lo; i < hi; ++i)
+                {
+                    const auto hann = 0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * (double) (i - lo) / span);
+                    sumSin += hann * e.attack[i] * s;
+                    sumCos += hann * e.attack[i] * c;
+                    const auto nc = c * dc - s * ds;
+                    s = s * dc + c * ds;
+                    c = nc;
+                }
+                e.attackSin[(size_t) k] = (float) sumSin;
+                e.attackCos[(size_t) k] = (float) sumCos;
+            }
         }
         return table;
     }
