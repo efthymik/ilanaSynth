@@ -901,6 +901,31 @@ void runM72BodyTests()
     check (quietest > -4.0 && loudest < 4.0, "the Guitar body is heard at a tuned body's level on every note ("
                                                  + juce::String (quietest, 1) + " to " + juce::String (loudest, 1) + " dB)");
     check (sawLevel (4, 164.81, 0.7f, true) < -40.0, "the Guitar body's legacy level is the old, quiet one");
+
+    // A pluck (a saw dying away over 0.6 s) through a tuned body kept losing
+    // level as DECAY rose (10 dB at 100 %): it never rang up to the level a
+    // held note reaches. Now its first half second stays level with DECAY 0.
+    const auto pluckLevel = [] (float decay, bool legacy)
+    {
+        MaterialBody body;
+        body.prepare (48000.0);
+        body.configure (3, 0.33f, 0.5f, decay, 220.0, 2, 0.0f, legacy);
+        auto in = 0.0, out = 0.0, phase = 0.5;
+        const auto step = 220.0 / 48000.0;
+        for (int i = 0; i < 24000; ++i)
+        {
+            phase += step;
+            phase -= std::floor (phase);
+            const auto x = (float) ((2.0 * phase - 1.0) * 0.1 * std::exp (-i / (48000.0 * 0.6)));
+            const auto y = body.process (x);
+            in += (double) x * x;
+            out += (double) y * y;
+        }
+        return 10.0 * std::log10 (out / in);
+    };
+    const auto pluckDrop = pluckLevel (0.0f, false) - pluckLevel (1.0f, false);
+    check (std::abs (pluckDrop) < 3.0, "a pluck through a tuned body keeps its level at DECAY 100 % (" + juce::String (-pluckDrop, 1) + " dB)");
+    check (pluckLevel (0.0f, true) - pluckLevel (1.0f, true) > 6.0, "the legacy body level still drops at long DECAY");
 }
 
 // ILANA_BODY_FIT=<folder> writes impulse responses of the four material

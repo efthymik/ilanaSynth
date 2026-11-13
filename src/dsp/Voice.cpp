@@ -3036,8 +3036,12 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
                 bodyExciteR += chunkLive[slot] * params.inputToBody;
                 if (params.bodyCouplingMode == 1)
                 {
-                    bodyExciteL *= 0.2f;
-                    bodyExciteR *= 0.2f;
+                    // The mix reaches the body at 20 % and the string's bridge force at
+                    // COUPLE; at COUPLE 0 that left the body 14 dB down. Now the mix's share
+                    // rises to the whole as COUPLE falls (old patches: body_legacy_level).
+                    const auto mixShare = params.bodyLegacyLevel ? 0.2f : 0.2f + 0.8f * (1.0f - params.bodyCoupling);
+                    bodyExciteL *= mixShare;
+                    bodyExciteR *= mixShare;
                     for (int osc = 0; osc < numOsc; ++osc)
                     {
                         const auto drive = driveOut[osc][slot];
@@ -3587,8 +3591,12 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
             bodyExciteR += liveSample * params.inputToBody;
             if (params.bodyCouplingMode == 1)
             {
-                bodyExciteL *= 0.2f;
-                bodyExciteR *= 0.2f;
+                // The mix reaches the body at 20 % and the string's bridge force at
+                // COUPLE; at COUPLE 0 that left the body 14 dB down. Now the mix's share
+                // rises to the whole as COUPLE falls (old patches: body_legacy_level).
+                const auto mixShare = params.bodyLegacyLevel ? 0.2f : 0.2f + 0.8f * (1.0f - params.bodyCoupling);
+                bodyExciteL *= mixShare;
+                bodyExciteR *= mixShare;
                 for (int k = 0; k < numDrivingOscs; ++k)
                 {
                     const auto drive = stringDrive[drivingOscs[k]];

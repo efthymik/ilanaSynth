@@ -9,7 +9,7 @@ namespace
     constexpr SavedSchema savedSchemas[] = {
         { "osc3Schema", 2 }, { "grainPosSchema", 2 }, { "lorenzSchema", 2 }, { "stringSchema", 2 },
         { "redundantKnobsSchema", 2 }, { "modRangeSchema", 2 }, { "destSchema", 2 }, { "tableSchema", 4 },
-        { "boardMixSchema", 3 }, { "glideSchema", 2 }, { "guitarBodySchema", 2 },
+        { "boardMixSchema", 3 }, { "glideSchema", 2 }, { "bodyLevelSchema", 2 },
     };
 
     bool savedByNewerBuild (const juce::ValueTree& state)
@@ -1616,9 +1616,9 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
         state.setProperty ("glideSchema", 2, nullptr);
     }
 
-    // A patch on the Guitar body saved before it was levelled on the note
-    // keeps the old, quiet body.
-    if ((int) state.getProperty ("guitarBodySchema", 1) < 2)
+    // A patch on a material body saved before its levels changed (2026-11-13)
+    // keeps the old body.
+    if ((int) state.getProperty ("bodyLevelSchema", 1) < 2)
     {
         const auto find = [&state] (const juce::String& id)
         {
@@ -1627,7 +1627,7 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
                     return state.getChild (i);
             return juce::ValueTree();
         };
-        migrateGuitarBodyLevel ([&find] (const juce::String& id, float fallback)
+        migrateBodyLevel ([&find] (const juce::String& id, float fallback)
                                 {
                                     const auto child = find (id);
                                     return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
@@ -1639,7 +1639,7 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
                                     else
                                         state.appendChild (juce::ValueTree ("PARAM", { { "id", id }, { "value", value } }), nullptr);
                                 });
-        state.setProperty ("guitarBodySchema", 2, nullptr);
+        state.setProperty ("bodyLevelSchema", 2, nullptr);
     }
 
     apvts.replaceState (state);

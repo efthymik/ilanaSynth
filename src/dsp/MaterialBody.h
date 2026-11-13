@@ -18,16 +18,17 @@ public:
     {
         y1.fill (0.0f);
         y2.fill (0.0f);
+        restart = true;
     }
 
     void configure (int shapeIndex, float material, float size, float decay,
-                    double noteHz, int quality, float stereoOffset = 0.0f, bool legacyFixedLevel = false)
+                    double noteHz, int quality, float stereoOffset = 0.0f, bool legacyLevel = false)
     {
         if (shapeIndex == lastShape && material == lastMaterial && size == lastSize
             && decay == lastDecay && noteHz == lastNote && quality == lastQuality
-            && stereoOffset == lastStereo && legacyFixedLevel == lastLegacy)
+            && stereoOffset == lastStereo && legacyLevel == lastLegacy)
             return;
-        lastLegacy = legacyFixedLevel;
+        lastLegacy = legacyLevel;
         lastShape = shapeIndex;
         lastMaterial = material;
         lastSize = size;
@@ -48,7 +49,7 @@ public:
         // 60 (a mode at 98 Hz then rings 0.13 to 1.35 s, the higher ones less).
         // Sharper fixed modes only ring when a harmonic happens to land on one,
         // and that note then booms 20-30 dB over its neighbours.
-        const auto broadModes = shape.fixedPitch && ! legacyFixedLevel;
+        const auto broadModes = shape.fixedPitch && ! legacyLevel;
         const auto quality60 = 2.2 * (6.0 + 54.0 * (double) life * (double) life);
         const auto metal = std::clamp ((colour - 0.15f) / 0.55f, 0.0f, 1.0f);
         const auto glass = std::clamp ((colour - 0.8f) / 0.2f, 0.0f, 1.0f);
@@ -64,6 +65,14 @@ public:
         const auto rootPhase = 6.283185307179586 * std::min (pitch, sampleRate * 0.45) / sampleRate;
         const auto peakNorm = (1.0 - rootRadius)
                               * std::sqrt (1.0 - 2.0 * rootRadius * std::cos (2.0 * rootPhase) + rootRadius * rootRadius);
+
+        // A tuned body reaches that unity only after ringing up for a few
+        // time constants: at DECAY 100 % a pluck stayed 13 dB under DECAY 0's.
+        // New patches drive the body harder at the note's start, the extra
+        // dying away as the root mode rings up (onsetBoost, process()): a pluck
+        // is heard at DECAY 0's level, a held note settles to unity.
+        onsetBoost = broadModes || legacyLevel ? 0.0f : (float) (1.0 / (1.0 - std::pow (rootRadius, 0.35 * sampleRate)) - 1.0);
+        boostDecay = (float) rootRadius;
 
         for (int i = 0; i < activeModes; ++i)
         {
@@ -138,7 +147,13 @@ public:
     // to the bit.
     float process (float input)
     {
-        const auto drive = std::clamp (input, -2.0f, 2.0f);
+        if (restart)
+        {
+            extra = onsetBoost;
+            restart = false;
+        }
+        const auto drive = std::clamp (input, -2.0f, 2.0f) * (1.0f + extra);
+        extra *= boostDecay;
         constexpr auto count = (size_t) BodyTuning::modes;
         alignas (32) float next[count];
         for (size_t m = 0; m < count; ++m)
@@ -203,6 +218,8 @@ private:
     float lastMaterial = -1.0f, lastSize = -1.0f, lastDecay = -1.0f, lastStereo = 0.0f;
     double lastNote = -1.0;
     float direct = 0.0f;
+    float onsetBoost = 0.0f, boostDecay = 0.0f, extra = 0.0f; // (zero for the legacy and guitar levels: drive exact)
+    bool restart = true;
     // The guitar's direct path, as a share of its first mode's peak (-12 dB),
     // and the most its response is lifted to reach a tuned body's level.
     static constexpr double directShare = 0.25, maxBoost = 4.0;
