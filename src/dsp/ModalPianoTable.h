@@ -43,7 +43,15 @@ struct ModalPianoTable
         float pluckMs = 0.0f, riseMs = 0.0f;
         std::vector<float> startPhase, modeStartPhase; // [partials], [modes]
         std::vector<float> burstDb, burstFall;         // [noiseBandCount]
+        // What each mode is, for SIZE (ModeKind, sorted at parse time):
+        // the guitar's air (A0) and top (T(1,1)2) modes, the board's or
+        // plate's other modes, and modes that are the strings' (the
+        // grand's bass strings ring longitudinal modes at 0.4-1.2 kHz),
+        // which don't move with the body.
+        std::vector<unsigned char> modeKind; // [modes]
     };
+
+    enum ModeKind : unsigned char { boardMode = 0, airMode = 1, topMode = 2, stringMode = 3 };
 
     // The guitar's attacks are separate takes per velocity, not one
     // instrument's strikes: mixed sample by sample their plucks partly
@@ -53,6 +61,11 @@ struct ModalPianoTable
     bool nearestAttack = false;
     // Version 5: the pluck is modelled (Entry::pluckMs ...), not played back.
     bool modelledPluck = false;
+    // The guitar's box (SIZE moves its air and top modes as a coupled
+    // pair), not the grand's soundboard; and the box's air and top modes
+    // as the table has them (Hz; the most common ones over the notes).
+    bool guitarBody = false;
+    float airHz = 103.0f, topHz = 240.0f;
 
     static constexpr float noPhase = 100.0f; // (Entry::startPhase: none)
     static constexpr int noiseBandCount = 6;

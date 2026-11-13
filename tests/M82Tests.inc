@@ -358,6 +358,80 @@ void runTests()
                                         + juce::String (worst, 1) + " dB; time " + juce::String (timeSkip / timeAll, 2) + "x)");
         }
 
+        // SIZE, physically (2026-11-13): at x1 the note is the recording's,
+        // bit for bit, also after SIZE has been elsewhere; away from it
+        // both instruments stay finite and sound at the knob's ends; and
+        // the guitar's air mode (A0, 102.5 Hz in the table) moves as the
+        // coupled air/top pair says: 196 Hz at x0.6, 56 Hz at x1.6.
+        {
+            const auto shaped = [] (bool guitar, int note, float velocity, float size, bool visitFirst, int samples)
+            {
+                ModalPiano piano;
+                piano.prepare (48000.0);
+                if (guitar)
+                    piano.setTable (ModalPianoTable::guitar());
+                if (visitFirst)
+                    piano.setShape (1.7f, 1.0f);
+                piano.setShape (size, 1.0f);
+                piano.setNote (440.0 * std::pow (2.0, (note - 69) / 12.0), note);
+                piano.setParams (0.5f, 0.0f, 0.5f, 0.5f, 0.5f, false);
+                piano.trigger (velocity, 0.37f);
+                std::vector<float> out ((size_t) samples);
+                for (int i = 0; i < samples; ++i)
+                    out[(size_t) i] = piano.process (i < samples * 3 / 4) + piano.side();
+                return out;
+            };
+            auto identical = true;
+            for (bool guitar : { false, true })
+                for (int note : { 40, 64, 88 })
+                {
+                    const auto plain = shaped (guitar, note, 0.7f, 1.0f, false, 24000);
+                    const auto visited = shaped (guitar, note, 0.7f, 1.0f, true, 24000);
+                    identical = identical && std::memcmp (plain.data(), visited.data(), plain.size() * sizeof (float)) == 0;
+                }
+            check (identical, "the Modal Piano and Guitar at SIZE x1 are the recording's, bit for bit, after SIZE has moved");
+
+            auto stable = true;
+            for (bool guitar : { false, true })
+                for (int note : { 21, 40, 64, 96 })
+                    for (float size : { 0.25f, 0.6f, 2.5f, 4.0f })
+                    {
+                        if (guitar && (note < 40 || note > 88))
+                            continue;
+                        auto peak = 0.0f;
+                        for (auto v : shaped (guitar, note, 0.9f, size, false, 48000))
+                        {
+                            stable = stable && std::isfinite (v);
+                            peak = juce::jmax (peak, std::abs (v));
+                        }
+                        stable = stable && peak < 4.0f && peak > 1.0e-5f;
+                    }
+            check (stable, "the Modal Piano and Guitar stay finite and sound from SIZE x0.25 to x4");
+
+            // The strongest Hz under 400 in C5's ring (no partial is there).
+            const auto airHz = [&shaped] (float size)
+            {
+                const auto x = shaped (true, 72, 0.63f, size, false, 72000);
+                auto best = 0.0, bestHz = 0.0;
+                for (double hz = 40.0; hz < 400.0; hz += 0.5)
+                {
+                    std::complex<double> sum;
+                    for (int i = 9600; i < 48000; ++i)
+                        sum += (double) x[(size_t) i] * std::polar (1.0, -juce::MathConstants<double>::twoPi * hz * i / 48000.0);
+                    if (std::abs (sum) > best)
+                    {
+                        best = std::abs (sum);
+                        bestHz = hz;
+                    }
+                }
+                return bestHz;
+            };
+            const auto small = airHz (0.6f), real = airHz (1.0f), big = airHz (1.6f);
+            check (std::abs (real / 102.5 - 1.0) < 0.03 && std::abs (small / 196.3 - 1.0) < 0.03 && std::abs (big / 56.2 - 1.0) < 0.03,
+                   "the Modal Guitar's air mode moves with SIZE (A0 " + juce::String (small, 1) + " Hz at x0.6, " + juce::String (real, 1)
+                       + " Hz at x1, " + juce::String (big, 1) + " Hz at x1.6)");
+        }
+
         // Stereo: as the reference's microphones heard it. The Spitfire
         // grand (since 2026-11-03) is in phase at C4 (correlation 0.8, Piano V's
         // was -0.9): the channels are related but not one mono signal, and
