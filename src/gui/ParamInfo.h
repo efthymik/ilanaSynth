@@ -361,15 +361,11 @@ inline juce::String offAtZero (const juce::String&, float value) { return juce::
 
 inline juce::String rotate (const juce::String&, float value) { return "+" + juce::String (juce::roundToInt (value)); }
 
-// The modal exciters' SIZE (x0.25..x4) and SCALE (x0.5..x2) as factors;
-// SIZE names the violin family's sizes on the way.
+// The modal exciters' SIZE (x0.25..x4) and SCALE (x0.5..x2) as factors.
+// (The instrument at a factor depends on the engine: the picture and the drag's info line name it, ModalMarks.h.)
 inline juce::String modalSize (const juce::String&, float factor)
 {
-    const auto text = juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) + juce::String (factor, 2);
-    for (const auto& [at, name] : { std::pair { 1.0f, "violin" }, std::pair { 1.17f, "viola" }, std::pair { 2.1f, "cello" } })
-        if (juce::String (factor, 2) == juce::String (at, 2))
-            return text + " " + name;
-    return text;
+    return juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) + juce::String (factor, 2);
 }
 inline juce::String modalScale (const juce::String&, float factor)
 {
