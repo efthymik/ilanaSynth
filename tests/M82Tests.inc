@@ -391,6 +391,28 @@ void runTests()
                 }
             check (identical, "the Modal Piano and Guitar at SIZE x1 are the recording's, bit for bit, after SIZE has moved");
 
+            // SIZE x1 to x2 is as it was before the giant body came in past
+            // x2 (2026-11-13, at caf747a): the renders' bits hashed (FNV-1a),
+            // for the AVX and SSE paths, on the Linux x86-64 build they were
+            // measured on (another compiler or libm may round differently).
+           #if defined(__linux__) && defined(__x86_64__)
+            {
+                std::uint64_t hash = 14695981039346656037ull;
+                for (bool guitar : { false, true })
+                    for (int note : { 40, 64, 88 })
+                        for (float size : { 1.25f, 1.6f, 2.0f })
+                            for (auto v : shaped (guitar, note, 0.7f, size, false, 24000))
+                            {
+                                std::uint32_t bits;
+                                std::memcpy (&bits, &v, sizeof (bits));
+                                hash = (hash ^ bits) * 1099511628211ull;
+                            }
+                const auto expected = ModalPiano::useAvx() ? 0x79272aa3ff0679f1ull : 0xea96573b1b744288ull;
+                check (hash == expected, "the Modal Piano and Guitar from SIZE x1 to x2 are bit for bit as before the giant body (hash "
+                                             + juce::String::toHexString ((juce::int64) hash) + ")");
+            }
+           #endif
+
             auto stable = true;
             for (bool guitar : { false, true })
                 for (int note : { 21, 40, 64, 96 })
@@ -407,6 +429,48 @@ void runTests()
                         stable = stable && peak < 4.0f && peak > 1.0e-5f;
                     }
             check (stable, "the Modal Piano and Guitar stay finite and sound from SIZE x0.25 to x4");
+
+            // Past x2 the giant body comes in (a layer of long-ringing modes
+            // through the strings' range), with the level held: x4 within
+            // 4 dB of x2 (RMS over 3 s), more sound between the strings'
+            // partials and after key-up, and nothing explodes up to x10.
+            {
+                const auto rmsDb = [] (const std::vector<float>& x, int from, int to)
+                {
+                    auto e = 1.0e-30;
+                    for (int i = from; i < to; ++i)
+                        e += (double) x[(size_t) i] * x[(size_t) i];
+                    return 10.0 * std::log10 (e / (to - from));
+                };
+                auto level = true, tail = true, wild = true;
+                juce::String worst;
+                for (bool guitar : { false, true })
+                    for (int note : { 40, 52, 64, 76 })
+                    {
+                        const auto two = shaped (guitar, note, 0.7f, 2.0f, false, 144000);
+                        const auto four = shaped (guitar, note, 0.7f, 4.0f, false, 144000);
+                        const auto change = rmsDb (four, 0, 144000) - rmsDb (two, 0, 144000);
+                        // (key-up at 2.25 s: 0.25 to 0.5 s after it, against the 0.25 s before)
+                        const auto ringOn = (rmsDb (four, 120000, 132000) - rmsDb (four, 96000, 108000))
+                                            - (rmsDb (two, 120000, 132000) - rmsDb (two, 96000, 108000));
+                        level = level && std::abs (change) < 4.0;
+                        tail = tail && ringOn > 12.0;
+                        worst << (guitar ? " G" : " P") << note << " " << juce::String (change, 1) << "/" << juce::roundToInt (ringOn);
+                    }
+                for (bool guitar : { false, true })
+                    for (float size : { 2.01f, 10.0f })
+                    {
+                        auto peak = 0.0f;
+                        for (auto v : shaped (guitar, 52, 1.0f, size, false, 96000))
+                        {
+                            wild = wild && std::isfinite (v);
+                            peak = juce::jmax (peak, std::abs (v));
+                        }
+                        wild = wild && peak < 4.0f && peak > 1.0e-5f;
+                    }
+                check (level && tail && wild, "the Modal Piano and Guitar past SIZE x2: the giant body holds the level and rings on after key-up "
+                                                  "(x4 against x2, dB / ring-on dB:" + worst + ")");
+            }
 
             // The strongest Hz under 400 in C5's ring (no partial is there).
             const auto airHz = [&shaped] (float size)

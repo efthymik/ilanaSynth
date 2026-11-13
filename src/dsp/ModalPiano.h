@@ -63,7 +63,17 @@
 //           time. Both: modes keep constant Q (moved by r, they ring 1/r as
 //           long, after the dampers too), fade out under 30 Hz, and past
 //           x1.4 free slots fill with infill modes (density ~ area).
-//           Exactly the recording at x1 (every term skipped).
+//           Exactly the recording at x1 (every term skipped). Past x2 it
+//           leaves physics (the giant body, addGiant; x1-x2 bit for bit
+//           as before): up to 24 extra slots crossfade in by x4, body
+//           modes through the strings' range fed by the note's spectrum
+//           near each, and a halo of the note's lowest partials a few
+//           cents off; each blooms, rings long (T60 rising with SIZE) and
+//           rings on after key-up, the low end cut, the dry note ducked
+//           so the level holds. The guitar is a giant hollow box, nearly
+//           a gong (one set of modes for every note, upper ones swelling
+//           later); the grand a piano on a huge plate (each voice its own
+//           plate modes to 6 kHz, a fast bloom, a stronger halo).
 //   SCALE   the string's length at the same pitch: longer strings are less
 //           stiff (the stretch falls as SCALE^-3) and ring longer (x SCALE)
 
@@ -96,8 +106,9 @@ class ModalPiano
 public:
     static constexpr int maxPartials = 100;
     static constexpr int maxModes = 16;     // the board's resonances
+    static constexpr int maxGiant = 32;     // SIZE past x2: the giant body's 24 modes and up to 7 silent ones (addGiant)
     static constexpr int group = 8;         // slots run and skipped together (one AVX register, two SSE)
-    static constexpr int maxSlots = (maxPartials + maxModes + group - 1) / group * group;
+    static constexpr int maxSlots = (maxPartials + maxModes + maxGiant + group - 1) / group * group;
     static constexpr int blockSize = 32;
     // Tests and benches turn it off to compare with every partial running
     // (CPU round 2026-10-31): skipping groups of silent partials, and
@@ -127,7 +138,7 @@ public:
 
     void reset()
     {
-        count = slots = modeSlots = 0;
+        count = slots = modeSlots = giantStart = 0;
         attackLeft = 0;
         pluckAt = pluckLength = 0;
         burstLive = false;
@@ -167,6 +178,8 @@ public:
         sized = newSize != 1.0f;
         if (sized)
             setBodyLaws();
+        else
+            giant = 0.0f;
         stretchScale = 1.0f / (newScale * newScale * newScale);
         pitchDirty = true;
     }
@@ -189,7 +202,7 @@ public:
     void trigger (float velocity, float randomUnit)
     {
         const auto& table = *tableData;
-        count = slots = 0;
+        count = slots = giantStart = 0;
         attackLeft = 0;
         pluckAt = pluckLength = 0;
         burstLive = pluckNoise = false;
@@ -260,6 +273,9 @@ public:
         modeSlots = slots;
         if (sized)
             addInfill (modes, seed);
+        giantStart = slots;
+        if (sized && logSize > 1.0f)
+            addGiant (seed);
         for (int k = slots; k < roundedCount(); ++k)
         {
             measured[k] = harmonic[k] = re[k] = im[k] = amp[k] = 0.0f;
@@ -269,6 +285,8 @@ public:
             blockTurn[k] = 0.0;
         }
         updatePitch();
+        if (slots > giantStart)
+            coupleGiant();
 
         // The modelled pluck (the guitar): each partial and mode starts in
         // the phase it had in the nearest recorded note at the nearest
@@ -307,12 +325,18 @@ public:
                 phase = modeA->modePhase[(size_t) (k - count)];
             }
             // Each channel's gain, at the two channels' power average of 1.
-            if (k >= modeSlots && k < slots)
+            if (k >= modeSlots && k < giantStart)
             {
                 // (An infill mode: its lower neighbour's.)
                 const auto parent = (size_t) (infillFrom[k - modeSlots] - count);
                 balance = modeA->modeBalance[parent];
                 phase = modeA->modePhase[parent];
+            }
+            if (k >= giantStart && k < slots)
+            {
+                // (A giant body mode: its own place, wide.)
+                balance = 10.0f * (hash01 (k - giantStart, 3) - 0.5f);
+                phase = 2.0f * (hash01 (k - giantStart, 4) - 0.5f);
             }
             const auto ratio = std::pow (10.0f, balance / 20.0f);
             const auto right = std::sqrt (2.0f / (1.0f + ratio * ratio));
@@ -632,7 +656,8 @@ private:
     // is scaled so the length goes there and on to the next block's level
     // along an exponential, which is how a level that falls in dB falls.
     // A silent partial keeps a tiny length (-160 dB) so its phase stays.
-    void setLevel (int k, float target)
+    // (span: samples to the target; the giant body's slots go 8 blocks at a time.)
+    void setLevel (int k, float target, int span = blockSize)
     {
         static constexpr float floorLevel = 1.0e-8f;
         const auto from = amp[k] > 0.0f ? amp[k] : floorLevel;
@@ -648,7 +673,7 @@ private:
         re[k] *= scale;
         im[k] *= scale;
         const auto to = target > 0.0f ? target : floorLevel;
-        const auto growth = start == to ? 1.0f : std::exp2 (std::log2 (to / start) * (1.0f / (float) blockSize));
+        const auto growth = start == to ? 1.0f : std::exp2 (std::log2 (to / start) * (1.0f / (float) span));
         turnCos[k] = rotCos[k] * growth;
         turnSin[k] = rotSin[k] * growth;
         amp[k] = target;
@@ -670,6 +695,8 @@ private:
             db += bodyShapeDb (partialHz);
         if (stringScale != 1.0f)
             db += juce::jlimit (-12.0f, 12.0f, 3.0f * std::log2 (stringScale) * std::log2 ((float) (k + 1)));
+        if (slots > giantStart)
+            db -= giantDuckDb();
         return db;
     }
 
@@ -713,6 +740,8 @@ private:
         }
         // The grand's board noise (0-500 Hz, the thump) on the board's time.
         noiseTime = std::exp2 (2.0f * std::tanh (-logSize));
+        // Past x2, the giant body (giantBody): 0 at x2, 1 at x4.
+        giant = logSize > 1.0f ? juce::jmin (1.0f, logSize - 1.0f) : 0.0f;
     }
 
     // The grand's board: its thickness hardly changes with a piano's size,
@@ -750,6 +779,11 @@ private:
     // A body mode slot's Hz, decay (ringScale) and level (modeDb) at this SIZE.
     void moveMode (int k)
     {
+        if (k >= giantStart)
+        {
+            moveGiant (k);
+            return;
+        }
         if (k < modeSlots)
         {
             const auto m = (size_t) (k - count);
@@ -764,6 +798,8 @@ private:
             // little (2 dB per doubling).
             modeDb[k] = juce::jmin (0.0f, edgeDb (hz[k]) - edgeDb (from))
                         + (kind == ModalPianoTable::airMode ? softLimit (2.0f * logSize, 6.0f) : 0.0f);
+            if (slots > giantStart)
+                modeDb[k] -= giantDuckDb();
             return;
         }
         const auto j = k - modeSlots;
@@ -772,6 +808,8 @@ private:
         ringScale[k] = std::sqrt (ringScale[a] * ringScale[b]);
         const auto fade = smoothstep (2.0f * std::log2 (bodySize / infillAt[j]));
         modeDb[k] = (fade > 1.0e-7f ? 20.0f * std::log10 (fade) : -140.0f) + juce::jmin (0.0f, edgeDb (hz[k]));
+        if (slots > giantStart)
+            modeDb[k] -= giantDuckDb();
     }
 
     // A bigger plate has more modes per Hz (~ area, SIZE^2 at a fixed
@@ -814,6 +852,180 @@ private:
             re[k] = std::cos (phase);
             im[k] = std::sin (phase);
             amp[k] = 0.0f;
+        }
+    }
+
+    // ---- SIZE past x2: the giant body (2026-11-13; ilana: "past x2 it
+    // leaves physics: dense ringing body modes stay in the strings' range,
+    // a reverb-like bloom, longer ring-on; x1-x2 stays as is"). Physics
+    // alone sends every body mode under the strings past ~x2 (and fades
+    // it under 30 Hz), so x2.5 and x4 sounded alike above 100 Hz. Past x2
+    // (giant: 0 at x2, smoothstep in log2 SIZE to 1 at x4) a layer of
+    // extra mode slots crossfades in, filling the strings' range:
+    //   body modes  a ladder through the strings' range (jittered per
+    //               slot, sinking slowly as SIZE^-0.5 past x2), fed by the
+    //               note's spectrum near each one (a broad kernel, plus a
+    //               narrow one for partials right on a mode), low end cut;
+    //   sympathetic the note's lowest partials again, a few cents off
+    //               (each voice its own detune): a halo that beats slowly
+    //               against the strings and outlasts them;
+    // each slot fading in at its own rank (denser with SIZE), blooming
+    // (a rise of tau) and ringing long (T60 rising with SIZE; slower still
+    // after key-up), with the strings and the table's body ducked a few dB
+    // so the level holds. Two flavours (GiantFlavour): the guitar a giant
+    // hollow box, nearly a gong (one fixed set of modes for every note,
+    // 55 Hz-1.8 kHz, upper modes swell later); the grand a piano on a huge
+    // plate (each voice its own denser plate modes to 6 kHz, a fast bloom,
+    // a strong halo). All of it per note and per block, in the existing
+    // phasor bank: nothing new per sample.
+    struct GiantFlavour
+    {
+        int sympathetic, body;           // slots of each
+        float lowHz, highHz;             // the body ladder at x2
+        bool shared;                     // one ladder for every note (else each voice's own)
+        float cornerHz;                  // the layer's low cut (12 dB/octave under it)
+        float bodyShare;                 // of the layer's power, the body modes' (the rest the halo's)
+        float t60From, t60To, t60Tilt, tiltHz; // body T60 (s) at giant 0 and 1, times (Hz / tiltHz)^-tilt
+        float haloT60From, haloT60To;
+        float bloomFrom, bloomTo, bloomHigh;   // rise tau (s); + bloomHigh x sqrt (Hz / 1 kHz) x giant
+        float layerFromDb, layerToDb;    // the layer's power over the note's (at 0.05 s), giant 0 and 1
+        float duckDb;                    // the strings and table body down by this x giant
+        float haloCents;                 // the halo's detune, up to
+        float whiten;                    // a body mode feeds on the note's power to this (under 1: brighter, less boom)
+        float tilt;                      // and its feed tilts up as (Hz / 500)^tilt (against mud)
+    };
+    const GiantFlavour& flavour() const
+    {
+        static constexpr GiantFlavour box { 4, 20, 55.0f, 4000.0f, true, 180.0f, 0.75f, 3.0f, 10.0f, 0.25f, 200.0f,
+                                            2.5f, 8.0f, 0.02f, 0.10f, 0.40f, -9.0f, 1.0f, 2.0f, 6.0f, 0.6f, 0.7f };
+        static constexpr GiantFlavour plate { 6, 18, 110.0f, 6000.0f, false, 100.0f, 0.6f, 3.0f, 12.0f, 0.35f, 500.0f,
+                                              3.0f, 14.0f, 0.01f, 0.10f, 0.0f, -9.0f, 1.0f, 1.5f, 5.0f, 0.8f, 0.0f };
+        return tableData->guitarBody ? box : plate;
+    }
+    // A fixed number in [0, 1) for slot j (the guitar's one ladder, stereo places).
+    static float hash01 (int j, int salt)
+    {
+        auto h = (std::uint32_t) j * 2654435761u + (std::uint32_t) salt * 40503u + 0x9e3779b9u;
+        h ^= h >> 15;
+        h *= 2246822519u;
+        h ^= h >> 13;
+        h *= 3266489917u;
+        h ^= h >> 16;
+        return (float) (h >> 8) / 16777216.0f;
+    }
+    float giantDuckDb() const { return flavour().duckDb * giant; }
+
+    // The giant body's slots, after the infill (SIZE over x2 at the note's start).
+    void addGiant (std::uint32_t& seed)
+    {
+        const auto& f = flavour();
+        const auto next = [&seed]
+        {
+            seed = seed * 1664525u + 22695477u;
+            return (float) (seed >> 8) / 16777216.0f;
+        };
+        const auto add = [&] (int partial, float hz, float detuneCents, float rank)
+        {
+            const auto j = slots - giantStart;
+            giantPartial[j] = partial;
+            giantBaseHz[j] = hz;
+            giantDetune[j] = std::exp2 (detuneCents / 1200.0f);
+            giantRank[j] = rank;
+            giantCouple[j] = -140.0f;
+            const auto k = slots++;
+            const auto phase = next() * juce::MathConstants<float>::twoPi;
+            re[k] = std::cos (phase);
+            im[k] = std::sin (phase);
+            amp[k] = 0.0f;
+        };
+        // (Silent slots up to a group's edge first: the giant body's groups,
+        // always sounding, then don't keep the partials' last one running.)
+        while (slots % group != 0)
+            add (-2, 1000.0f, 0.0f, 2.0f);
+        for (int i = 0; i < f.sympathetic && i < count; ++i)
+        {
+            const auto cents = f.haloCents * (0.4f + 0.6f * next()) * (next() < 0.5f ? -1.0f : 1.0f);
+            add (i, 0.0f, cents, 0.5f * (float) i / (float) f.sympathetic);
+        }
+        for (int b = 0; b < f.body; ++b)
+        {
+            const auto u = f.shared ? hash01 (b, 1) : next();
+            const auto at = ((float) b + 0.5f + 0.8f * (u - 0.5f)) / (float) f.body;
+            add (-1, f.lowHz * std::pow (f.highHz / f.lowHz, at), 1.5f * (2.0f * next() - 1.0f),
+                 (float) ((b * 7) % f.body) / (float) f.body);
+        }
+    }
+
+    // A giant slot's Hz, level (but for its bloom and fall), fall and bloom at this SIZE.
+    void moveGiant (int k)
+    {
+        const auto& f = flavour();
+        const auto j = k - giantStart;
+        const auto halo = giantPartial[j] >= 0;
+        hz[k] = (halo ? hz[giantPartial[j]] : giantBaseHz[j] * std::exp2 (-0.5f * (logSize - 1.0f))) * giantDetune[j];
+        ringScale[k] = 1.0f;
+        modeDb[k] = 0.0f;
+        const auto on = smoothstep ((1.5f * giant - giantRank[j]) * 4.0f);
+        giantDb[j] = giantCouple[j] + f.layerFromDb + giant * (f.layerToDb - f.layerFromDb)
+                     + (on > 1.0e-7f ? 20.0f * std::log10 (on) : -140.0f) + juce::jmin (0.0f, edgeDb (hz[k]));
+        const auto t60 = halo ? f.haloT60From * std::pow (f.haloT60To / f.haloT60From, giant)
+                              : f.t60From * std::pow (f.t60To / f.t60From, giant) * std::pow (juce::jmax (20.0f, hz[k]) / f.tiltHz, -f.t60Tilt);
+        giantFall[j] = 60.0f / juce::jmax (0.05f, t60);
+        giantBloom[j] = f.bloomFrom + giant * (f.bloomTo - f.bloomFrom + f.bloomHigh * std::sqrt (hz[k] / 1000.0f));
+    }
+
+    // What each giant slot gets from this note (once, at its start): the
+    // halo its partial's power, a body mode the note's power near it; the
+    // body and the halo each scaled to their share of the note's power.
+    void coupleGiant()
+    {
+        const auto& f = flavour();
+        const auto& table = *tableData;
+        const auto times = (int) table.times.size();
+        float power[maxPartials], fed[maxPartials];
+        auto total = 1.0e-30f;
+        for (int k = 0; k < count; ++k)
+        {
+            auto level = levelOffset + shapeDb[k];
+            for (int i = 0; i < 4; ++i)
+                level += corners.weights[(size_t) i] * levelOf (*corners.entries[(size_t) i], k, table.lateTime, times);
+            power[k] = level < -140.0f ? 0.0f : std::pow (10.0f, level / 10.0f);
+            fed[k] = level < -140.0f ? 0.0f : std::pow (10.0f, f.whiten * level / 10.0f);
+            total += power[k];
+        }
+        float feed[maxGiant];
+        auto bodySum = 1.0e-30f, haloSum = 1.0e-30f;
+        for (int k = giantStart; k < slots; ++k)
+        {
+            const auto j = k - giantStart;
+            auto c = 0.0f;
+            if (giantPartial[j] == -2)
+                c = 0.0f;
+            else if (giantPartial[j] >= 0)
+            {
+                c = power[giantPartial[j]];
+                haloSum += c;
+            }
+            else
+            {
+                for (int i = 0; i < count; ++i)
+                {
+                    const auto r = hz[i] / hz[k], x = r - 1.0f / r;
+                    c += fed[i] * (1.0f / (1.0f + 2.0f * x * x) + 4.0f / (1.0f + 1600.0f * x * x));
+                }
+                const auto low = f.cornerHz / hz[k];
+                c *= std::pow (hz[k] / 500.0f, f.tilt) / (1.0f + low * low * low * low);
+                bodySum += c;
+            }
+            feed[j] = c;
+        }
+        for (int k = giantStart; k < slots; ++k)
+        {
+            const auto j = k - giantStart;
+            const auto share = giantPartial[j] == -2 ? 0.0f : giantPartial[j] >= 0 ? (1.0f - f.bodyShare) / haloSum : f.bodyShare / bodySum;
+            const auto p = total * share * feed[j];
+            giantCouple[j] = p > 1.0e-14f ? 10.0f * std::log10 (p) : -140.0f;
+            moveGiant (k);
         }
     }
 
@@ -1009,7 +1221,7 @@ private:
             }
             // SIZE's infill modes: between their two neighbours, 3 dB under
             // their mean, faded in.
-            for (int k = modeSlots; k < slots; ++k)
+            for (int k = modeSlots; k < giantStart; ++k)
             {
                 const auto a = infillFrom[k - modeSlots], b = infillTo[k - modeSlots];
                 levelA[k] = 0.5f * (levelA[a] + levelA[b]) - 3.0f + modeDb[k];
@@ -1033,8 +1245,39 @@ private:
         const auto cut = skipSilentGroups ? loudestPartial - relativeCut : -1000.0f;
         auto loudest = -200.0f, loudestNow = -200.0f;
         bool slotLive[maxSlots];
+        const auto giantRelease = 0.3f * std::exp2 (-3.3f * giant);
+        const auto giantTurn = (int) ((elapsed / blockSize) & 7);
         for (int k = 0; k < slots; ++k)
         {
+            if (k >= giantStart)
+            {
+                // The giant body: blooming, then its own long fall (and
+                // a slower one after key-up). Slow: each slot is set 8
+                // blocks ahead, an eighth of them each block.
+                const auto j = k - giantStart;
+                if (((j + giantTurn) & 7) != 0 && elapsed > 0)
+                {
+                    loudest = juce::jmax (loudest, giantLastDb[j]);
+                    loudestNow = juce::jmax (loudestNow, giantLastDb[j]);
+                    slotLive[k] = amp[k] > 0.0f;
+                    continue;
+                }
+                const auto span = 8 - ((j + giantTurn) & 7);
+                const auto at = (float) ((double) (elapsed + span * blockSize) / sampleRate);
+                const auto r = at / giantBloom[j];
+                const auto bloom = r > 12.0f ? 0.0f : 20.0f * std::log10 (juce::jmax (1.0e-7f, 1.0f - std::exp (-r)));
+                const auto releasedThen = released < 0 ? 0.0f : (float) ((elapsed + span * blockSize - released) / sampleRate);
+                const auto db = giantDb[j] + bloom - giantFall[j] * at / timeScale
+                                - dampRate * juce::jmin (8.0f, hz[k] / 1000.0f) * at
+                                - releaseRate * releasedThen * giantRelease;
+                giantLastDb[j] = db;
+                loudest = juce::jmax (loudest, db);
+                loudestNow = juce::jmax (loudestNow, db);
+                const auto target = db < -140.0f || db < cut ? 0.0f : std::pow (10.0f, db / 20.0f);
+                slotLive[k] = target > 0.0f || amp[k] > 0.0f;
+                setLevel (k, target, span * blockSize);
+                continue;
+            }
             auto db = levelA[k] + u * (levelB[k] - levelA[k]);
             if (beyond > 0.0f)
                 db += juce::jmin (-1.0f, (levelB[k] - levelA[k]) / (t1 - t0)) * beyond;
@@ -1175,6 +1418,12 @@ private:
     float ringScale[maxSlots] {}, modeDb[maxSlots] {}, drainRate[maxSlots] {};
     int infillFrom[maxModes] {}, infillTo[maxModes] {};
     float infillU[maxModes] {}, infillAt[maxModes] {};
+    // The giant body (addGiant, past x2): its slots start at giantStart.
+    float giant = 0.0f;
+    int giantStart = 0;
+    int giantPartial[maxGiant] {}; // the halo's partial, or -1: a body mode (-2: silent, to a group's edge)
+    float giantBaseHz[maxGiant] {}, giantDetune[maxGiant] {}, giantRank[maxGiant] {}, giantCouple[maxGiant] {};
+    float giantDb[maxGiant] {}, giantFall[maxGiant] {}, giantBloom[maxGiant] {}, giantLastDb[maxGiant] {};
     float shapeDb[maxSlots] {}; // each partial's SIZE / SCALE level change (shapeGainDb)
     // The table's sinusoid levels are the reference's in dBFS (about 20 dB
     // quiet); Voice::exciterTrim brings the Modal Piano up to the other
