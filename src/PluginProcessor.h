@@ -530,6 +530,14 @@ public:
     int getActiveVoiceCount() const { return activeVoiceCount.load(); }
     // Voices still rendering, tails included (getActiveVoiceCount counts only
     // those with their envelopes up). Audio thread or tests only.
+    // The voice playing `note`, or nullptr. Tests only.
+    const Voice* voicePlayingForTest (int note) const
+    {
+        for (int i = 0; i < synth.getNumVoices(); ++i)
+            if (synth.getVoice (i)->isVoiceActive() && synth.getVoice (i)->getCurrentlyPlayingNote() == note)
+                return dynamic_cast<const Voice*> (synth.getVoice (i));
+        return nullptr;
+    }
     int getRenderingVoiceCount() const
     {
         auto count = 0;

@@ -1488,8 +1488,9 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
         auto slot = readModSlot (i);
         slot.remap = activeModRemapOn[(size_t) i] ? activeModRemapTables[(size_t) i].data() : nullptr;
 
-        // A spectral amount fed by a retriggered LFO is worked out per voice, like an envelope.
-        if (Mod::spectralOscFor (slot.destination) >= 0)
+        // A spectral amount or a knob the voices read (voiceKnobOffsetFor)
+        // fed by a retriggered LFO is worked out per voice, like an envelope.
+        if (Mod::spectralOscFor (slot.destination) >= 0 || voiceKnobOffsetFor (slot.destination) >= 0)
             for (const auto source : { slot.source, slot.aux })
             {
                 const auto lfo = juce::jmax (Mod::lfoIndexFor (source), Mod::lfoBIndexFor (source));
@@ -1894,6 +1895,17 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
         if (! Mod::isExplicitDestination (destination))
         {
             p.anySpectralMods = p.anySpectralMods || Mod::isVoiceSpectralSlot (activeSlots[i]);
+            if (isVoiceKnobSlot (activeSlots[i]))
+            {
+                auto seen = false;
+                for (int k = 0; k < p.numVoiceKnobs && ! seen; ++k)
+                    seen = p.voiceKnobs[(size_t) k].destination == destination;
+                const auto index = Mod::paramDestinationIndex (destination);
+                if (! seen && p.numVoiceKnobs < VoiceParams::maxVoiceKnobs && index >= 0 && index < (int) paramDestinations.size()
+                    && paramDestinations[(size_t) index].parameter != nullptr)
+                    p.voiceKnobs[(size_t) p.numVoiceKnobs++] = { destination, voiceKnobOffsetFor (destination),
+                                                                 &paramDestinations[(size_t) index].parameter->getNormalisableRange() };
+            }
             p.anyExtendedFmMods = p.anyExtendedFmMods || Mod::extendedFmCellFor (destination) >= 0;
             continue;
         }
