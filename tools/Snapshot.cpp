@@ -9072,6 +9072,44 @@ int runUiTests()
         parameter->setValueNotifyingHost (original);
         settle (30);
     }
+    // The echo also stepped the parameter itself back (2026-11-13, ilana's
+    // recording: "stuttery when moving the knob"): the filter graph and the
+    // sound read the parameter, not the knob. ParameterEchoGuard puts the
+    // user's latest value back when an echo of an earlier drag step arrives.
+    {
+        settle ((int) ParameterEchoGuard::holdMs + 50);
+        auto* parameter = processor.apvts.getParameter ("f1_cutoff");
+        const auto* raw = processor.apvts.getRawParameterValue ("f1_cutoff");
+        const auto fromAudioThread = [parameter] (float normalised)
+        {
+            std::thread host ([parameter, normalised] { parameter->setValueNotifyingHost (normalised); });
+            host.join();
+        };
+        const auto original = parameter->getValue();
+        const auto blockedBefore = processor.echoGuard.getEchoesBlocked();
+
+        parameter->beginChangeGesture();
+        for (const auto step : { 0.50f, 0.52f, 0.54f, 0.56f })
+            parameter->setValueNotifyingHost (step); // drag steps, from the editor
+        fromAudioThread (0.52f); // the host's echo of an older step
+        expect (std::abs (parameter->getValue() - 0.56f) < 1.0e-4f, "parameter echo: an echo of an earlier drag step doesn't move the parameter back");
+        expect (std::abs (raw->load() - parameter->convertFrom0to1 (0.56f)) < 1.0e-2f, "parameter echo: the value the graph reads stays on the drag");
+        expect (processor.echoGuard.getEchoesBlocked() == blockedBefore + 1, "parameter echo: the echo was counted");
+        fromAudioThread (0.56f); // the echo of the latest step changes nothing
+        expect (std::abs (parameter->getValue() - 0.56f) < 1.0e-4f, "parameter echo: the latest step's echo is harmless");
+        fromAudioThread (0.61f); // a value the user never set (automation) still lands
+        expect (std::abs (parameter->getValue() - 0.61f) < 1.0e-4f, "parameter echo: a new value from the host still lands mid-drag");
+        parameter->setValueNotifyingHost (0.58f);
+        parameter->endChangeGesture();
+        fromAudioThread (0.54f); // late echo just after letting go
+        expect (std::abs (parameter->getValue() - 0.58f) < 1.0e-4f, "parameter echo: a late echo just after letting go is blocked too");
+        settle ((int) ParameterEchoGuard::holdMs + 100);
+        fromAudioThread (0.54f); // after the hold: automation back to an old value lands
+        expect (std::abs (parameter->getValue() - 0.54f) < 1.0e-4f, "parameter echo: once the user let go, any value from the host lands");
+
+        parameter->setValueNotifyingHost (original);
+        settle ((int) ParameterEchoGuard::holdMs + 50);
+    }
     // The modal SIZE / SCALE knobs snap to real instruments (2026-11-12, ilana: "snap to the real instrument
     // sizes ... holding alt while draggin"): a drag that comes within a few pixels of a ring mark lands on its
     // exact value; Alt held passes it.
