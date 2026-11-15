@@ -380,6 +380,7 @@ IlanaSynthAudioProcessor::IlanaSynthAudioProcessor()
     synth.addSound (new WavetableSound());
 
     // The poly limit counts numVoices of them; the spares let a stolen voice fade out.
+    static_assert (numVoices + numSpareVoices <= 64, "IlanaSynth::renderVoicesNow lists at most 64 sounding voices");
     for (int i = 0; i < numVoices + numSpareVoices; ++i)
         synth.addVoice (new Voice());
     synth.setSpareVoices (numSpareVoices);
@@ -708,9 +709,9 @@ void IlanaSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     repeatWasPlaying = false; // (an export that starts playing re-seeds)
     noteSpray.reset();
     arpHeldNotes.clearQuick();   // what's sounding is released by its gate
-    generatedMidi.ensureSize (4096);
-    midiForSynth.ensureSize (4096);
-    clipScratch.ensureSize (8192);
+    generatedMidi.ensureSize (65536);
+    midiForSynth.ensureSize (65536);
+    clipScratch.ensureSize (65536);
     clipActive.clear();
     clipHeld.clearQuick();
     clipRunning = clipUsedHost = false;
@@ -759,7 +760,7 @@ void IlanaSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     synth.prepareVoiceThreads (juce::jlimit (0, 3, juce::SystemStats::getNumCpus() - 1), expectedBlockSize * 4,
                                expectedBlockSize, sampleRate);
 
-    scaledMidiBuffer.ensureSize (4096); // (a dense MPE block; sized like chunkMidi)
+    scaledMidiBuffer.ensureSize (65536); // (a dense MPE block; sized like chunkMidi)
 
     lfoBuffers.setSize (numLfoChannels, expectedBlockSize * oversamplingFactor.load(), false, false, true);
 
@@ -774,6 +775,8 @@ void IlanaSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     // the first audio block.
     (void) Mod::extendedFmCellFor (0);
     (void) Mod::spectralOscFor (0);
+    (void) voiceKnobOffsetFor (0);
+    (void) Filters2::Acid303::tuningFor (1.0); // the 303 filter's phase grid
 
     // M7.5: room for the input at up to 4x oversampling, and 3 s of history.
     liveDry.setSize (2, expectedBlockSize, false, true, false);
@@ -814,7 +817,7 @@ void IlanaSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
         compileFxPlansNow();
         freeRetiredFx (true);
     }
-    chunkMidi.ensureSize (4096);
+    chunkMidi.ensureSize (65536);
     updateLatency();
 }
 
@@ -916,9 +919,6 @@ void IlanaSynthAudioProcessor::cutPatchTails()
             voice->resetForNewPatch();
     noteSpray.reset();
 
-    for (auto& stage : dcBlock)
-        for (auto& channel : stage)
-            channel = { 0.0f, 0.0f };
     fxAsleep = false;
     fxSilentSamples = 0;
     resetBlockRamps();
@@ -926,6 +926,22 @@ void IlanaSynthAudioProcessor::cutPatchTails()
     for (int channel = 0; channel < 2; ++channel)
         declick[channel] = lastOutput[channel];
 
+    clearPostVoiceMemory();
+
+    // The modulators start over too, as in a new instance, so a patch sounds
+    // the same whatever played before it (a slow free-running LFO otherwise
+    // starts wherever the last patch left it).
+    restartModulators (0);
+}
+
+// Everything after the voices that keeps audio (effects, the piano body
+// and pedal, the band splitters, the DC blocker), cleared without
+// allocating: on a patch change, and when a NaN / Inf reached the output.
+void IlanaSynthAudioProcessor::clearPostVoiceMemory()
+{
+    for (auto& stage : dcBlock)
+        for (auto& channel : stage)
+            channel = { 0.0f, 0.0f };
     resetFxEngines();
     sympatheticStrings.reset();
     soundboard.reset();
@@ -935,23 +951,7 @@ void IlanaSynthAudioProcessor::cutPatchTails()
     // (The band splitters' filters; the effects' own memory is in
     // resetFxEngines above.)
     for (auto& split : fxSplit)
-    {
-        for (auto& stage : split.lowA)
-            for (auto& filter : stage)
-                filter.reset();
-        for (auto& stage : split.lowB)
-            for (auto& filter : stage)
-                filter.reset();
-        for (auto& filter : split.allLow)
-            filter.reset();
-        for (auto& filter : split.allHigh)
-            filter.reset();
-    }
-
-    // The modulators start over too, as in a new instance, so a patch sounds
-    // the same whatever played before it (a slow free-running LFO otherwise
-    // starts wherever the last patch left it).
-    restartModulators (0);
+        split.reset();
 }
 
 // The free LFOs, MSEG, clocked S&H, vector path and the Evolve drifts start
@@ -1092,7 +1092,7 @@ void IlanaSynthAudioProcessor::setOversampling (int factor)
     mseg.prepare (voiceRate);
     mseg.reset();
     lfoBuffers.setSize (numLfoChannels, expectedBlockSize * factor, false, false, true);
-    scaledMidiBuffer.ensureSize (4096); // (a dense MPE block; sized like chunkMidi)
+    scaledMidiBuffer.ensureSize (65536); // (a dense MPE block; sized like chunkMidi)
     updateLatency();
 
     suspendProcessing (false);
@@ -1455,11 +1455,16 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
 
     if (const auto epoch = remapEpoch.load(); epoch != activeRemapEpoch)
     {
-        const juce::SpinLock::ScopedLockType lock (remapLock);
-        activeModRemapTables = modRemapTables;
-        for (size_t i = 0; i < activeModRemapOn.size(); ++i)
-            activeModRemapOn[i] = modRemapOn[i].load();
-        activeRemapEpoch = epoch;
+        // Never wait for the editor (it copies curves under this lock): if
+        // it holds the lock, take the new curves on a later block.
+        const juce::SpinLock::ScopedTryLockType lock (remapLock);
+        if (lock.isLocked())
+        {
+            activeModRemapTables = modRemapTables;
+            for (size_t i = 0; i < activeModRemapOn.size(); ++i)
+                activeModRemapOn[i] = modRemapOn[i].load();
+            activeRemapEpoch = epoch;
+        }
     }
 
     {
@@ -2184,6 +2189,32 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
         synth.renderNextBlock (buffer, midiForSynth, 0, buffer.getNumSamples());
     }
 
+    // A voice that went NaN / Inf: its samples are zeroed here, before the
+    // piano body, the effects or the oversampler's IIR filters (which would
+    // keep it for ever) take it in, and the synth checks its voices one by
+    // one on the next block, stopping the broken one, until this comes out
+    // clean (IlanaSynth::setCheckVoicesForNonFinite). Finite audio passes
+    // untouched.
+    {
+        auto voicesBad = false;
+        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+        {
+            auto* data = buffer.getWritePointer (channel);
+            for (int i = 0; i < buffer.getNumSamples(); ++i)
+                if (! std::isfinite (data[i]))
+                {
+                    voicesBad = true;
+                    data[i] = 0.0f;
+                }
+        }
+        if (voicesBad)
+        {
+            oversampler2x.reset();
+            oversampler4x.reset();
+        }
+        synth.setCheckVoicesForNonFinite (voicesBad);
+    }
+
     {
         auto bestAmp = 0.0f;
         auto bestActivity = 0.0f;
@@ -2430,8 +2461,11 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
                 }
             }
         }
+        // (Voices' NaNs are caught before this, after the synth renders.)
+        // Whatever made it may have left it in any of the memories after the
+        // voices (the piano body and pedal, the band splitters): clear them.
         if (bad)
-            resetFxEngines();
+            clearPostVoiceMemory();
     }
 
     // After a patch change: ease from where the old patch's output stopped
@@ -3163,10 +3197,14 @@ void IlanaSynthAudioProcessor::setUserSample (int oscIndex, std::shared_ptr<Samp
     }
 
     const auto embedded = data != nullptr && path.isEmpty() ? data : nullptr;
+    // The sample retired three loads ago is freed here, after the lock is
+    // let go (the audio thread waits on it in getSampleForOsc).
+    std::shared_ptr<SampleData> dropped;
     {
         const juce::SpinLock::ScopedLockType lock (sampleLock);
         auto& retired = retiredSamples[(size_t) oscIndex];
         auto& index = retiredIndex[(size_t) oscIndex];
+        dropped = std::move (retired[(size_t) index]);
         retired[(size_t) index] = std::move (sampleSlots[(size_t) oscIndex]);
         index = (index + 1) % (int) retired.size();
         sampleSlots[(size_t) oscIndex] = std::move (data);
@@ -3206,9 +3244,14 @@ bool IlanaSynthAudioProcessor::loadUserWavetable (int slot, const juce::File& fi
 void IlanaSynthAudioProcessor::swapUserTable (int slot, std::shared_ptr<Wavetable> table)
 {
     ++dataEpoch; // what the editor draws changes
+    // The table retired three swaps ago is freed after the lock is let go:
+    // the audio thread waits on this lock (getTableForChoice).
+    std::shared_ptr<Wavetable> dropped;
     const juce::SpinLock::ScopedLockType lock (tableLock);
     auto& index = retiredTableIndex[(size_t) slot];
-    retiredTables[(size_t) (slot * 3 + index)] = std::move (userTables[(size_t) slot]);
+    auto& retired = retiredTables[(size_t) (slot * 3 + index)];
+    dropped = std::move (retired);
+    retired = std::move (userTables[(size_t) slot]);
     index = (index + 1) % 3;
     userTables[(size_t) slot] = std::move (table);
 }

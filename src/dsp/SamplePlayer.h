@@ -483,7 +483,14 @@ public:
         // A region's sustain loop: forward only, inside the played range.
         else if (zoneLoopPlays() && params.loopEnd > params.loopStart && ! params.reverse && position >= (double) params.loopEnd
             && params.loopEnd <= regionEnd && params.loopStart >= regionStart)
-            position -= (double) (params.loopEnd - params.loopStart);
+        {
+            const auto loopLength = (double) (params.loopEnd - params.loopStart);
+            position -= loopLength;
+            // A step longer than the loop (a short single-cycle loop played
+            // octaves up) went past it again and ended the note.
+            if (position >= (double) params.loopEnd)
+                position = (double) params.loopStart + std::fmod (position - (double) params.loopStart, loopLength);
+        }
 
         if ((position >= regionEnd || position < regionStart) && ! (looping && params.pingPong))
         {

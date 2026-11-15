@@ -1365,6 +1365,7 @@ private:
     int fxSilentSamples = 0;
     std::array<std::array<std::array<float, 2>, 2>, 2> dcBlock {}; // [before/after the effects][channel][x, y]
     void cutPatchTails();
+    void clearPostVoiceMemory();
     std::atomic<float> inputLevelDisplay { 0.0f }, inputEnvDisplay { 0.0f };
     struct OscCoreIds
     {
@@ -1797,6 +1798,7 @@ public:
 
     // Tests only: what the last block sent to the voices.
     const juce::MidiBuffer& getSynthMidiForTest() const { return midiForSynth; }
+    IlanaSynth& getSynthForTest() { return synth; }
     // Tests only: the message thread's pending work (the CCs it applies) now.
     void runAsyncUpdateForTest() { handleUpdateNowIfNeeded(); }
 
@@ -1996,6 +1998,18 @@ private:
         std::array<juce::IIRFilter, 2> allLow, allHigh;
         int lastBand = 0;
         float lastLow = 0.0f, lastHigh = 0.0f;
+
+        void reset()
+        {
+            for (auto* stages : { &lowA, &lowB })
+                for (auto& stage : *stages)
+                    for (auto& filter : stage)
+                        filter.reset();
+            for (auto& filter : allLow)
+                filter.reset();
+            for (auto& filter : allHigh)
+                filter.reset();
+        }
     };
     std::array<SplitFilter, (size_t) numFxSlots> fxSplit;
     juce::AudioBuffer<float> fxBand;

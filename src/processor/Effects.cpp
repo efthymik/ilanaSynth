@@ -483,8 +483,13 @@ void IlanaSynthAudioProcessor::runFxSlot (int slot, juce::AudioBuffer<float>& bu
         }
 
         // An effect whose output is not finite has latched: it starts empty.
+        // (The band splitter's filters too: a NaN they kept would come back
+        // every block.)
         if (sanitiseBuffer (buffer))
+        {
             engineForSlot (slot - 1).reset();
+            fxSplit[(size_t) (slot - 1)].reset();
+        }
 
         {
             auto& in = fxSlotIn[(size_t) (slot - 1)];

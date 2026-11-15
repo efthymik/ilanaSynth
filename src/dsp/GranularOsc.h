@@ -108,8 +108,10 @@ public:
 
             if (position < 0.0)
                 position += (double) numSamples;
+            if (! std::isfinite (position)) // (a NaN position read far outside the sample)
+                continue;
 
-            const auto index = (int) position;
+            const auto index = juce::jmin (numSamples - 1, (int) position);
             const auto next = index + 1 < numSamples ? index + 1 : 0;
             const auto frac = (float) (position - (double) index);
             const auto l = dataL[index] + (dataL[next] - dataL[index]) * frac;

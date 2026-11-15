@@ -77,13 +77,20 @@ public:
     // pairs with, so the two only differ where their knobs do.
     void matchNoise (const KarplusStrong& other) { random.setSeed (other.random.getSeed()); }
 
+    static int bufferSizeFor (double rate) { return juce::nextPowerOfTwo ((int) (rate / 15.0) + 1); }
+
+    // A scratch shared with the other strings of one voice (at least
+    // bufferSizeFor long, never used by two strings at once); without one
+    // the string keeps its own, which grows on its first plucks.
+    void setSharedScratch (std::vector<float>* scratch) noexcept { sharedScratch = scratch; }
+
     void prepare (double newSampleRate)
     {
         sampleRate = newSampleRate;
         loopSetupDirty = true;
         glideCoefficient = KnobGlide<float>::coefficientFor (glideSeconds, sampleRate);
 
-        const auto size = juce::nextPowerOfTwo ((int) (sampleRate / 15.0) + 1);
+        const auto size = bufferSizeFor (sampleRate);
         buffer.assign ((size_t) size, 0.0f);
         bufferB.assign ((size_t) size, 0.0f);
         electric.prepare (sampleRate);
@@ -381,7 +388,7 @@ public:
 
             const auto combDepth = juce::jmin (1.0f, 16.0f * excitationPosition);
             const auto combMakeup = 1.0f / std::sqrt (1.0f + combDepth * combDepth);
-            std::vector<float>& raw = combScratch;
+            std::vector<float>& raw = sharedScratch != nullptr && sharedScratch->capacity() >= buffer.size() ? *sharedScratch : combScratch;
             raw.assign (buffer.begin() + first, buffer.end());
             auto smooth = 0.0f;
 
@@ -1678,6 +1685,7 @@ private:
 
     std::vector<float> buffer;
     std::vector<float> combScratch;
+    std::vector<float>* sharedScratch = nullptr;
     juce::Random random;
     double sampleRate = 44100.0;
     double frequency = 440.0;

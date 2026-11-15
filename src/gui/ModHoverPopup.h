@@ -36,6 +36,15 @@ public:
 
         setAlwaysOnTop (true);
         setRepaintsOnMouseActivity (true);
+        claim();
+    }
+
+    // The knobs' hover hooks are process-wide: the editor the mouse is in
+    // takes them (each plugin instance's editor has its own popup).
+    void claim()
+    {
+        if (instance() == this)
+            return;
         instance() = this;
         modHoverHooks().show = [] (juce::Component& knob, int destination, const juce::String& text) { showFor (knob, destination, text); };
         modHoverHooks().hide = [] (const juce::Component& knob) { hideFor (knob); };

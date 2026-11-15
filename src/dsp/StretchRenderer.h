@@ -152,13 +152,29 @@ private:
     }
 
     // The size of the copy renderCopy would make, estimated (the stretched length).
+    // (The engines work at the stretched length x the pitch ratio, so a copy
+    // pitched up needs that much more while it renders.)
     static size_t copyBytes (const SampleData& source, juce::uint64 key) noexcept
     {
-        return (size_t) ((double) source.getNumSamples() * lengthForStep (stepOf (key))) * (size_t) source.getNumChannels() * sizeof (float);
+        const auto pitch = juce::jmax (1.0, std::exp2 (semitonesOf (key) / 12.0));
+        return (size_t) ((double) source.getNumSamples() * lengthForStep (stepOf (key)) * pitch) * (size_t) source.getNumChannels() * sizeof (float);
     }
 
     // nullptr: too large (copyBytes over maxCopyBytes), cancelled or failed.
     std::shared_ptr<const SampleData> renderCopy (const SampleData& source, juce::uint64 key)
+    {
+        // Out of memory on this worker thread would end the host: no copy instead.
+        try
+        {
+            return renderCopyOrThrow (source, key);
+        }
+        catch (...)
+        {
+            return nullptr;
+        }
+    }
+
+    std::shared_ptr<const SampleData> renderCopyOrThrow (const SampleData& source, juce::uint64 key)
     {
         if (copyBytes (source, key) > maxCopyBytes)
             return nullptr;

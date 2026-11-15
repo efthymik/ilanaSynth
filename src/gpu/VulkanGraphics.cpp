@@ -1066,7 +1066,13 @@ bool replay (Device& device, FrameResources& frame, Recorder& rec, Texture& canv
     }
 
     vkResetFences (device.device, 1, &frame.fence);
-    return vkQueueSubmit (device.queue, 1, &submit, frame.fence) == VK_SUCCESS;
+    if (vkQueueSubmit (device.queue, 1, &submit, frame.fence) == VK_SUCCESS)
+        return true;
+    // A failed submit leaves the fence unsignalled, and every later wait on
+    // it (the fallback's waitIdle, the frame's destructor) waits forever: an
+    // empty submit signals it once the queue's earlier work is done.
+    vkQueueSubmit (device.queue, 0, nullptr, frame.fence);
+    return false;
 }
 } // namespace
 
@@ -1202,6 +1208,7 @@ juce::Image Canvas::readback()
     vkResetFences (device->device, 1, &frame->fence);
     if (vkQueueSubmit (device->queue, 1, &submit, frame->fence) != VK_SUCCESS)
     {
+        vkQueueSubmit (device->queue, 0, nullptr, frame->fence); // (signalled again: see replay)
         buffer.destroy (*device);
         return {};
     }

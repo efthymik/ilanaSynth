@@ -638,7 +638,11 @@ void IlanaSynthAudioProcessor::processClip (juce::MidiBuffer& midi, int numSampl
             {
                 const auto start = loop * lengthBeats + (double) n.start;
 
-                if (start < b0 || start >= b1 || (double) n.start >= lengthBeats)
+                // (A hair of tolerance: each block's clock starts again at the
+                // host's beat, which can land a rounding error past a note
+                // the last block ended just short of; it must not fall
+                // between the two.)
+                if (start < b0 - 1.0e-9 || start >= b1 - 1.0e-9 || (double) n.start >= lengthBeats)
                     continue;
 
                 const auto position = samplePosition (start);

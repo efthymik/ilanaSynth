@@ -236,6 +236,8 @@ public:
     // host block of blockSamples at hostRate).
     void prepareVoiceThreads (int numWorkers, int maxSamples, int blockSamples, double hostRate)
     {
+        checkScratch.setSize (2, juce::jmax (1, maxSamples), false, true, true);
+        checkNonFinite = false;
         voiceThreads.prepare (numWorkers, voices.size(), maxSamples,
                               [this] (int voice, juce::AudioBuffer<float>& buffer, int start, int length)
                               { voices.getUnchecked (voice)->renderNextBlock (buffer, start, length); },
@@ -246,6 +248,17 @@ public:
     bool setVoiceThreadsWorkgroup (const juce::AudioWorkgroup& workgroup) noexcept { return voiceThreads.setWorkgroup (workgroup); }
 
     void setVoiceThreadsEnabled (bool shouldUse) noexcept { useVoiceThreads = shouldUse; }
+
+    // Audio thread. The processor's last check found a sample that is not
+    // finite: until it says the output is clean again, the voices render one
+    // by one into a scratch buffer and are checked before they are added
+    // (in voice order, each adding exactly what it would have added
+    // straight to the output, so good voices sound bit for bit the same),
+    // and a voice that went NaN / Inf is stopped and cleared. Without this
+    // one broken voice kept the whole mix muted (its NaN summed into every
+    // sample) and the effects cleared every block for as long as it rang.
+    void setCheckVoicesForNonFinite (bool shouldCheck) noexcept { checkNonFinite = shouldCheck; }
+    int getNonFiniteVoicesStopped() const noexcept { return nonFiniteVoicesStopped; }
 
     // SUSTAIN VOICES: at most this many voices ring on after their key is
     // up (released, or held by the pedal); past it the oldest fade out over
@@ -279,6 +292,12 @@ protected:
             capSustainedVoices();
         updateBowedNoiseShare (numSamples);
 
+        if (checkNonFinite)
+        {
+            renderVoicesChecked (buffer, startSample, numSamples);
+            return;
+        }
+
         int sounding[64] {};
         auto numSounding = 0;
         if (useVoiceThreads)
@@ -298,6 +317,48 @@ protected:
                 voices.getUnchecked (i)->renderNextBlock (buffer, startSample, numSamples);
 
         voiceThreads.renderAndSum (sounding, numSounding, buffer, startSample, numSamples);
+    }
+
+    void renderVoicesChecked (juce::AudioBuffer<float>& buffer, int startSample, int numSamples)
+    {
+        // Same sample positions as the output (the voices read the shared
+        // LFO buffers at startSample), as VoiceThreads does.
+        const auto channels = juce::jmin (2, buffer.getNumChannels());
+        if (channels <= 0 || checkScratch.getNumChannels() < 2 || startSample + numSamples > checkScratch.getNumSamples())
+        {
+            Synthesiser::renderVoices (buffer, startSample, numSamples);
+            return;
+        }
+        float* scratch[2] { checkScratch.getWritePointer (0), checkScratch.getWritePointer (1) };
+        juce::AudioBuffer<float> view (scratch, channels, checkScratch.getNumSamples());
+
+        for (int i = 0; i < voices.size(); ++i)
+        {
+            auto* voice = voices.getUnchecked (i);
+            if (! voice->isVoiceActive())
+            {
+                voice->renderNextBlock (buffer, startSample, numSamples); // idle: its own bookkeeping only
+                continue;
+            }
+            for (int c = 0; c < channels; ++c)
+                juce::FloatVectorOperations::clear (scratch[c] + startSample, numSamples);
+            voice->renderNextBlock (view, startSample, numSamples);
+
+            auto finite = true;
+            for (int c = 0; c < channels && finite; ++c)
+                for (int k = startSample; k < startSample + numSamples && finite; ++k)
+                    finite = std::isfinite (scratch[c][k]);
+
+            if (! finite)
+            {
+                if (auto* own = dynamic_cast<Voice*> (voice))
+                    own->silenceAfterNonFinite();
+                ++nonFiniteVoicesStopped;
+                continue;
+            }
+            for (int c = 0; c < channels; ++c)
+                juce::FloatVectorOperations::add (buffer.getWritePointer (c, startSample), scratch[c] + startSample, numSamples);
+        }
     }
 
     juce::SynthesiserVoice* findFreeVoice (juce::SynthesiserSound* sound, int midiChannel,
@@ -505,6 +566,9 @@ private:
     bool voicesLinked = false;
     VoiceThreads voiceThreads;
     bool useVoiceThreads = false;
+    juce::AudioBuffer<float> checkScratch;
+    bool checkNonFinite = false;
+    int nonFiniteVoicesStopped = 0;
     int sustainVoiceCap = 0;
     int spareVoices = 0;
 
