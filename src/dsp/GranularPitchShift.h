@@ -23,6 +23,7 @@ public:
     {
         std::fill (buffer.begin(), buffer.end(), 0.0f);
         writeCount = 0;
+        writePosition = 0; // (the reads count from writeCount: both start at 0, as in prepare)
         resetGrains();
     }
 

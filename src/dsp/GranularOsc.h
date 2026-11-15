@@ -103,13 +103,18 @@ public:
             if (! grain.active)
                 continue;
 
+            // (A NaN position or age read far outside the sample: the grain ends.)
+            if (! std::isfinite (grain.position) || ! std::isfinite ((double) grain.age * grain.windowStep))
+            {
+                grain.active = false;
+                continue;
+            }
+
             const auto windowIndex = juce::jmin (windowSize - 1, (int) (grain.age * grain.windowStep));
             auto position = std::fmod (grain.position, (double) numSamples);
 
             if (position < 0.0)
                 position += (double) numSamples;
-            if (! std::isfinite (position)) // (a NaN position read far outside the sample)
-                continue;
 
             const auto index = juce::jmin (numSamples - 1, (int) position);
             const auto next = index + 1 < numSamples ? index + 1 : 0;

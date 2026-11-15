@@ -624,6 +624,7 @@ void IlanaSynthAudioProcessor::processClip (juce::MidiBuffer& midi, int numSampl
         if (to <= from || rate <= 0.0)
             return;
 
+        const auto edge = playing ? 1.0e-9 : 0.0;
         const auto b0 = clipBase + (double) from * rate;
         const auto b1 = clipBase + (double) to * rate;
         const auto transpose = hostMode || clipHeld.isEmpty() ? 0 : clipHeld.getLast() - ClipState::rootNote;
@@ -638,11 +639,12 @@ void IlanaSynthAudioProcessor::processClip (juce::MidiBuffer& midi, int numSampl
             {
                 const auto start = loop * lengthBeats + (double) n.start;
 
-                // (A hair of tolerance: each block's clock starts again at the
-                // host's beat, which can land a rounding error past a note
-                // the last block ended just short of; it must not fall
-                // between the two.)
-                if (start < b0 - 1.0e-9 || start >= b1 - 1.0e-9 || (double) n.start >= lengthBeats)
+                // (A hair of tolerance with the host's clock: each block
+                // starts again at the host's beat, which can land a rounding
+                // error past a note the last block ended just short of; it
+                // must not fall between the two. The free clock is
+                // continuous and keeps the exact edges.)
+                if (start < b0 - edge || start >= b1 - edge || (double) n.start >= lengthBeats)
                     continue;
 
                 const auto position = samplePosition (start);

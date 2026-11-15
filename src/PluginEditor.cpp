@@ -1225,9 +1225,10 @@ IlanaSynthAudioProcessorEditor::~IlanaSynthAudioProcessorEditor()
     juce::PopupMenu::dismissAllActiveMenus(); // (their items call into this editor)
     const auto ownsHooks = hookOwner() == this;
     if (ownsHooks)
+    {
         setArmedModSource (0);
-    if (ownsHooks)
         armedModSourceChanged() = nullptr;
+    }
     sampleBrowser.reset();
     zoneEditor.reset();
     setGpuRendering (false); // before any child goes: the render thread paints them
@@ -3367,7 +3368,12 @@ void IlanaSynthAudioProcessorEditor::exportPreset()
 
                                   if (file != juce::File() && safeThis != nullptr)
                                   {
-                                      safeThis->processorRef.savePresetToFile (file.withFileExtension ("ilanapreset"));
+                                      // A copy: the patch stays bound to its own preset (SAVE must
+                                      // not write over the exported file afterwards).
+                                      const auto target = file.withFileExtension ("ilanapreset");
+                                      if (! safeThis->processorRef.writePresetCopy (target))
+                                          juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Export preset",
+                                                                                  "Couldn't write " + target.getFullPathName() + ".");
 
                                       if (safeThis->presetPanel != nullptr)
                                           safeThis->presetPanel->refresh();

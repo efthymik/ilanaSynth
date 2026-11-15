@@ -213,7 +213,7 @@ inline std::shared_ptr<SampleData> loadSfz (const juce::File& file, juce::String
         zone.loVel = juce::jlimit (1, 127, get ("lovel", "1").getIntValue());
         zone.hiVel = juce::jlimit (1, 127, get ("hivel", "127").getIntValue());
         zone.rootNote -= get ("tune", "0").getDoubleValue() / 100.0 + get ("transpose", "0").getDoubleValue();
-        zone.gain = juce::Decibels::decibelsToGain (juce::jlimit (-144.0f, 24.0f, get ("volume", "0").getFloatValue())); // (SFZ volume is -144..6 dB)
+        zone.gain = juce::Decibels::decibelsToGain (juce::jlimit (-144.0f, 24.0f, get ("volume", "0").getFloatValue())); // (SFZ volume is -144..6 dB; broken files clamp at +24)
         // Step 37: a round-robin alternate's place among the regions sharing its keys.
         zone.sequence = juce::jmax (0, get ("seq_position", "0").getIntValue());
         const auto length = zone.data->getNumSamples();
@@ -454,7 +454,29 @@ struct Sf2Preset
 };
 
 // Every preset of a SoundFont, by bank then program. Empty if the file is unusable.
+inline std::vector<Sf2Preset> listSf2PresetsUncached (const juce::File& file);
+
+// (Cached by path, size and date: the sample menu asks on every open, and a
+// parse reads the whole file, hundreds of MB for a big SoundFont.)
 inline std::vector<Sf2Preset> listSf2Presets (const juce::File& file)
+{
+    struct Cached { juce::String path; juce::int64 size = -1; juce::Time modified; std::vector<Sf2Preset> presets; };
+    static juce::CriticalSection lock;
+    static Cached cached;
+    const auto size = file.getSize();
+    const auto modified = file.getLastModificationTime();
+    {
+        const juce::ScopedLock sl (lock);
+        if (cached.path == file.getFullPathName() && cached.size == size && cached.modified == modified)
+            return cached.presets;
+    }
+    auto presets = listSf2PresetsUncached (file);
+    const juce::ScopedLock sl (lock);
+    cached = { file.getFullPathName(), size, modified, presets };
+    return presets;
+}
+
+inline std::vector<Sf2Preset> listSf2PresetsUncached (const juce::File& file)
 {
     Sf2::Parsed parsed;
     std::vector<Sf2Preset> presets;

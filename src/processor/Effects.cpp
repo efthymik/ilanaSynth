@@ -50,7 +50,9 @@ void IlanaSynthAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
             break;
         }
         juce::AudioBuffer<float> part (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), start, length);
+        fxChunkStart = start;
         processEffectsNow (part);
+        fxChunkStart = 0;
     }
     fxClock += total;
 }
@@ -1859,9 +1861,10 @@ void IlanaSynthAudioProcessor::FxEngine::processVocoder (juce::AudioBuffer<float
         if ((int) vocoderModulator.size() < numSamples)
             vocoderModulator.resize ((size_t) numSamples);
 
-        const auto valid = juce::jmin (numSamples, liveInputSamples);
-        const auto* inL = liveDry.getReadPointer (0);
-        const auto* inR = liveDry.getReadPointer (1);
+        // (The rack can run in chunks: this one starts fxChunkStart into the block.)
+        const auto valid = juce::jlimit (0, numSamples, liveInputSamples - fxChunkStart);
+        const auto* inL = liveDry.getReadPointer (0) + juce::jmin (fxChunkStart, liveDry.getNumSamples());
+        const auto* inR = liveDry.getReadPointer (1) + juce::jmin (fxChunkStart, liveDry.getNumSamples());
         for (int i = 0; i < numSamples; ++i)
             vocoderModulator[(size_t) i] = i < valid ? 0.5f * (inL[i] + inR[i]) : 0.0f;
         modulator = vocoderModulator.data();
@@ -2705,6 +2708,11 @@ void IlanaSynthAudioProcessor::FxEngine::reset()
 
     freeze.reset();
     stutterBuffer.clear();
+    // (Its loop is gone: STUTTER still on captures again from the next sound,
+    // as when it is switched on, instead of looping the cleared buffer.)
+    stutterWasOn = false;
+    stutterRecording = false;
+    stutterArmed = false;
     tapeStopBuffer.clear();
     haasLine.reset();
     feedbackLine.reset();

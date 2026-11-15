@@ -2190,8 +2190,9 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
     }
 
     // A voice that went NaN / Inf: its samples are zeroed here, before the
-    // piano body, the effects or the oversampler's IIR filters (which would
-    // keep it for ever) take it in, and the synth checks its voices one by
+    // piano body or the effects take it in (the oversampler's IIR filters
+    // already have, and would keep it for ever: they are cleared), and the
+    // synth checks its voices one by
     // one on the next block, stopping the broken one, until this comes out
     // clean (IlanaSynth::setCheckVoicesForNonFinite). Finite audio passes
     // untouched.

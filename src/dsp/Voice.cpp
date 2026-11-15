@@ -745,7 +745,12 @@ void Voice::silenceAfterNonFinite()
     oneShotHold = false;
     brokenForTest = false;
     stopNote (0.0f, false);
+    // (resetForNewPatch also forgets the last note for GLIDE: the other
+    // voices' next note still glides from it.)
+    const auto lastNote = shared != nullptr ? shared->lastNoteFrequency : 0.0;
     resetForNewPatch();
+    if (shared != nullptr)
+        shared->lastNoteFrequency = lastNote;
 }
 
 void Voice::stopNote (float, bool allowTailOff)

@@ -345,6 +345,8 @@ public:
     // MASTER's value in a preset's values moves to output_trim (review 6).
     static void moveLevelToTrim (std::vector<std::pair<juce::String, float>>& values);
     bool savePresetToFile (const juce::File& file);
+    // Writes the patch to a file without making it the loaded preset (Export).
+    bool writePresetCopy (const juce::File& file);
     bool loadPresetFromFile (const juce::File& file);
 
     // The loaded preset's name lives in the state tree so it survives editor
@@ -1336,6 +1338,7 @@ private:
     bool liveGateOpen = false;
     int liveGateNote = -1;
     int liveInputSamples = 0;               // valid samples in liveDry this block
+    int fxChunkStart = 0;                   // where the rack's current chunk starts in the block (processEffects)
     // DRY is delayed by the reported latency so it lines up with the
     // oversampled wet path (a blend would comb-filter otherwise).
     void delayLiveDry (int numSamples);
