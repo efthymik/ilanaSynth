@@ -103,6 +103,7 @@ void timedRun (const char* name, Suite&& suite)
 #include "ParamInfoTests.inc"
 #include "HostIntegrationTests.inc"
 #include "DemoRender.inc"
+#include "OldStateTests.inc"
 
 #include "BenchTools.inc"
 int main()
@@ -454,6 +455,14 @@ int main()
         return failures == 0 ? 0 : 1;
     }
 
+    // ILANA_OLDSTATE_TEST=1: old saved states and factory presets load as before (tests/old-states).
+    if (juce::SystemStats::getEnvironmentVariable ("ILANA_OLDSTATE_TEST", "").isNotEmpty())
+    {
+        runOldStateTests();
+        std::cout << (failures == 0 ? "OLDSTATE TESTS PASSED" : "OLDSTATE TESTS FAILED") << " (" << failures << " failures)" << std::endl;
+        return failures == 0 ? 0 : 1;
+    }
+
     if (juce::SystemStats::getEnvironmentVariable ("ILANA_POLISH_TEST", "").isNotEmpty())
     {
         runPolishTests();
@@ -658,6 +667,7 @@ int main()
     {
         runPresetSanityTest();
         runPresetTuningTest();
+        runOldStateTests();
         std::cout << (failures == 0 ? "ALL TESTS PASSED" : "TESTS FAILED") << " (" << failures << " failures)" << std::endl;
         return failures == 0 ? 0 : 1;
     }
@@ -764,6 +774,7 @@ int main()
     timedRun ("runSampleRootTest", [] { runSampleRootTest(); });
     timedRun ("runSampleLoopCrossfadeTest", [] { runSampleLoopCrossfadeTest(); });
     timedRun ("runPresetSanityTest", [] { runPresetSanityTest(); });
+    timedRun ("runOldStateTests", [] { runOldStateTests(); });
     timedRun ("runOsc2Test", [] { runOsc2Test(); });
     timedRun ("runOscLevelTest", [] { runOscLevelTest(); });
     timedRun ("runPresetTuningTest", [] { runPresetTuningTest(); });

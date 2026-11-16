@@ -282,6 +282,8 @@ target_sources(ilanaTableTest PRIVATE
 )
 
 target_link_libraries(ilanaTableTest PRIVATE ilanaEngineTest)
+# Where the old-state corpus is (tests/old-states; ILANA_OLDSTATE_DIR overrides it).
+target_compile_definitions(ilanaTableTest PRIVATE ILANA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
 # Symbols for the optimised test build, so ILANA_PROFILE can name lines.
 if (MSVC)
