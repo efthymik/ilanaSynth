@@ -503,6 +503,11 @@ void Voice::startNote (int midiNoteNumber, float velocity, juce::SynthesiserSoun
         // The new key holds its note: a One Shot's hold on the last release
         // must not release it when the sample ends.
         oneShotHold = false;
+        // The Operator EG was in its release (a staccato line): it starts
+        // again, or the new note played the old one's fade and the voice
+        // ended under the held key. A tied line keeps it running.
+        if (dx7Playing && dx7Note.isReleased())
+            startOperatorEg (midiNoteNumber);
         return;
     }
 

@@ -691,6 +691,7 @@ public:
     float getSecondsReleased() const { return released ? (float) (releasedBlocks * block / sampleRateUsed) : -1.0f; }
     float getPitchShape() const { return pitchShape; }
     bool isActive() const { return active; }
+    bool isReleased() const { return released; }
     bool isCarrier (int i) const { return carrier[(size_t) i]; }
 
 private:
