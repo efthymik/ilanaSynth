@@ -517,14 +517,14 @@ public:
         paintTag (g, { (float) title.getX() + 4.0f, (float) title.getCentreY() }, colour);
         g.setColour (Ui::text);
         g.setFont (font (TextSize::body, true));
-        g.drawText (fxLfoName (id), title.withTrimmedLeft (16).withTrimmedRight (60), juce::Justification::centredLeft, true);
+        g.drawText (fxLfoName (id), title.withTrimmedLeft (Space::s16).withTrimmedRight (60), juce::Justification::centredLeft, true); // off-grid
     }
 
     void resized() override
     {
         auto area = getLocalBounds();
         auto title = area.removeFromTop (titleHeight).reduced (pad, 0);
-        closeButton.setBounds (title.removeFromRight (28).withSizeKeepingCentre (28, 28));
+        closeButton.setBounds (title.removeFromRight (28).withSizeKeepingCentre (28, 28)); // off-grid
         area = area.withTrimmedLeft (pad).withTrimmedRight (pad).withTrimmedBottom (pad);
         display.setBounds (area.removeFromTop (displayHeight));
         area.removeFromTop (gap);
@@ -568,7 +568,7 @@ public:
 
 private:
     // (The effect windows' grid: FxMiniWindow.)
-    static constexpr int pad = 12, gap = 8, titleHeight = 40, displayHeight = 124, cellWidth = 116, cellHeight = 44;
+    static constexpr int pad = Space::windowPad, gap = Space::windowGap, titleHeight = Space::windowTitleHeight, displayHeight = 124, cellWidth = Space::windowCellWidth, cellHeight = Space::windowCellHeight;
 
     struct Constrainer : juce::ComponentBoundsConstrainer
     {

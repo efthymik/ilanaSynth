@@ -35,6 +35,11 @@ def load(path):
 MIN_PX = int(os.environ.get("PIC_MIN_PX", "6"))
 
 
+# A card's glow breathes by a level or two between renders: a pixel that
+# differs by no more than this in every channel is the same pixel.
+TOL = int(os.environ.get("PIC_TOL", "2"))
+
+
 def main(argv):
     if len(argv) < 3 or len(argv) % 3:
         print(__doc__)
@@ -57,10 +62,10 @@ def main(argv):
                 print(f"SIZE {new}/{name}: {ia.shape} vs {inn.shape}")
                 bad += 1
                 continue
-            noise = (ia != ib).any(axis=2)
+            noise = (np.abs(ia - ib).max(axis=2) > TOL)
             if noise.any():
                 noise = binary_dilation(noise, iterations=6)
-            diff = (ia != inn).any(axis=2) & (ib != inn).any(axis=2) & ~noise
+            diff = (np.abs(ia - inn).max(axis=2) > TOL) & (np.abs(ib - inn).max(axis=2) > TOL) & ~noise
             if int(diff.sum()) > MIN_PX:
                 ys, xs = np.nonzero(diff)
                 print(f"DIFF {new}/{name}: {int(diff.sum())} px, bbox x {xs.min()}..{xs.max()} y {ys.min()}..{ys.max()}")

@@ -257,16 +257,16 @@ public:
         paintTag (g, { (float) title.getX() + 4.0f, (float) title.getCentreY() }, colour);
         g.setColour (Ui::text);
         g.setFont (font (TextSize::body, true));
-        g.drawText (name, title.withTrimmedLeft (16).withTrimmedRight (100), juce::Justification::centredLeft, true);
+        g.drawText (name, title.withTrimmedLeft (Space::s16).withTrimmedRight (100), juce::Justification::centredLeft, true); // off-grid
     }
 
     void resized() override
     {
         auto area = getLocalBounds();
         auto title = area.removeFromTop (titleHeight).reduced (pad, 0);
-        closeButton.setBounds (title.removeFromRight (28).withSizeKeepingCentre (28, 28));
-        title.removeFromRight (10);
-        power.setBounds (title.removeFromRight (40).withSizeKeepingCentre (40, 20));
+        closeButton.setBounds (title.removeFromRight (28).withSizeKeepingCentre (28, 28)); // off-grid
+        title.removeFromRight (10); // off-grid
+        power.setBounds (title.removeFromRight (40).withSizeKeepingCentre (40, 20)); // off-grid
         area = area.withTrimmedLeft (pad).withTrimmedRight (pad).withTrimmedBottom (pad);
         if (display.isVisible())
         {
@@ -311,7 +311,7 @@ public:
     }
 
 private:
-    static constexpr int pad = 12, gap = 8, titleHeight = 40, displayHeight = 64, cellWidth = 116, cellHeight = 44;
+    static constexpr int pad = Space::windowPad, gap = Space::windowGap, titleHeight = Space::windowTitleHeight, displayHeight = 64, cellWidth = Space::windowCellWidth, cellHeight = Space::windowCellHeight;
 
     // Dimmed as its RACK card is: everything while the effect is off, and a
     // control that does nothing in the present settings (FxPage::isIdleControl).
@@ -602,36 +602,36 @@ public:
     void resized() override
     {
         // The FX RACK page's frame: 8 px above and below, a 12 px gutter at the right.
-        auto area = getLocalBounds().reduced (0, 8).withTrimmedRight (12);
+        auto area = getLocalBounds().reduced (0, Space::s8).withTrimmedRight (Space::s12);
         auto toolbar = area.removeFromTop (toolbarHeight);
         // Left: the hint. Right: + ADD EFFECT, RESET, the zoom and FIT.
-        toolbar.removeFromLeft (10);
-        fitButton.setBounds (toolbar.removeFromRight (70).reduced (0, 2));
-        toolbar.removeFromRight (6);
+        toolbar.removeFromLeft (10); // off-grid
+        fitButton.setBounds (toolbar.removeFromRight (70).reduced (0, Space::s2)); // off-grid
+        toolbar.removeFromRight (Space::s6);
         // (The well is the buttons' height, 24 px, its parts 2 px inside it.)
-        zoomWell = toolbar.removeFromRight (132).reduced (0, 2);
+        zoomWell = toolbar.removeFromRight (132).reduced (0, Space::s2); // off-grid
         {
-            auto well = zoomWell.reduced (2, 2);
-            zoomOutButton.setBounds (well.removeFromLeft (32));
-            zoomInButton.setBounds (well.removeFromRight (32));
+            auto well = zoomWell.reduced (Space::s2, Space::s2);
+            zoomOutButton.setBounds (well.removeFromLeft (32)); // off-grid
+            zoomInButton.setBounds (well.removeFromRight (32)); // off-grid
             zoomLabel.setBounds (well);
         }
-        toolbar.removeFromRight (16);
+        toolbar.removeFromRight (Space::s16);
         if (hasVoice)
         {
-            resetButton.setBounds (toolbar.removeFromRight (80).reduced (0, 2));
-            toolbar.removeFromRight (6);
+            resetButton.setBounds (toolbar.removeFromRight (80).reduced (0, Space::s2)); // off-grid
+            toolbar.removeFromRight (Space::s6);
         }
-        addButton.setBounds (toolbar.removeFromRight (112).reduced (0, 2));
-        toolbar.removeFromRight (6);
-        lfoButton.setBounds (toolbar.removeFromRight (70).reduced (0, 2));
-        hint = toolbar.withTrimmedRight (10);
-        area.removeFromTop (10);
+        addButton.setBounds (toolbar.removeFromRight (112).reduced (0, Space::s2)); // off-grid
+        toolbar.removeFromRight (Space::s6);
+        lfoButton.setBounds (toolbar.removeFromRight (70).reduced (0, Space::s2)); // off-grid
+        hint = toolbar.withTrimmedRight (10); // off-grid
+        area.removeFromTop (10); // off-grid
         inspector = area.removeFromBottom (inspectorHeight);
-        area.removeFromBottom (10);
+        area.removeFromBottom (10); // off-grid
         // The row of effects under the canvas.
         carousel.setBounds (area.removeFromBottom (FxCarousel::stripHeight));
-        area.removeFromBottom (10);
+        area.removeFromBottom (10); // off-grid
         view.setBounds (area);
         if (autoFit)
             fit();
@@ -924,10 +924,10 @@ private:
             paintTag (g, { (float) title.getX() + 4.0f, (float) title.getBottom() - 10.0f }, colour);
             g.setColour (Ui::text);
             g.setFont (font (TextSize::large, true));
-            drawFitted (g, name, title.withTrimmedLeft (16), juce::Justification::bottomLeft, 1, TextSize::minPassive);
+            drawFitted (g, name, title.withTrimmedLeft (Space::s16), juce::Justification::bottomLeft, 1, TextSize::minPassive);
             g.setColour (Ui::text3);
             g.setFont (font (TextSize::label));
-            drawFitted (g, detail, text.withTrimmedTop (4).withTrimmedLeft (16), juce::Justification::topLeft, 2);
+            drawFitted (g, detail, text.withTrimmedTop (Space::s4).withTrimmedLeft (Space::s16), juce::Justification::topLeft, 2);
         };
         if (const auto* mod = selectedModCable())
         {
@@ -970,13 +970,13 @@ private:
             g.setColour (Ui::text);
             g.setFont (font (TextSize::large, true));
             const auto name = [] (const PatchGraph::Node* box) { return box != nullptr ? juce::String (box->label) : juce::String ("?"); };
-            drawFitted (g, "LOOP  " + name (from) + " > " + name (to), title.withTrimmedLeft (16), juce::Justification::bottomLeft, 1, TextSize::minPassive);
+            drawFitted (g, "LOOP  " + name (from) + " > " + name (to), title.withTrimmedLeft (Space::s16), juce::Justification::bottomLeft, 1, TextSize::minPassive);
             const auto ringing = view.loopGuardOf && view.loopGuardOf (*loop) < 0.98f;
             g.setColour (ringing ? accent() : Ui::text3);
             g.setFont (font (TextSize::label));
             g.drawText (ringing ? "Ringing by itself: held at 0 dB. Turn LEVEL down to tame it."
                                 : "Feeds " + name (from) + " back into " + name (to) + ".",
-                        text.withTrimmedTop (4).withTrimmedLeft (16), juce::Justification::topLeft, true);
+                        text.withTrimmedTop (Space::s4).withTrimmedLeft (Space::s16), juce::Justification::topLeft, true);
             return;
         }
         const auto* node = shown.find (view.getSelectedNode());
@@ -1007,10 +1007,10 @@ private:
             g.setColour (Ui::text3);
             g.setFont (font (TextSize::label));
             g.drawText ("Click a box or a loop's tag to set it here; double-click a box to open it. Right-click to add an effect.",
-                        text.withTrimmedTop (4), juce::Justification::topLeft, true);
+                        text.withTrimmedTop (Space::s4), juce::Justification::topLeft, true);
 
             // At the right: how the patch is wired and what its effects cost.
-            auto stats = inspector.reduced (20, 10).removeFromRight (hasVoice ? 510 : 330);
+            auto stats = inspector.reduced (20, 10).removeFromRight (hasVoice ? 510 : 330); // off-grid
             auto cpu = 0.0f;
             for (const auto& box : fxShown.nodes())
                 if (! box.isFixed() && juce::isPositiveAndBelow (box.ref - 1, IlanaSynthAudioProcessor::numFxSlots))
@@ -1039,8 +1039,8 @@ private:
                 g.drawText (name, cell.removeFromTop (cell.getHeight() / 2), juce::Justification::bottomLeft, false);
                 g.setColour (Ui::text);
                 g.setFont (font (TextSize::body, true, true));
-                g.drawText (value, cell.withTrimmedTop (4), juce::Justification::topLeft, false);
-                stats.removeFromRight (10);
+                g.drawText (value, cell.withTrimmedTop (Space::s4), juce::Justification::topLeft, false);
+                stats.removeFromRight (10); // off-grid
             }
             return;
         }
@@ -1049,7 +1049,7 @@ private:
         paintTag (g, { (float) title.getX() + 4.0f, (float) title.getBottom() - 10.0f }, colourOf (*node));
         g.setColour (Ui::text);
         g.setFont (font (TextSize::large, true));
-        g.drawText (isVoice (*node) ? voiceName (localKind (*node)) : juce::String (node->label), title.withTrimmedLeft (16),
+        g.drawText (isVoice (*node) ? voiceName (localKind (*node)) : juce::String (node->label), title.withTrimmedLeft (Space::s16),
                     juce::Justification::bottomLeft, true);
         juce::String detail;
         if (isVoice (*node))
@@ -1065,7 +1065,7 @@ private:
         }
         g.setColour (Ui::text3);
         g.setFont (font (TextSize::label));
-        g.drawText (detail, text.withTrimmedTop (4).withTrimmedLeft (16), juce::Justification::topLeft, true);
+        g.drawText (detail, text.withTrimmedTop (Space::s4).withTrimmedLeft (Space::s16), juce::Justification::topLeft, true);
         label ("ON", onButton.isVisible() ? onArea : powerArea);
         label ("SOLO", soloArea);
         label ("BAND", bandArea);
@@ -1105,12 +1105,12 @@ private:
             knob->placeAsRing (cell, 34);
             return;
         }
-        control.setBounds (cell.withSizeKeepingCentre (116, 44));
+        control.setBounds (cell.withSizeKeepingCentre (116, 44)); // off-grid
     }
 
     void layoutInspector()
     {
-        auto row = inspector.reduced (20, 10);
+        auto row = inspector.reduced (20, 10); // off-grid
         inspectorText = row.removeFromLeft (juce::jmin (inspectedVoice >= 0 ? 420 : inspectedLfo > 0 ? 200 : selectedModCable() != nullptr ? 260 : 300,
                                                        row.getWidth() / 3));
         onArea = powerArea = soloArea = bandArea = {};
@@ -1121,12 +1121,12 @@ private:
         if (loop)
         {
             // Name and detail, LEVEL, DELAY (the MIX knob's size), REMOVE CABLE at the right.
-            auto actions = row.removeFromRight (340);
-            removeCableButton.setBounds (actions.removeFromRight (130).withSizeKeepingCentre (130, 28));
-            row.removeFromLeft (20);
-            placeStripControl (*loopKnobs->level, row.removeFromLeft (120));
-            row.removeFromLeft (20);
-            placeStripControl (*loopKnobs->delay, row.removeFromLeft (120));
+            auto actions = row.removeFromRight (340); // off-grid
+            removeCableButton.setBounds (actions.removeFromRight (130).withSizeKeepingCentre (130, 28)); // off-grid
+            row.removeFromLeft (20); // off-grid
+            placeStripControl (*loopKnobs->level, row.removeFromLeft (120)); // off-grid
+            row.removeFromLeft (20); // off-grid
+            placeStripControl (*loopKnobs->delay, row.removeFromLeft (120)); // off-grid
             return;
         }
         // A selected LFO cable: name and detail, an AMOUNT per knob it moves,
@@ -1137,17 +1137,17 @@ private:
         openTargetButton.setVisible (mod != nullptr);
         if (mod != nullptr)
         {
-            auto actions = row.removeFromRight (290);
+            auto actions = row.removeFromRight (290); // off-grid
             removeCableButton.setVisible (true);
-            removeCableButton.setBounds (actions.removeFromRight (130).withSizeKeepingCentre (130, 28));
-            actions.removeFromRight (10);
-            openTargetButton.setBounds (actions.removeFromRight (140).withSizeKeepingCentre (140, 28));
-            row.removeFromLeft (20);
+            removeCableButton.setBounds (actions.removeFromRight (130).withSizeKeepingCentre (130, 28)); // off-grid
+            actions.removeFromRight (10); // off-grid
+            openTargetButton.setBounds (actions.removeFromRight (140).withSizeKeepingCentre (140, 28)); // off-grid
+            row.removeFromLeft (20); // off-grid
             for (int k = 0; k < lfoAmounts->numShown(); ++k)
             {
-                placeStripControl (*lfoAmounts->knobs[(size_t) k], row.removeFromLeft (120));
+                placeStripControl (*lfoAmounts->knobs[(size_t) k], row.removeFromLeft (120)); // off-grid
                 lfoAmounts->knobs[(size_t) k]->setVisible (true);
-                row.removeFromLeft (20);
+                row.removeFromLeft (20); // off-grid
             }
             return;
         }
@@ -1155,50 +1155,50 @@ private:
         // DEPTH (the rest in its window), OPEN WINDOW and REMOVE at the right.
         if (inspectedLfo > 0 && lfoControls != nullptr)
         {
-            auto actions = row.removeFromRight (250);
-            removeLfoButton.setBounds (actions.removeFromRight (90).withSizeKeepingCentre (90, 28));
-            actions.removeFromRight (10);
-            openLfoButton.setBounds (actions.removeFromRight (140).withSizeKeepingCentre (140, 28));
-            row.removeFromLeft (20);
-            lfoDisplay->setBounds (row.removeFromLeft (140).withSizeKeepingCentre (140, 44));
-            row.removeFromLeft (20);
+            auto actions = row.removeFromRight (250); // off-grid
+            removeLfoButton.setBounds (actions.removeFromRight (90).withSizeKeepingCentre (90, 28)); // off-grid
+            actions.removeFromRight (10); // off-grid
+            openLfoButton.setBounds (actions.removeFromRight (140).withSizeKeepingCentre (140, 28)); // off-grid
+            row.removeFromLeft (20); // off-grid
+            lfoDisplay->setBounds (row.removeFromLeft (140).withSizeKeepingCentre (140, 44)); // off-grid
+            row.removeFromLeft (20); // off-grid
             for (auto* item : lfoControls->allItems())
                 item->setVisible (false);
             const auto items = lfoControls->windowItems();
             for (size_t k = 0; k < 4 && row.getWidth() >= 116; ++k)
             {
-                placeStripControl (*items[k], row.removeFromLeft (116));
+                placeStripControl (*items[k], row.removeFromLeft (116)); // off-grid
                 items[k]->setVisible (true);
-                row.removeFromLeft (8); // (the windows' cell gap)
+                row.removeFromLeft (Space::s8); // (the windows' cell gap)
             }
             return;
         }
         if (inspectedVoice < 0 && inspectedSlot < 0)
         {
-            inspectorText = inspector.reduced (20, 10);
+            inspectorText = inspector.reduced (20, 10); // off-grid
             return;
         }
         const auto centreY = row.getY() + 32;
         if (inspectedVoice >= 0)
         {
-            auto actions = row.removeFromRight (160);
-            editButton.setBounds (actions.withSizeKeepingCentre (160, 28));
+            auto actions = row.removeFromRight (160); // off-grid
+            editButton.setBounds (actions.withSizeKeepingCentre (160, 28)); // off-grid
             if (onButton.isVisible())
             {
-                row.removeFromLeft (20);
+                row.removeFromLeft (20); // off-grid
                 onArea = juce::Rectangle<int> (row.getX(), centreY - 13, 50, 26);
                 onButton.setBounds (onArea);
             }
             return;
         }
-        auto actions = row.removeFromRight (340);
-        removeButton.setBounds (actions.removeFromRight (90).withSizeKeepingCentre (90, 28));
-        actions.removeFromRight (10);
-        duplicateButton.setBounds (actions.removeFromRight (100).withSizeKeepingCentre (100, 28));
-        actions.removeFromRight (10);
-        editButton.setBounds (actions.removeFromRight (130).withSizeKeepingCentre (130, 28));
-        row.removeFromLeft (20);
-        const auto controlRow = [&] (int width) { auto cell = row.removeFromLeft (width); row.removeFromLeft (20); return cell; };
+        auto actions = row.removeFromRight (340); // off-grid
+        removeButton.setBounds (actions.removeFromRight (90).withSizeKeepingCentre (90, 28)); // off-grid
+        actions.removeFromRight (10); // off-grid
+        duplicateButton.setBounds (actions.removeFromRight (100).withSizeKeepingCentre (100, 28)); // off-grid
+        actions.removeFromRight (10); // off-grid
+        editButton.setBounds (actions.removeFromRight (130).withSizeKeepingCentre (130, 28)); // off-grid
+        row.removeFromLeft (20); // off-grid
+        const auto controlRow = [&] (int width) { auto cell = row.removeFromLeft (width); row.removeFromLeft (20); return cell; }; // off-grid
         powerArea = controlRow (40);
         powerArea = juce::Rectangle<int> (powerArea.getX(), centreY - 10, 40, 20);
         soloArea = controlRow (30);

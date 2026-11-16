@@ -65,7 +65,7 @@ public:
 
     std::function<void()> onToggle;
     bool isOpen() const { return open; }
-    static constexpr int headerHeight = 24, rowHeight = 16;
+    static constexpr int headerHeight = Space::cardHeaderMod, rowHeight = 16;
     int getIdealHeight() const { return headerHeight + (open ? 4 + rowHeight * juce::jmax (1, (int) OperatorPool::operatorsOnEnv (processorRef).size()) + 4 : 0); }
 
     void paint (juce::Graphics& g) override
@@ -80,24 +80,24 @@ public:
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true));
         g.drawText (juce::String (count) + (count == 1 ? " OSCILLATOR PLAYS IT  " : " OSCILLATORS PLAY IT  ")
                         + juce::String::fromUTF8 (open ? "\xe2\x96\xb4" : "\xe2\x96\xbe"),
-                    header.reduced (10, 0), juce::Justification::centredLeft);
+                    header.reduced (10, 0), juce::Justification::centredLeft); // off-grid
         if (! open)
             return;
 
-        area.removeFromTop (4);
+        area.removeFromTop (Space::s4);
         for (int i = 0; i < count && area.getHeight() >= rowHeight; ++i)
         {
             const auto osc = operators[(size_t) i];
             const auto* parameter = processorRef.apvts.getParameter (OscRole::prefix (osc) + "_eg_out");
             if (parameter == nullptr)
                 continue;
-            auto row = area.removeFromTop (rowHeight).reduced (4, 0);
+            auto row = area.removeFromTop (rowHeight).reduced (Space::s4, 0);
             g.setColour (IlanaTheme::oscColour (osc));
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true));
-            g.drawText ("OSC " + juce::String (osc + 1), row.removeFromLeft (52), juce::Justification::centredLeft);
+            g.drawText ("OSC " + juce::String (osc + 1), row.removeFromLeft (52), juce::Justification::centredLeft); // off-grid
             g.setColour (IlanaTheme::Ui::text2);
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
-            g.drawText (parameter->getCurrentValueAsText(), row.removeFromRight (62), juce::Justification::centredRight);
+            g.drawText (parameter->getCurrentValueAsText(), row.removeFromRight (62), juce::Justification::centredRight); // off-grid
             const auto bar = row.withSizeKeepingCentre (row.getWidth() - 8, 6).toFloat();
             g.setColour (juce::Colours::white.withAlpha (0.07f));
             g.fillRoundedRectangle (bar, 3.0f);
@@ -171,7 +171,7 @@ public:
     // The header clicked (folded or opened by hand).
     std::function<void (bool collapsed)> onUserToggle;
 
-    static constexpr int headerHeight = 22, rowHeight = 18;
+    static constexpr int headerHeight = Space::cardHeaderOsc, rowHeight = 18;
 
     // The height that lists every route (at least one row, for the empty note).
     int getIdealHeight() const { return headerHeight + 6 + juce::jmax (1, (int) slots.size()) * rowHeight + 6; }
@@ -232,7 +232,7 @@ public:
             const auto name = cells.removeFromLeft (nameWidth (area));
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
             g.setColour (tint);
-            IlanaTheme::drawFitted (g, prefix + ModNames::destination (routing.destination, processorRef), name.withTrimmedRight (8),
+            IlanaTheme::drawFitted (g, prefix + ModNames::destination (routing.destination, processorRef), name.withTrimmedRight (Space::s8),
                                     juce::Justification::centredLeft, 1);
             if (hot && hoverName)
                 g.fillRect (name.getX(), name.getBottom() - 3, juce::jmin (name.getWidth() - 8, juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), prefix + ModNames::destination (routing.destination, processorRef))), 1);
@@ -265,7 +265,7 @@ public:
     {
         dragRow = -1;
 
-        if (headerArea().expanded (0, 3).contains (event.getPosition()))
+        if (headerArea().expanded (0, 3).contains (event.getPosition())) // off-grid
         {
             setCollapsed (! collapsed);
             if (onUserToggle != nullptr)
@@ -332,7 +332,7 @@ public:
     }
 
 private:
-    juce::Rectangle<int> headerArea() const { return getLocalBounds().reduced (10, 0).removeFromTop (headerHeight).withTrimmedTop (4); }
+    juce::Rectangle<int> headerArea() const { return getLocalBounds().reduced (10, 0).removeFromTop (headerHeight).withTrimmedTop (Space::s4); } // off-grid
 
     juce::Rectangle<int> rowArea (int row) const
     {
@@ -603,15 +603,15 @@ public:
 
         // No settings to show: what the source is, and its live value as a trace.
         IlanaTheme::paintWell (g, graphArea.toFloat(), 8.0f);
-        auto area = graphArea.reduced (12, 10);
+        auto area = graphArea.reduced (Space::s12, 10); // off-grid
         g.setColour (colour);
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::title, true));
-        g.drawText (ModNames::sourceUpper (source, &processorRef), area.removeFromTop (20), juce::Justification::centredLeft);
+        g.drawText (ModNames::sourceUpper (source, &processorRef), area.removeFromTop (20), juce::Justification::centredLeft); // off-grid
         g.setColour (IlanaTheme::Ui::text2);
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
-        IlanaTheme::drawFitted (g, describeOther(), area.removeFromTop (34), juce::Justification::topLeft, 2);
+        IlanaTheme::drawFitted (g, describeOther(), area.removeFromTop (34), juce::Justification::topLeft, 2); // off-grid
 
-        const auto plot = area.reduced (0, 4).toFloat();
+        const auto plot = area.reduced (0, Space::s4).toFloat();
         if (plot.getHeight() > 12.0f)
         {
             juce::Path trace;
@@ -684,7 +684,7 @@ public:
         {
             // SHAPE across the top; RATE and SMOOTH; SYNC and RETRIG.
             controls[0]->setBounds (controlArea.removeFromTop (menuHeight));
-            controlArea.removeFromTop (6);
+            controlArea.removeFromTop (Space::s6);
             const auto rowHeight = controlArea.getHeight() / 2;
             auto knobs = controlArea.removeFromTop (rowHeight);
             auto switches = controlArea;
@@ -732,7 +732,7 @@ private:
         if (unusedNote.isEmpty() || graphArea.isEmpty())
             return;
         // (Clear of the LFO graph's GRID menu and of EDIT OP ENV.)
-        auto pill = graphArea.reduced (8).withHeight (20);
+        auto pill = graphArea.reduced (Space::s8).withHeight (20); // off-grid
         pill.setRight (opEnvLink.isVisible() ? opEnvLink.getX() - 6 : pill.getRight());
         // An LFO's hint sits along the foot of its graph, where the whole
         // sentence fits (A16-6: it was cut by the GRID menu's corner) and the
@@ -751,7 +751,7 @@ private:
         g.drawRoundedRectangle (pill.toFloat().reduced (0.5f), 4.0f, 1.0f);
         g.setColour (IlanaTheme::Ui::text2);
         g.setFont (font);
-        IlanaTheme::drawFitted (g, unusedNote, pill.reduced (8, 0), juce::Justification::centred, 1);
+        IlanaTheme::drawFitted (g, unusedNote, pill.reduced (Space::s8, 0), juce::Justification::centred, 1);
     }
 
     void refreshUnused()
@@ -1005,8 +1005,8 @@ public:
     // The short editor's size; the full ones compact (ilana's mockup, 2026-10-25): an envelope's card
     // 330 wide, an LFO's 400, as tall as their controls and DRIVES.
     // (A performance source's: 300 wide, its line, its value and DRIVES; UI review 31, item 19. It was 620 x 340.)
-    static constexpr int preferredWidth = 300, describeHeight = 32, headerHeight = 38;
-    static constexpr int padding = 4, sideInset = 14, bottomInset = 14;
+    static constexpr int preferredWidth = 300, describeHeight = 32, headerHeight = Space::cardHeaderPopup;
+    static constexpr int padding = Space::s4, sideInset = 14, bottomInset = 14;
     static constexpr int compactHeader = 26, compactInset = 8, compactTop = 6, routesGap = 6;
     // (390: the envelope's graph about as wide as the LFO's, ilana 2026-10-29; 410: five switch pills in the LFO column at the real fonts.)
     static constexpr int envCardWidth = 390, lfoCardWidth = 410;
@@ -1039,7 +1039,7 @@ public:
         const auto size = juce::Point<int> (juce::jmin (wanted.x, area.getWidth() - 16), juce::jmin (wanted.y, area.getHeight() - 16));
         if (! moved)
             topLeft = { chip.getX() - 6, area.getBottom() - 8 - size.y };
-        return juce::Rectangle<int> (topLeft.x, topLeft.y, size.x, size.y).constrainedWithin (area.reduced (4));
+        return juce::Rectangle<int> (topLeft.x, topLeft.y, size.x, size.y).constrainedWithin (area.reduced (Space::s4));
     }
 
     void paint (juce::Graphics& g) override
@@ -1053,7 +1053,7 @@ public:
         const auto colour = modSourceColour (source);
         IlanaTheme::paintCard (g, bounds, 10.0f, colour.withAlpha (0.55f));
 
-        auto header = bounds.toNearestInt().reduced (10, 0).removeFromTop (compactHeader);
+        auto header = bounds.toNearestInt().reduced (10, 0).removeFromTop (compactHeader); // off-grid
         const auto count = modRouteCount (processorRef, source);
         const auto lfo = Mod::lfoIndexFor ((Mod::Source) source);
         // (Compact, DRIVES counts the routes: the header says what the source is doing.)
@@ -1087,7 +1087,7 @@ public:
         {
             valueBar.setBounds (body.removeFromBottom (SourceValueBar::height));
             body.removeFromBottom (routesGap);
-            describeArea = body.withTrimmedLeft (2);
+            describeArea = body.withTrimmedLeft (Space::s2);
             return;
         }
         // (ilana's layout, 2026-10-29: the LFO's SHAPE sits in the title row, right of the caption; the envelope's
@@ -1119,7 +1119,7 @@ public:
             return;
         auto next = getBounds().withPosition (dragStart + event.getOffsetFromDragStart());
         if (! pageArea.isEmpty())
-            next = next.constrainedWithin (pageArea.reduced (4));
+            next = next.constrainedWithin (pageArea.reduced (Space::s4));
         topLeft = next.getPosition();
         moved = true;
         setBounds (next);
@@ -1225,9 +1225,9 @@ public:
         g.setColour (selected ? colour.withAlpha (0.8f) : IlanaTheme::Ui::line);
         g.drawRoundedRectangle (bounds.reduced (0.5f), 7.0f, 1.0f);
 
-        auto area = getLocalBounds().reduced (9, 0);
+        auto area = getLocalBounds().reduced (9, 0); // off-grid
         // The count badge (or a plain dot while it drives nothing).
-        const auto badge = area.removeFromLeft (18);
+        const auto badge = area.removeFromLeft (18); // off-grid
         if (routes > 0)
         {
             const auto circle = juce::Rectangle<float> (16.0f, 16.0f).withCentre (badge.getCentre().toFloat());
@@ -1244,7 +1244,7 @@ public:
         }
 
         // The grip: two columns of dots, the drag handle (none on OP ENV).
-        const auto grip = area.removeFromRight (10);
+        const auto grip = area.removeFromRight (10); // off-grid
         if (source != opEnvSourceId)
         g.setColour ((hot ? IlanaTheme::Ui::text2 : IlanaTheme::Ui::text3).withAlpha (0.9f));
         for (int row = 0; row < 3; ++row)
@@ -1253,7 +1253,7 @@ public:
 
         g.setColour (hot ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2);
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::minInteractive, true));
-        IlanaTheme::drawFitted (g, sourceTabName (source, processorRef), area.reduced (6, 0), juce::Justification::centred, 1);
+        IlanaTheme::drawFitted (g, sourceTabName (source, processorRef), area.reduced (Space::s6, 0), juce::Justification::centred, 1);
     }
 
     void mouseEnter (const juce::MouseEvent&) override
@@ -1308,7 +1308,7 @@ private:
         }
         g.setColour (selected ? IlanaTheme::Ui::header : (hot ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2));
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::packedBody, true));
-        IlanaTheme::drawFitted (g, compactLabel, getLocalBounds().reduced (3, 0), juce::Justification::centred, 1);
+        IlanaTheme::drawFitted (g, compactLabel, getLocalBounds().reduced (3, 0), juce::Justification::centred, 1); // off-grid
     }
 
     IlanaSynthAudioProcessor& processorRef;
@@ -1390,13 +1390,13 @@ public:
         repaint();
     }
 
-    static constexpr int headerHeight = 30, pad = 10, tabHeight = 28, tabGap = 6, minTabWidth = 104, maxRows = 2;
+    static constexpr int headerHeight = Space::cardHeaderFull, pad = 10, tabHeight = 28, tabGap = Space::s6, minTabWidth = 104, maxRows = 2;
 
     void paint (juce::Graphics& g) override
     {
         const auto colour = sourceTabColour (selected);
         IlanaTheme::paintCard (g, getLocalBounds().toFloat(), 6.0f, colour);
-        auto header = getLocalBounds().withHeight (headerHeight).withTrimmedLeft (12).withTrimmedRight (12);
+        auto header = getLocalBounds().withHeight (headerHeight).withTrimmedLeft (Space::s12).withTrimmedRight (Space::s12);
         IlanaTheme::paintCardHeader (g, header, "MODULATION", "drag a tab onto any knob", colour, editWidth + 8);
 
         const auto link = editLinkArea();

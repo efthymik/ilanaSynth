@@ -632,7 +632,7 @@ public:
             g.setColour (IlanaTheme::Ui::text3);
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true).withKerningFactor (0.08f));
             auto caption = suggestCaption.withSizeKeepingCentre (suggestCaption.getWidth(), 30);
-            g.drawText ("SUGGESTED", caption.removeFromTop (15), juce::Justification::centredLeft, false);
+            g.drawText ("SUGGESTED", caption.removeFromTop (15), juce::Justification::centredLeft, false); // off-grid
             g.drawText ("NEXT", caption, juce::Justification::centredLeft, false);
         }
     }
@@ -653,11 +653,11 @@ public:
             auto heading = emptyHeading;
             g.setColour (IlanaTheme::Ui::text);
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::large, true));
-            g.drawText ("The rack is empty", heading.removeFromTop (26), juce::Justification::centredLeft);
+            g.drawText ("The rack is empty", heading.removeFromTop (26), juce::Justification::centredLeft); // off-grid
             g.setColour (IlanaTheme::Ui::text2);
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::body));
             g.drawText ("Pick an effect to start the chain. Each one goes into the next slot; drag a row's name to reorder them.",
-                        heading.removeFromTop (20), juce::Justification::centredLeft);
+                        heading.removeFromTop (20), juce::Justification::centredLeft); // off-grid
         }
     }
 
@@ -673,7 +673,7 @@ public:
 
         if (stackView.getViewPositionY() + stackView.getHeight() < stackContent.getHeight() - 2)
         {
-            const auto foot = stackView.getBounds().removeFromBottom (28).toFloat();
+            const auto foot = stackView.getBounds().removeFromBottom (28).toFloat(); // off-grid
             g.setGradientFill (juce::ColourGradient (background.withAlpha (0.0f), 0.0f, foot.getY(), background, 0.0f, foot.getBottom(), false));
             g.fillRect (foot);
         }
@@ -682,7 +682,7 @@ public:
         {
             // The card cut off under the toolbar is hidden almost wholly, then
             // fades in: its half-drawn controls no longer show through (N16-5).
-            const auto head = stackView.getBounds().removeFromTop (34).toFloat();
+            const auto head = stackView.getBounds().removeFromTop (34).toFloat(); // off-grid
             auto fade = juce::ColourGradient (background, 0.0f, head.getY(), background.withAlpha (0.0f), 0.0f, head.getBottom(), false);
             fade.addColour (0.55, background.withAlpha (0.92f));
             g.setGradientFill (fade);
@@ -693,7 +693,7 @@ public:
     void resized() override
     {
         // A 12 px gutter at the right, as the other pages keep (N16-4).
-        auto area = getLocalBounds().reduced (0, 8).withTrimmedRight (12);
+        auto area = getLocalBounds().reduced (0, Space::s8).withTrimmedRight (Space::s12);
 
         // The top bar: IN above the rail, the two chains, the routing; then
         // the OUTPUT stage after the rack (SOFT CLIP, CLIP GAIN and the meter,
@@ -703,30 +703,30 @@ public:
         const auto item = [] (juce::Rectangle<int> r) { return r.withSizeKeepingCentre (r.getWidth(), toolbarItemHeight); };
         inColumn = toolbar.removeFromLeft (railWidth);
         toolbar.removeFromLeft (railGap);
-        chainSeg = toolbar.removeFromLeft (136).withSizeKeepingCentre (136, toolbarItemHeight + 4);
-        chainAButton.setBounds (chainSeg.withTrimmedLeft (3).removeFromLeft (64).reduced (0, 2));
-        chainBButton.setBounds (chainSeg.withTrimmedLeft (3 + 66).removeFromLeft (64).reduced (0, 2));
-        toolbar.removeFromLeft (10);
-        routingSeg = toolbar.removeFromLeft (172).withSizeKeepingCentre (172, toolbarItemHeight + 4);
-        routingOnPatchButton.setBounds (routingSeg.reduced (3, 2));
-        toolbar.removeFromLeft (10);
-        diceButton.setBounds (item (toolbar.removeFromRight (112)));
-        toolbar.removeFromRight (6);
-        fileButton.setBounds (item (toolbar.removeFromRight (84)));
-        toolbar.removeFromRight (16);
+        chainSeg = toolbar.removeFromLeft (136).withSizeKeepingCentre (136, toolbarItemHeight + 4); // off-grid
+        chainAButton.setBounds (chainSeg.withTrimmedLeft (3).removeFromLeft (64).reduced (0, Space::s2)); // off-grid
+        chainBButton.setBounds (chainSeg.withTrimmedLeft (3 + 66).removeFromLeft (64).reduced (0, Space::s2)); // off-grid
+        toolbar.removeFromLeft (10); // off-grid
+        routingSeg = toolbar.removeFromLeft (172).withSizeKeepingCentre (172, toolbarItemHeight + 4); // off-grid
+        routingOnPatchButton.setBounds (routingSeg.reduced (3, Space::s2)); // off-grid
+        toolbar.removeFromLeft (10); // off-grid
+        diceButton.setBounds (item (toolbar.removeFromRight (112))); // off-grid
+        toolbar.removeFromRight (Space::s6);
+        fileButton.setBounds (item (toolbar.removeFromRight (84))); // off-grid
+        toolbar.removeFromRight (Space::s16);
         addButton.setVisible (false); // (+ ADD EFFECT is the add row at the foot)
         {
             // OUTPUT, right-aligned against the chain's menu: the meter, CLIP
             // GAIN, SOFT CLIP and its name, a rule before them.
-            outputMeter->setBounds (toolbar.removeFromRight (110).withSizeKeepingCentre (110, 28));
-            toolbar.removeFromRight (14);
-            clipGain->setBounds (toolbar.removeFromRight (136));
-            toolbar.removeFromRight (14);
-            softClip->setBounds (toolbar.removeFromRight (40).withSizeKeepingCentre (40, 22));
-            toolbar.removeFromRight (6);
-            outputSoftLabel = toolbar.removeFromRight (70);
-            toolbar.removeFromRight (14);
-            outputSeparator = toolbar.removeFromRight (1).withSizeKeepingCentre (1, 26);
+            outputMeter->setBounds (toolbar.removeFromRight (110).withSizeKeepingCentre (110, 28)); // off-grid
+            toolbar.removeFromRight (14); // off-grid
+            clipGain->setBounds (toolbar.removeFromRight (136)); // off-grid
+            toolbar.removeFromRight (14); // off-grid
+            softClip->setBounds (toolbar.removeFromRight (40).withSizeKeepingCentre (40, 22)); // off-grid
+            toolbar.removeFromRight (Space::s6);
+            outputSoftLabel = toolbar.removeFromRight (70); // off-grid
+            toolbar.removeFromRight (14); // off-grid
+            outputSeparator = toolbar.removeFromRight (1).withSizeKeepingCentre (1, 26); // off-grid
         }
         copyChainButton.setVisible (false);
         area.removeFromTop (rowGap - stackTopMargin);
@@ -748,8 +748,8 @@ public:
 
         if (empty)
         {
-            auto box = stackArea.reduced (12, 0);
-            emptyHeading = box.removeFromTop (60).withTrimmedTop (6);
+            auto box = stackArea.reduced (Space::s12, 0);
+            emptyHeading = box.removeFromTop (60).withTrimmedTop (Space::s6); // off-grid
             library->setBounds (box.withHeight (juce::jmin (box.getHeight(), FxLibraryView::preferredHeight() + 170)));
         }
 
@@ -2129,21 +2129,21 @@ private:
 
     static LeftBlock leftBlockFor (juce::Rectangle<int> card)
     {
-        auto block = card.withTrimmedLeft (10).withWidth (leftWidth).withSizeKeepingCentre (leftWidth, 48);
+        auto block = card.withTrimmedLeft (10).withWidth (leftWidth).withSizeKeepingCentre (leftWidth, 48); // off-grid
         block.setX (card.getX() + 10);
-        auto line1 = block.removeFromTop (22);
-        block.removeFromTop (6);
-        auto line2 = block.removeFromTop (20);
+        auto line1 = block.removeFromTop (22); // off-grid
+        block.removeFromTop (Space::s6);
+        auto line2 = block.removeFromTop (20); // off-grid
 
         LeftBlock result;
-        result.number = line1.removeFromLeft (18).withSizeKeepingCentre (18, 18);
-        line1.removeFromLeft (4);
+        result.number = line1.removeFromLeft (18).withSizeKeepingCentre (18, 18); // off-grid
+        line1.removeFromLeft (Space::s4);
         result.name = line1;
-        result.solo = line2.removeFromLeft (24);
-        line2.removeFromLeft (6);
-        result.power = line2.removeFromLeft (36);
-        line2.removeFromLeft (6);
-        result.chip = line2.withHeight (20);
+        result.solo = line2.removeFromLeft (Space::s24);
+        line2.removeFromLeft (Space::s6);
+        result.power = line2.removeFromLeft (36); // off-grid
+        line2.removeFromLeft (Space::s6);
+        result.chip = line2.withHeight (20); // off-grid
         return result;
     }
 
@@ -2205,7 +2205,7 @@ private:
             header.chip.setVisible (true);
         }
 
-        auto inner = bounds.reduced (10, rowPad).withTrimmedLeft (leftWidth + 10);
+        auto inner = bounds.reduced (10, rowPad).withTrimmedLeft (leftWidth + 10); // off-grid
 
         if (panel.duplicate)
         {
@@ -2213,7 +2213,7 @@ private:
             slotSwitches[(size_t) slot]->setBare (true);
             slotSwitches[(size_t) slot]->setColour (fxColour (panel.type));
             slotSwitches[(size_t) slot]->setVisible (true);
-            slotSwitches[(size_t) slot]->setBounds (left.power.withHeight (20));
+            slotSwitches[(size_t) slot]->setBounds (left.power.withHeight (20)); // off-grid
             auto& remove = header.remove;
             remove.setBounds (juce::Rectangle<int> (bounds.getRight() - 12 - 84, bounds.getCentreY() - 12, 84, 24));
             remove.setVisible (true);
@@ -2222,7 +2222,7 @@ private:
             auto& edit = header.edit;
             edit.setButtonText ("MAKE OWN");
             edit.setTooltip ("Give this copy its own settings and engine, so it can sound different from the first");
-            edit.setBounds (remove.getBounds().translated (-100, 0).withWidth (90));
+            edit.setBounds (remove.getBounds().translated (-100, 0).withWidth (90)); // off-grid
             edit.setVisible (true);
             panel.well = {};
             stackPanels.push_back (panel);
@@ -2241,21 +2241,21 @@ private:
             power->setInlineLabel (false);
             power->setBareSwitch (true);
             power->setSwitchColour (fxColour (panel.type));
-            power->setBounds (left.power.withHeight (20));
+            power->setBounds (left.power.withHeight (20)); // off-grid
         }
         else
         {
             slotSwitches[(size_t) slot]->setBare (true);
             slotSwitches[(size_t) slot]->setColour (fxColour (panel.type));
             slotSwitches[(size_t) slot]->setVisible (true);
-            slotSwitches[(size_t) slot]->setBounds (left.power.withHeight (20));
+            slotSwitches[(size_t) slot]->setBounds (left.power.withHeight (20)); // off-grid
         }
 
         // The delay's tap grid under the row while TAPS is on.
         if (hasTapGrid (panel))
         {
-            tapGrid.setBounds (inner.removeFromBottom (tapGridHeight - 4).withTrimmedBottom (2).withTrimmedTop (2));
-            inner.removeFromBottom (6); // (the 32 px dials' names reach 4 px under their row: they keep clear of the grid)
+            tapGrid.setBounds (inner.removeFromBottom (tapGridHeight - 4).withTrimmedBottom (Space::s2).withTrimmedTop (Space::s2));
+            inner.removeFromBottom (Space::s6); // (the 32 px dials' names reach 4 px under their row: they keep clear of the grid)
         }
 
         // The controls at the right on PLAY's grid, the picture taking the rest.
@@ -2299,7 +2299,7 @@ private:
         const auto blockWidth = filterFront ? filterTypeBlockWidth + sideColumnGap : 0;
         auto knobsArea = plan.width() > 0 ? inner.removeFromRight (plan.width() + blockWidth) : juce::Rectangle<int>();
         if (plan.width() > 0)
-            inner.removeFromRight (10);
+            inner.removeFromRight (10); // off-grid
 
         panel.well = {};
         if (hasCardPicture (type))
@@ -2394,14 +2394,14 @@ private:
         g.strokePath (bracket, juce::PathStrokeType (2.0f, juce::PathStrokeType::mitered, juce::PathStrokeType::square));
 
         const auto heading = group.bounds.withHeight (splitHeaderHeight).withTrimmedLeft (splitInsetLeft - 4);
-        IlanaTheme::paintCardTitle (g, heading.withWidth (150), group.frequency ? "SPLIT BANDS" : "MID / SIDE", IlanaTheme::accent());
+        IlanaTheme::paintCardTitle (g, heading.withWidth (150), group.frequency ? "SPLIT BANDS" : "MID / SIDE", IlanaTheme::accent()); // off-grid
 
         if (! group.frequency)
         {
             g.setColour (IlanaTheme::Ui::text3);
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
             g.drawText ("These slots work on the middle or the sides of the stereo image; the rest passes around them",
-                        heading.withTrimmedLeft (150).withTrimmedRight (14), juce::Justification::centredLeft, true);
+                        heading.withTrimmedLeft (150).withTrimmedRight (14), juce::Justification::centredLeft, true); // off-grid
         }
     }
 
@@ -2647,12 +2647,12 @@ private:
 
             if (panel.duplicate)
             {
-                auto text = panel.bounds.withTrimmedLeft (leftWidth + 20).withTrimmedRight (210).reduced (4, 6);
+                auto text = panel.bounds.withTrimmedLeft (leftWidth + 20).withTrimmedRight (210).reduced (Space::s4, Space::s6); // off-grid
                 const auto first = slotHoldingType (panel.type, panel.slot);
                 g.setColour (IlanaTheme::Ui::text);
                 g.setFont (IlanaTheme::font (IlanaTheme::TextSize::body, true));
                 IlanaTheme::drawFitted (g, "Copy of " + getSlotName (panel.type) + ": it shares slot " + juce::String (first + 1) + "'s settings.",
-                                        text.removeFromTop (20), juce::Justification::centredLeft);
+                                        text.removeFromTop (20), juce::Justification::centredLeft); // off-grid
                 g.setColour (IlanaTheme::Ui::text2);
                 g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
                 IlanaTheme::drawFitted (g, "MAKE OWN gives it its own settings, so the two can differ.",
@@ -2685,7 +2685,7 @@ private:
         {
             g.setColour (IlanaTheme::Ui::text3);
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
-            g.drawText (name, row.removeFromLeft (30), juce::Justification::centredLeft);
+            g.drawText (name, row.removeFromLeft (30), juce::Justification::centredLeft); // off-grid
             const auto bar = row.toFloat().withSizeKeepingCentre ((float) row.getWidth(), 6.0f);
             g.setColour (IlanaTheme::Ui::track);
             g.fillRoundedRectangle (bar, 3.0f);
@@ -2704,8 +2704,8 @@ private:
         // Standing: IN and OUT side by side, filled from the foot, with
         // lines at -12, -24 and -36 dB and the names under them.
         auto area = meters;
-        auto names = area.removeFromBottom (18);
-        constexpr int gap = 14;
+        auto names = area.removeFromBottom (18); // off-grid
+        constexpr int gap = 14; // off-grid
         const auto each = (area.getWidth() - gap) / 2;
         for (int i = 0; i < 2; ++i)
         {
@@ -2728,18 +2728,18 @@ private:
     {
         const auto well = panel.well.toFloat();
         IlanaTheme::paintWell (g, well, 6.0f);
-        auto inner = panel.well.reduced (8, 0);
+        auto inner = panel.well.reduced (Space::s8, 0);
 
         // IN and OUT meters at the right, the live reading of what the
         // effect does to the level.
         if (inner.getWidth() > 230)
         {
-            const auto meters = inner.removeFromRight (86).reduced (0, 8);
-            inner.removeFromRight (10);
+            const auto meters = inner.removeFromRight (86).reduced (0, Space::s8); // off-grid
+            inner.removeFromRight (10); // off-grid
             paintLevelMeters (g, panel, meters, off);
         }
 
-        auto caption = inner.removeFromTop (19).withTrimmedTop (3);
+        auto caption = inner.removeFromTop (19).withTrimmedTop (3); // off-grid
         g.setColour (IlanaTheme::Ui::text3);
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
         const auto index = airwindowsIndexFor (panel.type);
@@ -2747,7 +2747,7 @@ private:
                                 caption, juce::Justification::centredLeft);
         g.setColour (off ? IlanaTheme::Ui::text3 : IlanaTheme::Ui::text2);
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::body));
-        IlanaTheme::drawFitted (g, cardInfoText (panel.type), inner.withTrimmedBottom (4), juce::Justification::topLeft, juce::jmax (2, inner.getHeight() / 13));
+        IlanaTheme::drawFitted (g, cardInfoText (panel.type), inner.withTrimmedBottom (Space::s4), juce::Justification::topLeft, juce::jmax (2, inner.getHeight() / 13));
     }
 
     // While a card is dragged by its header: where it will land, and its
