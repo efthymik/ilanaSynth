@@ -4,11 +4,20 @@
 // right click in the small window and assign to that lfo"). The box's
 // controls, its picture, its floating window, and the row a selected LFO
 // cable shows (how far it moves each knob). Included only from
-// PluginEditor.cpp, before PatchPage.h.
+// PluginEditor.cpp (its anonymous namespace); includes what it uses.
 #pragma once
 
 #include <map>
 #include <optional>
+#include <juce_gui_basics/juce_gui_basics.h>
+
+#include "../../PluginProcessor.h"
+#include "../DisplayStyle.h"
+#include "../FxInstanceControls.h"
+#include "../IlanaLookAndFeel.h"
+#include "../OperatorEnvDisplay.h"
+#include "../ParamControls.h"
+#include "PageHelpers.h"
 
 namespace
 {

@@ -6,7 +6,8 @@
 // costs what it did: the voice's cables (route_cables and cable_*,
 // dsp/VoiceRouting.h) and the FX patch (FxPatch.h). The page merges them into
 // one graph for the cable view (PatchCableView.h) and splits each edit back.
-// Included only from PluginEditor.cpp, after FxPage.h and the FILTER page.
+// Included only from PluginEditor.cpp (its anonymous namespace); includes
+// what it uses.
 //
 // No modes (ilana, 2026-10-12: "why chain or cables? let the user just pick
 // that themselves, reorder everything freely"): the page has no CHAIN /
@@ -17,6 +18,23 @@
 // cables and switches that side to play them (one undo step puts it back).
 // The old switch parameters stay for older patches; only the UI is gone.
 #pragma once
+
+#include <juce_gui_basics/juce_gui_basics.h>
+
+#include "../../ClipState.h"
+#include "../../PluginProcessor.h"
+#include "../FilterWidgets.h"
+#include "../FxCarousel.h"
+#include "../FxDisplays.h"
+#include "../FxInstanceControls.h"
+#include "../IlanaLookAndFeel.h"
+#include "../LfoShapeMenu.h"
+#include "../ParamControls.h"
+#include "../PatchCableView.h"
+#include "FxPage.h"
+#include "FxWidgets.h"
+#include "PageHelpers.h"
+#include "PatchLfo.h"
 
 namespace
 {

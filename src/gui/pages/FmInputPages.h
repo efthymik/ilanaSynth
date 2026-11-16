@@ -1,8 +1,24 @@
-// Split verbatim from PluginEditor.cpp. Included only from PluginEditor.cpp,
-// after its includes; the contents stay in the same anonymous namespace.
+// Included only from PluginEditor.cpp; the contents are in its anonymous
+// namespace. Includes what it uses (tools/check_headers.sh checks).
 #pragma once
 
 #include <map>
+#include <juce_gui_basics/juce_gui_basics.h>
+
+#include "../../PluginProcessor.h"
+#include "../AnimationUtils.h"
+#include "../CardTabs.h"
+#include "../EnvelopeDisplay.h"
+#include "../FmDiagram.h"
+#include "../FmOperatorInfo.h"
+#include "../FmWidgets.h"
+#include "../IlanaLookAndFeel.h"
+#include "../OperatorPoolCards.h"
+#include "../OscPicker.h"
+#include "../OutputView.h"
+#include "../ParamControls.h"
+#include "OscPage.h"
+#include "PageHelpers.h"
 
 namespace
 {

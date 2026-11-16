@@ -1,8 +1,30 @@
-// Included only from PluginEditor.cpp, after OscPage.h and ModSourcePanel.h; the
-// contents stay in the same anonymous namespace.
+// Included only from PluginEditor.cpp; the contents are in its anonymous
+// namespace. Includes what it uses (tools/check_headers.sh checks).
 #pragma once
 
 #include <complex>
+#include <juce_gui_basics/juce_gui_basics.h>
+
+#include "../../PluginProcessor.h"
+#include "../../SectionColours.h"
+#include "../AnimationUtils.h"
+#include "../DisplayStyle.h"
+#include "../EnvelopeDisplay.h"
+#include "../FilterDisplay.h"
+#include "../FilterWidgets.h"
+#include "../IlanaLookAndFeel.h"
+#include "../LfoDisplay.h"
+#include "../LfoShapeMenu.h"
+#include "../ModNames.h"
+#include "../ModuleMenu.h"
+#include "../ModulePool.h"
+#include "../ParamControls.h"
+#include "../SectionColourPicker.h"
+#include "EnvLfoPages.h"
+#include "FilterVectorPhysicalPages.h"
+#include "ModSourcePanel.h"
+#include "OscPage.h"
+#include "PageHelpers.h"
 
 namespace
 {

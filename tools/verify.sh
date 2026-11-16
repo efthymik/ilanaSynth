@@ -50,6 +50,9 @@ python3 tools/check_doc_paths.py
 step "Layout literal ratchet"
 python3 tools/layout_literal_ratchet.py
 
+step "GUI headers compile on their own"
+JOBS="$jobs" tools/check_headers.sh | tail -1
+
 step "Unit tests"
 ILANA_CI=1 build/ilanaTableTest_artefacts/Release/ilanaTableTest | tee build/table-test.txt | grep -E "^FAIL|TESTS" || true
 grep -q "ALL TESTS PASSED" build/table-test.txt

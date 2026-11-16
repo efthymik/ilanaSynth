@@ -56,7 +56,8 @@
 #include "gui/WaveDisplay.h"
 #include "gui/SampleNameBox.h"
 
-// Page classes (anonymous namespace), in dependency order.
+// Page classes (anonymous namespace). Each page header includes what it
+// uses (tools/check_headers.sh), so the order here no longer matters.
 #include "gui/StateTabs.h"
 #include "gui/pages/PageHelpers.h"
 #include "gui/PhysicalApplies.h"
@@ -73,6 +74,83 @@
 #include "gui/pages/FxPage.h"
 #include "gui/pages/PatchLfo.h"
 #include "gui/pages/PatchPage.h"
+
+namespace
+{
+#if defined (_WIN32)
+// GetDpiForMonitor ignores the caller's DPI awareness (unlike the DPI APIs
+// JUCE's peer uses), so it still reports the real monitor scale inside hosts
+// that virtualise plugin windows.  Loaded dynamically to avoid extra link
+// dependencies.
+float queryMonitorScale (void* nativeHandle)
+{
+    if (nativeHandle == nullptr)
+        return 1.0f;
+
+    using MonitorFromWindowFn = void* (*) (void*, unsigned long);
+    using GetDpiForMonitorFn = long (*) (void*, int, unsigned int*, unsigned int*);
+
+    auto* user32 = GetModuleHandleW (L"user32.dll");
+    auto* shcore = LoadLibraryW (L"shcore.dll");
+
+    if (user32 == nullptr || shcore == nullptr)
+        return 1.0f;
+
+    auto* monitorFromWindow = (MonitorFromWindowFn) (void*) GetProcAddress (user32, "MonitorFromWindow");
+    auto* getDpiForMonitor = (GetDpiForMonitorFn) (void*) GetProcAddress (shcore, "GetDpiForMonitor");
+
+    if (monitorFromWindow == nullptr || getDpiForMonitor == nullptr)
+        return 1.0f;
+
+    auto* monitor = monitorFromWindow (nativeHandle, 2 /*MONITOR_DEFAULTTONEAREST*/);
+    unsigned int dpiX = 96;
+    unsigned int dpiY = 96;
+
+    if (monitor == nullptr || getDpiForMonitor (monitor, 0 /*MDT_EFFECTIVE_DPI*/, &dpiX, &dpiY) != 0 /*S_OK*/)
+        return 1.0f;
+
+    return juce::jlimit (1.0f, 3.0f, (float) dpiX / 96.0f);
+}
+
+void* setThreadDpiContext (void* context)
+{
+    using SetThreadDpiAwarenessContextFn = void* (*) (void*);
+
+    static auto fn = (SetThreadDpiAwarenessContextFn) (void*)
+        GetProcAddress (GetModuleHandleW (L"user32.dll"), "SetThreadDpiAwarenessContext");
+
+    return fn != nullptr ? fn (context) : nullptr;
+}
+
+void* perMonitorAwareV2Context() { return (void*) (juce::pointer_sized_int) -4; }
+
+int processDpiAwareness()
+{
+    using GetProcessDpiAwarenessFn = long (*) (void*, int*);
+
+    static auto* shcore = LoadLibraryW (L"shcore.dll");
+    static auto getProcessAwareness = shcore != nullptr
+                                          ? (GetProcessDpiAwarenessFn) (void*) GetProcAddress (shcore, "GetProcessDpiAwareness")
+                                          : nullptr;
+
+    if (getProcessAwareness == nullptr)
+        return -1;
+
+    auto* process = OpenProcess (0x1000 /*PROCESS_QUERY_LIMITED_INFORMATION*/, 0, GetCurrentProcessId());
+    int awareness = -1;
+
+    if (process != nullptr)
+    {
+        if (getProcessAwareness (process, &awareness) != 0)
+            awareness = -1;
+
+        CloseHandle (process);
+    }
+
+    return awareness;
+}
+#endif
+} // namespace
 
 
 // The scope over the current page. Docked (the default, review 7) it fills

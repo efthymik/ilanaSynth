@@ -1,6 +1,31 @@
-// Split verbatim from PluginEditor.cpp. Included only from PluginEditor.cpp,
-// after its includes; the contents stay in the same anonymous namespace.
+// Included only from PluginEditor.cpp; the contents are in its anonymous
+// namespace. Includes what it uses (tools/check_headers.sh checks).
 #pragma once
+
+#include <juce_gui_basics/juce_gui_basics.h>
+
+#include "../../PluginEditor.h"
+#include "../../PluginProcessor.h"
+#include "../../SectionColours.h"
+#include "../AnimationUtils.h"
+#include "../FmDiagram.h"
+#include "../FmOperatorInfo.h"
+#include "../HeldSliderAttachment.h"
+#include "../IlanaLookAndFeel.h"
+#include "../LfoShapeMenu.h"
+#include "../MatrixWidgets.h"
+#include "../ModalMarks.h"
+#include "../ModuleMenu.h"
+#include "../OperatorEnvDisplay.h"
+#include "../OscPicker.h"
+#include "../ParamControls.h"
+#include "../SectionColourPicker.h"
+#include "../PhysicalApplies.h"
+#include "../PhysicalView.h"
+#include "../SampleNameBox.h"
+#include "../TableBrowser.h"
+#include "../WaveDisplay.h"
+#include "PageHelpers.h"
 
 namespace
 {

@@ -1,6 +1,25 @@
-// Included only from PluginEditor.cpp, after EnvLfoPages.h; the contents stay
-// in the same anonymous namespace.
+// Included only from PluginEditor.cpp; the contents are in its anonymous
+// namespace. Includes what it uses (tools/check_headers.sh checks).
 #pragma once
+
+#include <juce_gui_basics/juce_gui_basics.h>
+
+#include "../../PluginProcessor.h"
+#include "../AnimationUtils.h"
+#include "../EnvelopeDisplay.h"
+#include "../FmOperatorInfo.h"
+#include "../IlanaLookAndFeel.h"
+#include "../LfoDisplay.h"
+#include "../LfoShapeMenu.h"
+#include "../ModNames.h"
+#include "../ModulationCardView.h"
+#include "../ModuleMenu.h"
+#include "../ModulePool.h"
+#include "../OperatorPoolCards.h"
+#include "../ParamControls.h"
+#include "EnvLfoPages.h"
+#include "OscPage.h"
+#include "PageHelpers.h"
 
 namespace
 {

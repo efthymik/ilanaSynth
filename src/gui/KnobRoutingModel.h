@@ -10,6 +10,7 @@
 //
 // Included from ParamControls.h just before KnobControl: it uses ModDotStrip::Dot,
 // knobClipboard() and addMidiLearnItems(), which that file defines above.
+// (header-check: fragment, not compiled on its own by tools/check_headers.sh.)
 
 class KnobRoutingModel
 {
