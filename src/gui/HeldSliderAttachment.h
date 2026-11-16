@@ -75,6 +75,12 @@ public:
 
     ~HeldSliderAttachment() override
     {
+        // A knob destroyed mid-drag (a card or page rebuilt under the mouse)
+        // closes its gesture: left open, the host kept the parameter touched
+        // and the echo guard kept treating it as edited, so its automation
+        // could stay stuck at the user's values.
+        if (gestureOpen)
+            attachment.endGesture();
         stopTimer();
         slider.removeListener (this);
         auto& all = registry();
@@ -147,8 +153,19 @@ private:
         attachment.setValueAsPartOfGesture ((float) slider.getValue());
     }
 
-    void sliderDragStarted (juce::Slider*) override { attachment.beginGesture(); }
-    void sliderDragEnded (juce::Slider*) override { attachment.endGesture(); }
+    void sliderDragStarted (juce::Slider*) override
+    {
+        if (! gestureOpen)
+            attachment.beginGesture();
+        gestureOpen = true;
+    }
+    void sliderDragEnded (juce::Slider*) override
+    {
+        if (gestureOpen)
+            attachment.endGesture();
+        gestureOpen = false;
+    }
+    bool gestureOpen = false;
 
     static std::multimap<const juce::AudioProcessorParameter*, HeldSliderAttachment*>& registry()
     {
