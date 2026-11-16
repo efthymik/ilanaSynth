@@ -1,6 +1,6 @@
 # Architecture map
 
-For an agent arriving cold. Current state and rules: [HANDOFF.md](../HANDOFF.md). Why things are as they are: [DECISIONS.md](DECISIONS.md). Paths checked against the tree on 2026-11-08. `src/PluginEditor.cpp` is huge (thousands of lines): grep, don't read whole. `IlanaSynthAudioProcessor` is split across `src/PluginProcessor.cpp` and `src/processor/`.
+For an agent arriving cold. Current state and rules: [HANDOFF.md](../HANDOFF.md). Why things are as they are: [DECISIONS.md](DECISIONS.md). Paths checked by `tools/check_doc_paths.py` (run by `tools/verify.sh`). `src/PluginEditor.cpp` is huge (thousands of lines): grep, don't read whole. `IlanaSynthAudioProcessor` is split across `src/PluginProcessor.cpp` and `src/processor/`.
 
 ## Two plugins, one source tree
 | Target | What | Notes |
@@ -12,9 +12,10 @@ For an agent arriving cold. Current state and rules: [HANDOFF.md](../HANDOFF.md)
 | Path | Contents |
 |---|---|
 | `src/PluginProcessor.{h,cpp}` | `IlanaSynthAudioProcessor` (class in the header). The .cpp holds construction, `FactoryTables`, the parameter cache and `getParam`, `prepareToPlay`, `processBlock`/`processChunk` (MIDI/MPE, voices, scope), wavetable and sample slots, `getUiEpoch()` |
-| `src/processor/*.cpp` | The rest of `IlanaSynthAudioProcessor`'s member functions, one area per file, moved verbatim: `ParameterLayout.cpp` (`createParameterLayout`), `Modulation.cpp` (LFO curves, mod slots, macros, vector pad and Evolve, `renderLfos`, global sources, acoustic keys), `Effects.cpp` (`processEffects`, `processSlot`, splitters, every `processXxx` effect incl. vocoder and Airwindows, FX chain save/switch), `Sequencers.cpp` (arpeggiator, Euclid exciter hits, clip sequencer `processClip`), `Presets.cpp` (preset lists, `loadFactoryPreset`, voicing, trims, default macros, `handleAsyncUpdate`), `State.cpp` (`buildFullState`, `applyFullState`, get/setStateInformation, tuning, FM algorithms), `Bounce.cpp` (M8.6 resample; processor destructor), `SamplePortability.cpp` (embed, collect, find and relink sample files; step 31). `ProcessorInternal.h` has the shared file-local helpers (`lfoValue`, `sanitiseBuffer`, ..., `FactoryTables`, `BounceThread`); the files are listed in `ILANA_PROCESSOR_SOURCES` in `CMakeLists.txt` |
-| `src/PluginEditor.{h,cpp}` | `IlanaSynthAudioProcessorEditor` shell (~4,200 lines): construction, tabs, header, menus, layout, key handling, `ScopePanel`, the settings file (`playBandsFolded` etc.). The page classes are in `src/gui/pages/` |
-| `src/gui/pages/*.h` | Page classes (~24k lines in all; `OscPage.h` 5.3k, `FxPage.h` 3.4k, `PlayPage.h` 2.8k, `PatchPage.h` 2.7k, `EnvLfoPages.h` 2.6k) split from PluginEditor.cpp; PLAY is one tab (`PlayPage.h`) holding oscillators, filter and envelope/LFO/body bands and the VECTOR pad (`VectorPage` in `FilterVectorPhysicalPages.h`); the file list below predates that, so `ls src/gui/pages` is the truth. Header-only, in the anonymous namespace, included only by PluginEditor.cpp after its own includes, in dependency order (page-helpers, Osc, FilterVectorPhysical, EnvLfo, FmInput, Seq, Main, Matrix, FxWidgets, Fx, FxPatcher): `PageHelpers.h` `addAll`, `paintSectionTitle`, heading constants, Windows DPI helper; `OscPage.h` `OscPage`, `OscPageViewport` (OSC tab); `FilterVectorPhysicalPages.h` `FilterPanel`, `WestPanel`, `VectorPage`, `PhysicalPage`; `EnvLfoPages.h` `FilterPage`, `EnvSection`, `LfoSection`, `EnvLfoPage` (FILTER and MOD tabs); `FmInputPages.h` `FmPage`, `InputPage`; `SeqPage.h` `SeqPage` (SEQ tab); `MainPage.h` `MainPage` (PLAY tab overview); `MatrixPage.h` `MatrixPage` (mod matrix); `FxWidgets.h` `TapGrid`, `GateGrid`, `SlotSwitch`, `fxColour`, FX stack helpers; `FxPage.h` `FxPage` (FX tab) |
+| `src/processor/*.cpp` | The rest of `IlanaSynthAudioProcessor`'s member functions, one area per file, moved verbatim: `ParameterLayout.cpp` (`createParameterLayout`), `Modulation.cpp` (LFO curves, mod slots, macros, vector pad and Evolve, `renderLfos`, global sources, acoustic keys), `Effects.cpp` (`processEffects`, `processSlot`, splitters, every `processXxx` effect incl. vocoder and Airwindows, FX chain save/switch), `Sequencers.cpp` (arpeggiator, Euclid exciter hits, clip sequencer `processClip`), `Presets.cpp` (preset lists, `loadFactoryPreset`, voicing, trims, default macros, `handleAsyncUpdate`), `State.cpp` (`buildFullState`, `applyFullState`, get/setStateInformation, tuning, FM algorithms), `Bounce.cpp` (M8.6 resample; processor destructor), `SamplePortability.cpp` (embed, collect, find and relink sample files; step 31), `Dx7.cpp` (DX7 patch and bank import), `OscRouting.cpp` and `OscSlots.cpp` (oscillator routing and the slot pool), `ModuleClipboard.cpp` (copy and paste of a module's settings), `FxPatcher.cpp` (below). `ProcessorInternal.h` has the shared file-local helpers (`lfoValue`, `sanitiseBuffer`, ..., `FactoryTables`, `BounceThread`); the files are listed in `ILANA_PROCESSOR_SOURCES` in `CMakeLists.txt` |
+| `src/PluginEditor.{h,cpp}` | `IlanaSynthAudioProcessorEditor` shell (~4,700 lines): construction, tabs, header, menus, layout, key handling, `ScopePanel`, the settings file (`playBandsFolded` etc.). The page classes are in `src/gui/pages/` |
+| `src/gui/pages/*.h` | Page classes (~25k lines in all; `OscPage.h` 5.6k, `FxPage.h` 3.7k, `PlayPage.h` 2.9k, `PatchPage.h` 2.7k, `EnvLfoPages.h` 2.6k), split from PluginEditor.cpp; `ls src/gui/pages` is the truth. PLAY is one tab (`PlayPage.h`) holding oscillators, filter and envelope/LFO/body bands and the VECTOR pad (`VectorPage` in `FilterVectorPhysicalPages.h`). Header-only, in the anonymous namespace, included only by PluginEditor.cpp after its own includes, in dependency order: `PageHelpers.h` (`addAll`, `paintSectionTitle`, heading constants, Windows DPI helper), `OscPage.h` (`OscPage`, `OscPageViewport`), `FilterVectorPhysicalPages.h` (`FilterPanel`, `WestPanel`, `VectorPage`, `PhysicalPage`), `EnvLfoPages.h` (`FilterPage`, `EnvSection`, `LfoSection`, `EnvLfoPage`), `ModSourcePanel.h` (the modulation source panel), `FmInputPages.h` (`FmPage`, `InputPage`), `SeqPage.h` (SEQ tab), `PlayPage.h` (PLAY tab), `MatrixPage.h` (mod matrix), `FxWidgets.h` (`TapGrid`, `GateGrid`, `SlotSwitch`, `fxColour`, FX stack helpers), `FxPage.h` (FX tab), `PatchLfo.h` (LFO cards on the PATCH tab), `PatchPage.h` (PATCH tab) |
+| `src/gpu/` | The Vulkan editor renderer (~4k lines, Windows and Linux; CMake option `ILANA_VULKAN`): `VulkanDevice` (loader opened at run time through volk), `VulkanGraphics` (JUCE rasteriser semantics, Vulkan doing the fills and layers), `VulkanAttachment`, `VulkanSurface`, `VulkanCanvas.h`, pre-compiled shaders in `VulkanShaders.h` (`tools/build_vulkan_shaders.sh` regenerates them from `src/gpu/shaders`). Direct2D (Windows) and OpenGL (Linux) stay as the fallback; macOS keeps CoreGraphics |
 | `src/Presets.h`, `PresetLibrary.h`, `PresetPackM10.h` | `FactoryPreset` / `Value`, the library `Builder`, the M10 pack |
 | `src/PresetTrims.h` | Generated per-preset level and macro trims (`Trim`), written by `tools/tune_presets.py` |
 | `src/TuningState.h`, `src/MtsEsp.{h,cpp}`, `src/thirdparty/mts-esp` | Scala tuning text saved in the patch; MTS-ESP client |
@@ -27,7 +28,8 @@ For an agent arriving cold. Current state and rules: [HANDOFF.md](../HANDOFF.md)
 | `resources/fonts/` | Manrope 400/500/700 (OFL) |
 | `content/` | `samples/` (VCSL CC0), `wavetables/` (AKWF CC0), `analysis/` (critic reports, embeddings); rebuilt by `tools/build_content.py` |
 | `tests/` | `TableTest.cpp` + `*.inc` topic suites, `FxTest.cpp`, `fingerprints-linux.csv` (committed baseline) |
-| `tools/` | Test-tool sources (`Snapshot.cpp`, `PresetFingerprint.cpp`, `PresetRender.cpp`, `RefHost.cpp`) and Python/shell scripts |
+| `tools/` | Test-tool sources (`Snapshot.cpp` and the `*UiTests.h` it includes, `PresetFingerprint.cpp`, `PresetRender.cpp`, `StressTest.cpp`, `PolishRepro.cpp`, `MidiRender.cpp`, `KnobAudit.cpp`, `FxCpuBench.cpp`, `RefHost.cpp`) and Python/shell scripts |
+| `cmake/` | `cmake/engine/CMakeLists.txt` (the engine static libraries, below), `BuildInfo.cmake`, `JuceLayerClip.cmake` |
 | `docs/` | `HANDOFF-HISTORY.md` (per-milestone notes), `REVIEW-PLAN.md` (standing decisions, what is open), `REVIEW-PLAN-HISTORY.md` (finished steps), `RC-1.0-CHECKLIST.md`, `filter-overhaul-status.md` |
 | `.github/workflows/` | `ci.yml`, `release.yml`: both manual-only |
 
@@ -43,6 +45,55 @@ For an agent arriving cold. Current state and rules: [HANDOFF.md](../HANDOFF.md)
 | Envelopes (16), LFOs (16), MSEG, chaos/physics shapes, Evolve, generative | `Modulation.h` (`Mod` namespace), `Mseg.h`, `LfoShape.h`, `LfoSim.h`, `LfoCurve.h`, `Evolve.h`, `Generative.h` |
 | Tuning | `Tuning.h` (.scl/.kbm parsers, 128-note table) |
 | FX chain (type 30 = Airwindows, 31 = Vocoder) | in `src/processor/Effects.cpp`; Airwindows via `src/dsp/airwindows/`; the vocoder is `Vocoder.h` (carrier = slot signal, modulator = audio input or built-in Talk) |
+
+## Threads
+Written 2026-11-16 from a read of the code (`grep` for the lock types in `src/`); the rows say what the code does today, not a design. Line numbers drift: search the lock's name.
+
+**Thread kinds.** *Audio*: the host's `processBlock` (`PluginProcessor.cpp`), on a realtime thread; with MULTI-CORE on, voice workers (`src/dsp/VoiceThreads.h`) render voices for it. *Message*: the JUCE message thread, which the editor, the `Timer`s and `handleAsyncUpdate` run on. *Host state load*: `setStateInformation` can arrive on a host thread (`stateLoadLock`). *Offline*: a bounce (`Bounce.cpp`, `BounceThread`), an offline export or a test calling `processBlock` itself; it plays the audio thread's part on whatever thread that is. *Workers*: `SpectralCache` and `StretchRenderer` build tables and stretched samples off the audio thread; `ModalBowedLayers` has one builder thread.
+
+**Rule for the audio thread:** never wait. A plain `ScopedLock` there is allowed only where the row says "short" (a pointer copy under a spin lock).
+
+### Locks
+| Lock (declared) | Guards | Takes it | Audio thread |
+|---|---|---|---|
+| `stateLoadLock` (`CriticalSection`, `PluginProcessor.h`) | one state load at a time (`State.cpp`: `setStateInformation`, `applyFullState`) | message, host state load | never |
+| `stateLock` (`SpinLock`) | `samplePaths`, `embeddedSamples`, the preset/state hand-overs, the bounce result (`State.cpp`, `Presets.cpp`, `SamplePortability.cpp`, `Bounce.cpp`, `FxPatcher.cpp`, `PluginProcessor.cpp`) | message, host state load, bounce thread | never |
+| `sampleLock` (`SpinLock`) | `sampleSlots`, `retiredSamples` | writes: message, state load; reads: `getSampleForOsc` | blocking, short (a `shared_ptr` raw pointer copy; retired samples keep the old one alive) |
+| `tableLock` (`SpinLock`) | user wavetable slots (`swapUserTable`, `getTableForChoice`) | writes: message, state load | blocking, short |
+| `previewLock` (`SpinLock`) | the sample browser's pending preview clip | message thread fills (blocking) | try-lock (`mixSamplePreview`) |
+| `scopeLock` (`SpinLock`) | the scope buffers | editor reads (blocking) | try-lock, skips the block's scope write when busy |
+| `lfoShapeLock` (`SpinLock`) | custom LFO shapes and curve tables | message, state load | try-lock at the top of a chunk; keeps the last block's shapes when busy |
+| `remapLock` (`SpinLock`) | the mod remap tables | message, state load | blocking, only when `remapEpoch` moved (one table copy). The one audio-side wait that is not a try-lock |
+| `fxEditLock` (`CriticalSection`) | the FX patch's edits (`FxPatcher.cpp`: add, remove, swap, graph, reconcile; `prepareToPlay`) | message, host state load | never |
+| `fxSwapApplyLock` (`SpinLock`) | applying a staged slot swap (`applyFxSwap`) | message waits (`mayWait`), up to 250 ms | try-lock; a busy swap waits for the next block |
+| `fxCompileLock` (`SpinLock`) | the rack runner's publish (`FxPatcher.cpp`) | message thread, or an offline render | never |
+| `getCallbackLock()` (JUCE) | `setOversampling`'s buffer rebuild against `processBlock` | message (`setOversampling`); VST3 and standalone wrappers hold it around `processBlock` | try-lock (`processBlock` outputs one silent block when busy) |
+| `TuningState::mutex` (`TuningState.h`) | the loaded Scala table and key mapping | message | try-lock (`acquireForAudio`) |
+| `ClipState::mutex` (`ClipState.h`) | the clips | message | try-lock in the reader (`ClipState.h`) |
+| `IlanaSynth::lock` (`src/dsp/IlanaSynth.h`, the `juce::Synthesiser` lock) | voice allocation, mode changes, pending notes | message (keyboard notes, `setVoiceMode`), audio (note on/off, render) | blocking, held by the render itself; the message-side holders are short |
+| `SpectralCache` `slot.lock` (`SpinLock`), `buildLock`, `voiceBuildLock` (`src/dsp/SpectralCache.h`) | a built spectral table per slot; one builder at a time | worker, message (synchronous path when offline) | try-lock on `slot.lock` only ("never blocks") |
+| `StretchRenderer` `queueLock` (`SpinLock`), `workerLock` (`src/dsp/StretchRenderer.h`) | the stretch request queue; one worker at a time | worker threads | try-lock on `queueLock` (`request` asks again next block) |
+| `ModalBowedLayers` `mutex` (`std::mutex`), `ModalPiano.h` and `SamplePlayer.h` function-local `static std::mutex` | the layer bank list; per-rate noise designs and window tables, built once | message (prepare), the builder thread | never by design (all three are reached from `prepare`) |
+
+Lock order: the one nesting found is `stateLock` inside `fxEditLock` (`FxPatcher.cpp`); `stateLock` alone is also taken without it. Keep that direction: never take `fxEditLock` while holding `stateLock`. Not checked by anything yet.
+
+### Atomics (who writes, who reads)
+There are about 120 `std::atomic` members of the processor; they fall into groups, and a new one should join a group.
+| Group (members in `PluginProcessor.h`) | Writes | Reads |
+|---|---|---|
+| Parameter values (`ParamRef`, `getRawParam`, the `std::atomic<float>` behind each parameter) | host automation (any thread), editor (message) | audio, every block |
+| Display and meter feeds: `scopeWritePos`, `scopeBlockSamples`, `scopeBlockMs`, `outputPeaks`, `outputLevelDisplay`, `inputLevelDisplay`, `cpuUsage`, `activeVoiceCount`, `lfoLastValues`, `lfoPhaseDisplays`, `lfoSampleHolds`, `modDisplayValues`, `envMonitor*`, `monitor*`, `displayPhase`, `oscDisplayPhases`, `fxSlotCpu`, `fxSlotIn`, `fxSlotOut`, `fxLfoShownValue`, `westGateDisplay`, `hostPpq`, `hostPlaying`, `currentBpm`, `engineDisplayStep`, `euclidDisplayStep`, `clipPlayhead` | audio | editor timers (message). Lossy by design |
+| Version counters the editor polls: `tableNoticeVersion`, `stateLoadNoticeVersion`, `missingSamplesVersion`, `revealVersion`, `sectionColourVersion`, `remapEpoch`, `paramEpoch`, `liveEpoch`, `dataEpoch`, `sampleEpoch`, `patchGeneration`, `noteSerial`, `uiNoteEpoch` | message, state load (`paramEpoch` also any thread via its parameter listener) | editor (message); `remapEpoch` also audio |
+| Pending input from the editor: `uiModWheel`, `uiPitchBend`, `uiPressure`, `previewFifo` (lock-free FIFO), `pendingProgramChange`, `pendingMacros`, `macroPendingFlags`, `macrosPending`, `liveRetrigger`, `patchCut`, `easeStep`, `exciterLevels`, `oversamplingFactor` | message | audio, next block |
+| MIDI-learn and CC: `macroLearn`, `macroCc`, `paramLearn`, `ccParameter`, `pendingCcValues`, `pendingCcParameter`, `ccValuePending`, `ccPending`, `ccOverrides` | audio (a CC arrives) and message (learn setup) | message (applies the queued values), audio (`ccOverrides` in `getParam`) |
+| Sample preview: `previewSerial`, `previewPlaying`, `previewGain` | message | audio |
+| Bounce: `bounceState`, `bounceProgress` | bounce thread, message | message |
+| Thread identity: `asyncOwnerThread` (`keepAsyncUpdatesOnThisThread`, `Presets.cpp`), `fxRackThread`, `fxLastRackMs` | the thread that renders (`beginFxBlock`), message | message, to decide whether a swap can wait for the audio thread |
+| FX rack hand-over: `slotEngines`, `slotValues`, `fxLfoProgram`, `fxSwapRequested`, `fxSwapApplied`, `fxRackCompileWanted`, `fxReconcileWanted`, `raw` pointers in `FxSwapStage` | message (publish, release) | audio (acquire), applies between two blocks |
+| Undo and echo guard: `ParamUndoRecorder::lastValues`, `ParameterEchoGuard` | every thread | message |
+
+### Checks in code
+`src/ThreadChecks.h`: `ILANA_AUDIO_THREAD_SCOPE()` (first line of `processBlock`), `ILANA_ASSERT_NOT_AUDIO()` and `ILANA_ASSERT_MESSAGE_THREAD()`. They exist in JUCE debug builds and in the test builds (`ILANA_TEST_BUILD`: `ilanaTableTest`, `ilanaFingerprint` and the tools on the engine libraries) and are empty macros everywhere else, the plugins included. A violation prints `THREAD CHECK FAILED`, counts, and breaks in a debug build; `ilanaTableTest` fails if the count is not 0 at the end. In place: `setFxPatchGraph`, `addFxEffect` (`FxPatcher.cpp`) and `setModSlotValue` (`Modulation.cpp`) must not run inside `processBlock`; `beginEdit` and `endEdit` (`State.cpp`) are message-thread only. Not yet covered: `loadFactoryPreset` and `assignModSlot` (`Presets.cpp`), the other editor-called setters in `PluginProcessor.cpp`, and a wrapper that asserts "no blocking lock on the audio thread". Add a check next to a new setter the same way.
 
 ## Parameters and modulation
 - Parameters are created in `createParameterLayout()` (`src/processor/ParameterLayout.cpp`); per-block reads use a `ParamRef` member (resolved once).
@@ -62,13 +113,20 @@ For an agent arriving cold. Current state and rules: [HANDOFF.md](../HANDOFF.md)
 | Target | Notes |
 |---|---|
 | `ilanaTableTest` | `tests/TableTest.cpp` + `tests/*.inc`. One suite via env switch: `ILANA_M5_TEST`, `ILANA_M81_TEST`..`ILANA_M86_TEST`, `ILANA_M10_TEST`, `ILANA_POLISH_TEST`, `ILANA_LIBRARY_TEST`, `ILANA_FILTER_TEST`, `ILANA_TUNING_TEST`, `ILANA_AIRWINDOWS_TEST`, `ILANA_VOCODER_TEST`, `ILANA_PLAN_TEST`, `ILANA_KS_TEST`, `ILANA_PRESET_TEST`, `ILANA_ARP_TEST`, `ILANA_CLIP_TEST`, `ILANA_MULTISAMPLE_TEST`, `ILANA_SPLITTER_TEST`. Probes: `ILANA_PRESET_OVERRIDES`, `ILANA_NOTE_DEBUG`, `ILANA_RENDER_DEMO`, `ILANA_PRESET_PROFILE`, `ILANA_BENCH`, `ILANA_PARAM_TEXT` |
-| `ilanaFxTest` | `tests/FxTest.cpp`: the FX plugin |
+| `ilanaFxTest` | `tests/FxTest.cpp`: the FX plugin (built with the real editor: one check opens it) |
+| `ilanaStress` | `tools/StressTest.cpp`: the stress phrase (pedal, retrigger, stealing, preset change, random block lengths, sample-rate change) through every preset, multi-core on vs off |
+| `ilanaKnobAudit` | `tools/KnobAudit.cpp`: knob sweeps (`tools/knob_audit.py`) |
+| `ilanaMidiRender` | `tools/MidiRender.cpp`: renders a MIDI file through a patch |
+| `ilanaPolishRepro` | `tools/PolishRepro.cpp`: repro for polish-pass bugs |
+| `ilanaFxCpuBench` | `tools/FxCpuBench.cpp`: what the FX rack costs per effect and routing |
 | `ilanaSnapshot` | `tools/Snapshot.cpp`; `--uitest` (pages, folding, switch), `--fps`, `--idlecpu`; needs a display (Xvfb on Linux) |
 | `ilanaFingerprint` | `tools/PresetFingerprint.cpp`; `ilanaFingerprint out.csv`, then `python tools/compare_fingerprints.py before.csv after.csv`. Linux baseline: `tests/fingerprints-linux.csv` (compare only within a platform) |
 | `ilanaPresetRender` | `tools/PresetRender.cpp`: renders test phrases per preset for `tools/preset_critic.py` |
 | `ilanaRefHost` | `tools/RefHost.cpp`: headless host rendering installed plugins (Vital, Surge XT, ...) as references (`--presets`) |
 
-Gate: `tools/verify.sh [--quick]` builds all targets, runs tests, `--uitest`, fingerprints against the Linux baseline, and pluginval.
+Build graph: the engine sources are compiled once per define flavour into the static libraries `ilanaEngineTest` (`ILANA_TEST_BUILD`), `ilanaEngineFp` (+ `ILANA_FINGERPRINT_BUILD`) and `ilanaEngineFxBench` (+ `ILANA_FX`) (`cmake/engine/CMakeLists.txt`); `ilanaTableTest`, `ilanaFingerprint` and the dev tools link them. The two plugins, `ilanaSnapshot` and `ilanaFxTest` need the editor and compile the engine themselves (`ILANA_ENGINE_SOURCES`). `ilanaStress`, `ilanaPolishRepro`, `ilanaKnobAudit`, `ilanaMidiRender`, `ilanaPresetRender`, `ilanaRefHost` and `ilanaFxCpuBench` are `EXCLUDE_FROM_ALL`: build them with `--target ilanaTools` (or `tools/verify.sh --all`).
+
+Gate: `tools/verify.sh [--quick] [--all]` builds the targets it runs (`--all`: also the dev tools), checks the doc paths, runs tests, `--uitest`, fingerprints against the Linux baseline, and pluginval.
 
 ## Tools (Python/shell)
 | Script | Does |
@@ -76,6 +134,7 @@ Gate: `tools/verify.sh [--quick]` builds all targets, runs tests, `--uitest`, fi
 | `tools/verify.sh` | The full gate |
 | `tools/verify.ps1`, `tools/setup-runner.ps1` | The gate on Windows; registers the PC as the self-hosted runner (`docs/SELF-HOSTED-RUNNER.md`) |
 | `tools/compare_fingerprints.py` | Diff two fingerprint CSVs |
+| `tools/check_doc_paths.py` | Fails when `ARCHITECTURE.md` or `HANDOFF.md` names a repo path that does not exist (run by `verify.sh`) |
 | `tools/preset_critic.py`, `clap_score.py`, `preset_diversity.py` | Score renders, CLAP embeddings, library diversity |
 | `tools/tune_presets.py` | Generates `src/PresetTrims.h` |
 | `tools/ab_clips.py` | Renders A/B listening clips |
