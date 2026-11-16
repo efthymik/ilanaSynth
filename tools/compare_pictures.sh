@@ -5,7 +5,14 @@
 # (meter, keyboard strip, FM scope) and are masked; only differences outside
 # that mask are reported (exit 1).
 #
-#   tools/compare_pictures.sh BASE_SNAPSHOT [NEW_SNAPSHOT] [WORKDIR]
+# The pictures are rendered silent (ILANA_SNAPSHOT_SILENT=1: no held note, so
+# no meter, scope or modulation markers moving): the baseline then differs from
+# itself by a few pixels at most, and the mask catches those. With LIVE=1 the
+# held note is on, as in the usual snapshots; the animated areas (meter,
+# keyboard strip, FM scope, LFO and envelope markers) then differ run to run
+# by thousands of pixels and a real change inside them cannot be told apart.
+#
+#   [LIVE=1] tools/compare_pictures.sh BASE_SNAPSHOT [NEW_SNAPSHOT] [WORKDIR]
 #
 # NEW_SNAPSHOT defaults to build/ilanaSnapshot_artefacts/Release/ilanaSnapshot.
 # To compare against an older commit, build that commit's ilanaSnapshot,
@@ -18,6 +25,7 @@ cd "$(dirname "$0")/.."
 base="${1:?usage: tools/compare_pictures.sh BASE_SNAPSHOT [NEW_SNAPSHOT] [WORKDIR]}"
 new="${2:-build/ilanaSnapshot_artefacts/Release/ilanaSnapshot}"
 work="$(realpath -m "${3:-build/pictures}")"
+silent=1; [ -z "${LIVE:-}" ] || silent=""
 base="$(realpath "$base")"; new="$(realpath "$new")"
 mkdir -p "$work"
 pages="MAIN,VECTOR,MATRIX,FM,ARP/SEQ,FX,PATCH"
@@ -27,7 +35,7 @@ render() { # binary outdir [preset]
     local tmp; tmp="$(mktemp -d)"
     ( cd "$tmp"
       if command -v xvfb-run > /dev/null && [ -z "${DISPLAY:-}" ]; then run=(xvfb-run -a); else run=(); fi
-      ILANA_SNAPSHOT_SCALE=1.75 ILANA_SNAPSHOT_PAGES="$pages" "${run[@]}" "$1" out ${3:+"$3"} > /dev/null )
+      ILANA_SNAPSHOT_SILENT="$silent" ILANA_SNAPSHOT_SCALE=1.75 ILANA_SNAPSHOT_PAGES="$pages" "${run[@]}" "$1" out ${3:+"$3"} > /dev/null )
     mv "$tmp/out" "$2"; rm -rf "$tmp"
 }
 

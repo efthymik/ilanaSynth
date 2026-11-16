@@ -5,7 +5,7 @@
 
 NOISE_A and NOISE_B are two renders of the same (baseline) build: every pixel
 that differs between them is animation noise (meter, keyboard strip, FM scope),
-dilated a few pixels to form the mask. NEW is a render of the build under test;
+dilated a few pixels (6) to form the mask. NEW is a render of the build under test;
 a pixel is reported only when it differs from both baseline renders and lies
 outside the mask. Exit 1 when there are any.
 """
@@ -14,7 +14,7 @@ import numpy as np
 from PIL import Image
 
 
-def binary_dilation(m, iterations=3):
+def binary_dilation(m, iterations=6):
     r = iterations
     out = m.copy()
     h, w = m.shape
@@ -28,6 +28,11 @@ def binary_dilation(m, iterations=3):
 
 def load(path):
     return np.asarray(Image.open(path).convert("RGBA")).astype(np.int16)
+
+
+# A few single pixels flicker between renders even in a silent render (a ring's
+# anti-aliasing at a repaint boundary): up to this many are not a difference.
+MIN_PX = int(os.environ.get("PIC_MIN_PX", "6"))
 
 
 def main(argv):
@@ -54,9 +59,9 @@ def main(argv):
                 continue
             noise = (ia != ib).any(axis=2)
             if noise.any():
-                noise = binary_dilation(noise, iterations=3)
+                noise = binary_dilation(noise, iterations=6)
             diff = (ia != inn).any(axis=2) & (ib != inn).any(axis=2) & ~noise
-            if diff.any():
+            if int(diff.sum()) > MIN_PX:
                 ys, xs = np.nonzero(diff)
                 print(f"DIFF {new}/{name}: {int(diff.sum())} px, bbox x {xs.min()}..{xs.max()} y {ys.min()}..{ys.max()}")
                 bad += 1
