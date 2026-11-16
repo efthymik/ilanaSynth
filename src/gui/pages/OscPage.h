@@ -4621,6 +4621,11 @@ private:
             if (auto* parameter = processorRef.apvts.getParameter (tableId))
                 parameter->setValueNotifyingHost (parameter->convertTo0to1 ((float) (tableChoiceOffset + factoryCount + slot)));
         }
+        else
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Load wavetable",
+                                                    "Couldn't read " + file.getFileName() + " as a wavetable.");
+        }
         processorRef.endEdit();
     }
 

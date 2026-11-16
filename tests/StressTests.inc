@@ -89,4 +89,53 @@ void runStressTests()
     // UTILITY +10, EQ +13 / +15, TILT +12). A runaway still blows far past
     // 32 (+30 dB) or goes non-finite.
     32.0f);
+
+    // One voice gone NaN (weak points 2026-11-15): before, its NaN summed
+    // into every sample, so the whole mix was zeroed and the effects cleared
+    // every block for as long as it rang. Now that voice is stopped within a
+    // block or two and the other notes play on, at the same level.
+    for (const auto multiCore : { false, true })
+    {
+        const struct Force { explicit Force (int v) { IlanaSynthAudioProcessor::forceVoiceThreads = v; }
+                             ~Force() { IlanaSynthAudioProcessor::forceVoiceThreads = -1; } } force (multiCore ? 1 : 0);
+        IlanaSynthAudioProcessor processor;
+        processor.prepareToPlay (48000.0, 512);
+        const auto render = [&processor] (bool notes)
+        {
+            juce::AudioBuffer<float> buffer (2, 512);
+            juce::MidiBuffer midi;
+            if (notes)
+                for (const auto note : { 48, 55, 60, 64 })
+                    midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 100), 0);
+            buffer.clear();
+            processor.processBlock (buffer, midi);
+            auto finite = true;
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < buffer.getNumSamples(); ++i)
+                    finite = finite && std::isfinite (buffer.getSample (ch, i));
+            return std::pair<bool, float> { finite, buffer.getRMSLevel (0, 0, buffer.getNumSamples()) };
+        };
+        render (true);
+        for (int i = 0; i < 8; ++i)
+            render (false);
+        const auto before = render (false).second;
+        Voice* broken = nullptr;
+        for (int i = 0; i < processor.getSynthForTest().getNumVoices() && broken == nullptr; ++i)
+            if (auto* voice = dynamic_cast<Voice*> (processor.getSynthForTest().getVoice (i)); voice != nullptr && voice->isVoiceActive())
+                broken = voice;
+        check (broken != nullptr, "NaN voice: a note is sounding");
+        if (broken == nullptr)
+            continue;
+        broken->breakForTest();
+        auto allFinite = true;
+        for (int i = 0; i < 3; ++i)
+            allFinite = render (false).first && allFinite;
+        const auto after = render (false);
+        const auto label = juce::String (multiCore ? " (MULTI-CORE)" : "");
+        check (allFinite && after.first, "NaN voice: output stays finite" + label);
+        check (processor.getSynthForTest().getNonFiniteVoicesStopped() == 1, "NaN voice: the broken voice is stopped ("
+               + juce::String (processor.getSynthForTest().getNonFiniteVoicesStopped()) + ")" + label);
+        check (after.second > 0.4f * before, "NaN voice: the other notes play on (rms " + juce::String (after.second, 4)
+               + " vs " + juce::String (before, 4) + ")" + label);
+    }
 }

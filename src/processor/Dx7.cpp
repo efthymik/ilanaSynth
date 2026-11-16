@@ -78,7 +78,11 @@ int IlanaSynthAudioProcessor::importDx7File (const juce::File& file, juce::Strin
         return 0;
     }
 
-    const auto folder = getUserPresetDirectory().getChildFile ("DX7").getChildFile (file.getFileNameWithoutExtension());
+    // A bank imported before keeps its folder (and any edits saved there):
+    // a second import goes in "NAME 2", "NAME 3"...
+    auto folder = getUserPresetDirectory().getChildFile ("DX7").getChildFile (file.getFileNameWithoutExtension());
+    for (int n = 2; folder.isDirectory() && folder.getNumberOfChildFiles (juce::File::findFiles, "*.ilanapreset") > 0; ++n)
+        folder = folder.getSiblingFile (file.getFileNameWithoutExtension() + " " + juce::String (n));
     folder.createDirectory();
 
     // Each voice goes through a processor of its own (as a load would) and is

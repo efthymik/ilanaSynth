@@ -666,6 +666,7 @@ public:
         static const std::vector<Point> grid = []
         {
             std::vector<Point> points;
+            points.reserve (4001);
             auto unwrapped = 0.0, previous = 0.0;
             for (int i = 0; i <= 4000; ++i)
             {

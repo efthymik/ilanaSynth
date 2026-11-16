@@ -169,12 +169,18 @@ void Voice::setCurrentPlaybackSampleRate (double newRate)
         env.setSampleRate (newRate);
     envMseg.prepare (newRate);
 
+    // One pluck-shaping scratch for all this voice's strings (they excite
+    // one at a time, on the thread rendering this voice), sized here so a
+    // pluck never allocates on the audio thread.
+    stringScratch.assign ((size_t) KarplusStrong::bufferSizeFor (newRate), 0.0f);
+
     for (int osc = 0; osc < VoiceParams::numOscillators; ++osc)
     {
         oscBank[osc].setSampleRate (newRate);
 
         for (int u = 0; u < VoiceParams::maxBufferedUnison; ++u)
         {
+            stringFor (osc, u).setSharedScratch (&stringScratch);
             stringFor (osc, u).prepare (newRate);
             sampleUnison[osc][u].prepare (newRate);
             sampleLayer[osc][u].prepare (newRate);
@@ -730,6 +736,21 @@ void Voice::resetForNewPatch()
 
     if (shared != nullptr)
         shared->lastNoteFrequency = 0.0;
+}
+
+void Voice::silenceAfterNonFinite()
+{
+    monoPending = monoKeepRunning = false;
+    heldAsleep = false;
+    oneShotHold = false;
+    brokenForTest = false;
+    stopNote (0.0f, false);
+    // (resetForNewPatch also forgets the last note for GLIDE: the other
+    // voices' next note still glides from it.)
+    const auto lastNote = shared != nullptr ? shared->lastNoteFrequency : 0.0;
+    resetForNewPatch();
+    if (shared != nullptr)
+        shared->lastNoteFrequency = lastNote;
 }
 
 void Voice::stopNote (float, bool allowTailOff)
@@ -1443,6 +1464,8 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
     }
 
     sounded = true;
+    if (brokenForTest && numSamples > 0)
+        outputBuffer.getWritePointer (0)[startSample] += std::numeric_limits<float>::quiet_NaN();
     retargetGlides (numSamples);
 
     // Step 33: the One Shot that held the release has played out.

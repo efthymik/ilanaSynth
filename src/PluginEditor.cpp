@@ -920,6 +920,8 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
         for (auto& macro : macroKnobs)
             macro->repaint();
     };
+    keepOwnHooks();
+    addMouseListener (&hookClaimer, true);
     processorRef.getUndoManager().addChangeListener (this);
     content.addChildComponent (confirmOverlay);
     content.addChildComponent (saveOverlay);
@@ -1187,11 +1189,46 @@ void IlanaSynthAudioProcessorEditor::closeSampleBrowser()
     }
 }
 
+void IlanaSynthAudioProcessorEditor::keepOwnHooks()
+{
+    ownHooks.openMatrixRow = ModNames::openMatrixRow();
+    ownHooks.fxSlotEffectName = ModNames::fxSlotEffectName();
+    ownHooks.openRouting = FilterFlow::openRouting();
+    ownHooks.sampleBrowser = sampleBrowserHook();
+    ownHooks.openOperator = FmOperatorInfo::hooks().openOperator;
+    ownHooks.openPitchAndLfo = FmOperatorInfo::hooks().openPitchAndLfo;
+    ownHooks.armedChanged = armedModSourceChanged();
+    ownHooks.tableSettings = tableBrowserSettings();
+    hookOwner() = this;
+}
+
+void IlanaSynthAudioProcessorEditor::claimGlobalHooks()
+{
+    modHoverPopup.claim();
+    if (hookOwner() == this)
+        return;
+    hookOwner() = this;
+    ModNames::openMatrixRow() = ownHooks.openMatrixRow;
+    ModNames::fxSlotEffectName() = ownHooks.fxSlotEffectName;
+    FilterFlow::openRouting() = ownHooks.openRouting;
+    sampleBrowserHook() = ownHooks.sampleBrowser;
+    FmOperatorInfo::hooks().openOperator = ownHooks.openOperator;
+    FmOperatorInfo::hooks().openPitchAndLfo = ownHooks.openPitchAndLfo;
+    armedModSourceChanged() = ownHooks.armedChanged;
+    tableBrowserSettings() = ownHooks.tableSettings;
+}
+
 IlanaSynthAudioProcessorEditor::~IlanaSynthAudioProcessorEditor()
 {
     routeBadgeWatch.stopTimer();
-    setArmedModSource (0);
-    armedModSourceChanged() = nullptr;
+    removeMouseListener (&hookClaimer);
+    juce::PopupMenu::dismissAllActiveMenus(); // (their items call into this editor)
+    const auto ownsHooks = hookOwner() == this;
+    if (ownsHooks)
+    {
+        setArmedModSource (0);
+        armedModSourceChanged() = nullptr;
+    }
     sampleBrowser.reset();
     zoneEditor.reset();
     setGpuRendering (false); // before any child goes: the render thread paints them
@@ -1199,12 +1236,17 @@ IlanaSynthAudioProcessorEditor::~IlanaSynthAudioProcessorEditor()
     vulkan.reset(); // (likewise: a frame paints every child)
    #endif
     scopeWindow.reset();
-    sampleBrowserHook() = nullptr;
-    FmOperatorInfo::hooks().openOperator = nullptr;
-    FmOperatorInfo::hooks().openPitchAndLfo = nullptr;
-    ModNames::openMatrixRow() = nullptr;
-    ModNames::fxSlotEffectName() = nullptr;
-    tableBrowserSettings() = nullptr;
+    if (ownsHooks)
+    {
+        sampleBrowserHook() = nullptr;
+        FmOperatorInfo::hooks().openOperator = nullptr;
+        FmOperatorInfo::hooks().openPitchAndLfo = nullptr;
+        ModNames::openMatrixRow() = nullptr;
+        ModNames::fxSlotEffectName() = nullptr;
+        FilterFlow::openRouting() = nullptr;
+        tableBrowserSettings() = nullptr;
+        hookOwner() = nullptr;
+    }
     if (const auto page = getCurrentPageId(); page.isNotEmpty())
         processorRef.lastViewPage = page;
     closeWavetableEditor();
@@ -3326,7 +3368,12 @@ void IlanaSynthAudioProcessorEditor::exportPreset()
 
                                   if (file != juce::File() && safeThis != nullptr)
                                   {
-                                      safeThis->processorRef.savePresetToFile (file.withFileExtension ("ilanapreset"));
+                                      // A copy: the patch stays bound to its own preset (SAVE must
+                                      // not write over the exported file afterwards).
+                                      const auto target = file.withFileExtension ("ilanapreset");
+                                      if (! safeThis->processorRef.writePresetCopy (target))
+                                          juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Export preset",
+                                                                                  "Couldn't write " + target.getFullPathName() + ".");
 
                                       if (safeThis->presetPanel != nullptr)
                                           safeThis->presetPanel->refresh();

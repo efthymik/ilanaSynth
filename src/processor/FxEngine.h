@@ -26,6 +26,7 @@ public:
           lfoRandom (ownerToUse.lfoRandom),
           liveDry (ownerToUse.liveDry),
           liveInputSamples (ownerToUse.liveInputSamples),
+          fxChunkStart (ownerToUse.fxChunkStart),
           tapStepIds (ownerToUse.tapStepIds),
           gateStepIds (ownerToUse.gateStepIds),
           euclidDisplayStep (ownerToUse.euclidDisplayStep)
@@ -60,6 +61,7 @@ private:
     juce::Random& lfoRandom;
     juce::AudioBuffer<float>& liveDry;
     int& liveInputSamples;
+    int& fxChunkStart;
     std::array<ParamRef, 16>& tapStepIds;
     std::array<ParamRef, 16>& gateStepIds;
     std::atomic<int>& euclidDisplayStep;

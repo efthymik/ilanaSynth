@@ -558,7 +558,7 @@ public:
         for (int i = 0; i < numSamples; ++i)
         {
             auto input = 0.5f * (left[i] + (right != nullptr ? right[i] : left[i]));
-            input = pedalDown ? juce::jlimit (-2.0f, 2.0f, input) * inputGain * amount : 0.0f;
+            input = pedalDown && std::isfinite (input) ? juce::jlimit (-2.0f, 2.0f, input) * inputGain * amount : 0.0f;
 
             if (bloomRemaining > 0)
             {
