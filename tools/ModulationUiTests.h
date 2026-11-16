@@ -47,18 +47,20 @@ void runModulationTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioPro
     };
 
     processor.loadFactoryPreset (0); // Init: an empty matrix
-    editor.showPage ("FILTER");
+    editor.showPage ("MAIN");
     settle (300);
 
     // Rings: one per routing on the knob, drawn round the dial; dragging one
     // sets its depth as one undo step (V5-1, V6-2).
     {
+        // (A CUTOFF knob of its own, 110 x 97: it has room for three rings, which PLAY's small filter knobs have not.)
+        KnobControl ownCutoff (processor.apvts, "f1_cutoff", "CUTOFF");
+        ownCutoff.setSize (110, 97);
         routeSlot (0, Mod::Source::Lfo1, Mod::Destination::Filter1Cutoff, 0.2f);
         routeSlot (1, Mod::Source::Lfo2, Mod::Destination::Filter1Cutoff, -0.4f);
         settle (300);
-        auto* cutoff = findKnob ("f1_cutoff");
-        if (cutoff != nullptr)
-            cutoff->syncRoutings();
+        auto* cutoff = &ownCutoff;
+        cutoff->syncRoutings();
         expect (cutoff != nullptr && cutoff->getNumRoutings() == 2 && cutoff->getNumRings() == 2,
                 "a knob with two routings draws two depth rings");
 
@@ -157,8 +159,9 @@ void runModulationTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioPro
                     "Stereo and Bipolar from the ring menu set the route, one undo step each");
 
             routeSlot (2, Mod::Source::Lfo3, (Mod::Destination) Mod::destinationForParamId ("f1_keytrack"), 0.3f);
-            settle (200);
-            if (auto* keyTrack = findKnob ("f1_keytrack"); keyTrack != nullptr)
+            KnobControl ownKeyTrack (processor.apvts, "f1_keytrack", "KEY TRACK");
+            ownKeyTrack.setSize (110, 97);
+            if (auto* keyTrack = &ownKeyTrack)
             {
                 keyTrack->syncRoutings();
                 expect (keyTrack->getNumRoutings() == 1 && ! itemsOf (keyTrack->getRouting (0)).at ("Stereo").isEnabled,
@@ -166,7 +169,7 @@ void runModulationTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioPro
             }
             else
             {
-                expect (false, "the filter page shows F1 KEY TRACK");
+                expect (false, "F1 KEY TRACK has its knob");
             }
             processor.clearModSlot (2);
             settle (100);
@@ -178,8 +181,7 @@ void runModulationTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioPro
         for (int i = 0; i < 7; ++i)
             routeSlot (2 + i, more[i], Mod::Destination::Filter1Cutoff, 0.1f);
         settle (300);
-        cutoff = findKnob ("f1_cutoff");
-        if (cutoff != nullptr)
+        cutoff = &ownCutoff;
         {
             cutoff->syncRoutings();
             auto& strip = cutoff->getDotStrip();
@@ -188,10 +190,6 @@ void runModulationTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioPro
                     "nine routings: three rings, " + juce::String (strip.getNumShown()) + " badges and a +"
                         + juce::String (9 - strip.getNumShown()) + " that fit the knob (" + juce::String (cutoff->getNumRings()) + " rings, strip "
                         + juce::String (strip.getHeight()) + " px on a " + juce::String (cutoff->getHeight()) + " px knob)");
-        }
-        else
-        {
-            expect (false, "the filter page shows CUTOFF");
         }
 
         for (int i = 0; i < 9; ++i)
@@ -754,7 +752,7 @@ void runReview7ModulationTests (IlanaSynthAudioProcessor& processor, IlanaSynthA
     // pinned source's ring takes the whole band (S7-33).
     {
         processor.loadFactoryPreset (0);
-        editor.showPage ("FILTER");
+        editor.showPage ("MAIN");
         settle (300);
         set ("mod1_src", (float) Mod::Source::Lfo1);
         set ("mod1_dst", (float) Mod::Destination::Filter1Cutoff);

@@ -6,7 +6,7 @@
 
 void runOscCardOverlapTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProcessorEditor& editor)
 {
-    editor.showPage ("OSC");
+    editor.showPage ("MAIN");
     settle (300);
     juce::StringArray clashes;
     const auto nameOf = [] (juce::Component* component)

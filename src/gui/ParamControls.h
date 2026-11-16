@@ -1359,7 +1359,10 @@ public:
             return takeArmedClick();
 
         const auto pinned = pinnedModSource();
-        if (! event.mods.isAltDown() || pinned == 0 || processorRef == nullptr || ! isModulatable() || routesFrom (pinned))
+        if (! event.mods.isAltDown() || pinned == 0 || processorRef == nullptr || ! isModulatable())
+            return false;
+        refreshRoutings(); // (the dots are a cache: a patch loaded since may have changed them)
+        if (routesFrom (pinned))
             return false;
 
         processorRef->beginEdit ("Add " + ModNames::source (pinned, processorRef) + " modulation");

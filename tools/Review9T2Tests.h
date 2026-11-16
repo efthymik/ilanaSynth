@@ -62,7 +62,7 @@ void runReview9T2Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProc
     // S9-1, S9-2: the OSC page's tab for unison spread is UNISON; VOICE holds
     // voice mode, voices, bend range and glide as visible controls.
     {
-        editor.showPage ("OSC");
+        editor.showPage ("MAIN");
         settle (300);
         // (The approved OSC design has no tabs: STEREO, NOISE, SUB, STRINGS,
         // SOUNDBOARD and KEYS are the strip's one row and VOICE is in the dock
@@ -74,6 +74,18 @@ void runReview9T2Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProc
             tabs += visibleInTree (row) ? 1 : 0;
 
         {
+            // The dock's STEREO tag opens the pop-up with SPREAD, PHASE and DRIFT (the OSC tab's STEREO group).
+            std::vector<juce::Button*> stereoButtons;
+            findAll<juce::Button> (editor, stereoButtons);
+            juce::Button* stereoTag = nullptr;
+            for (auto* button : stereoButtons)
+                if (button->getButtonText() == "STEREO" && visibleInTree (button))
+                    stereoTag = button;
+            if (stereoTag != nullptr)
+            {
+                stereoTag->triggerClick();
+                settle (500);
+            }
             const auto knobFor = [&editor] (const char* id) -> KnobControl*
             {
                 std::vector<KnobControl*> knobs;
@@ -96,7 +108,12 @@ void runReview9T2Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProc
                 if (visibleInTree (toggle) && toggle->getWidth() > 0 && toggle->getButton().getTooltip().startsWith ("Glide Legato"))
                     legato = toggle;
             expect (tabs == 0 && knobFor ("voice_spread") != nullptr && knobFor ("drift") != nullptr && knobFor ("unison_random") != nullptr,
-                    "OSC's strip has no tabs: the spread, phase and drift sit in its STEREO group (S9-1, S9-2, S10-3, V14-9)");
+                    "PLAY has no tabs row of its own for the strip: the spread, phase and drift sit in the STEREO pop-up (S9-1, S9-2, S10-3, V14-9)");
+            if (stereoTag != nullptr)
+            {
+                stereoTag->triggerClick();
+                settle (800);
+            }
             expect (modeCombo != nullptr && knobFor ("poly_voices") != nullptr && knobFor ("bend_range") != nullptr
                         && knobFor ("glide") != nullptr && legato != nullptr,
                     "the VOICE group shows mode, voices, bend range, glide and legato glide without a menu");

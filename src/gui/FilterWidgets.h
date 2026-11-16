@@ -22,6 +22,10 @@ public:
         attachment.sendInitialUpdate();
     }
 
+    // For the UI tests, which find these by type: the bound parameter and the text drawn.
+    juce::String getParameterId() const { return parameter.getParameterID(); }
+    virtual juce::String getDisplayText() const { return {}; }
+
 protected:
     void setValue (int value)
     {
@@ -461,14 +465,6 @@ private:
     juce::Colour colour;
     juce::String undoName;
 };
-
-// The FILTER page's SIGNAL FLOW opens on hover or click; the UI tests and
-// snapshots hold it open with this.
-inline bool& filterFlowForcedOpen()
-{
-    static bool forced = false;
-    return forced;
-}
 
 // 12 / 24 dB switch.  Hidden by the page for types without a slope.
 class SlopeSwitch : public ParamBoundComponent
