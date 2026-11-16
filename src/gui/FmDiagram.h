@@ -720,6 +720,8 @@ private:
     // compactRadius the node's name takes the small font.
     static constexpr int minimumRadius = 16;
     static constexpr float maximumRadius = 36.0f, singleRowRadius = 58.0f, compactRadius = 20.0f, stackGap = 20.0f; // (grown: the canvas was three-quarters empty, UI review 28)
+    // A sounding node's halo reaches up to 10 px past its box; tags and feedback loops start from that edge plus a 6 px gap.
+    static constexpr float haloReach = 10.0f, haloGap = 6.0f;
     static constexpr float captionWidth = 58.0f, boxWidthScale = 1.25f, handleDisc = 34.0f;
 
     struct Geometry
@@ -924,7 +926,7 @@ private:
         for (const auto osc : shown)
         {
             left = juce::jmin (left, centres[(size_t) osc].x - radius * (read (routeId (osc, osc)) > 0.001f ? 2.1f : 1.1f));
-            right = juce::jmax (right, centres[(size_t) osc].x + radius + 6.0f + captionWidth);
+            right = juce::jmax (right, centres[(size_t) osc].x + boxHalfWidth (radius) + haloReach + haloGap + captionWidth);
         }
         // Too wide (six columns in a narrow box): the columns close up a
         // little, so the last caption is not cut off.
@@ -947,7 +949,7 @@ private:
                 for (const auto osc : shown)
                 {
                     left = juce::jmin (left, centres[(size_t) osc].x - radius * (read (routeId (osc, osc)) > 0.001f ? 2.1f : 1.1f));
-                    right = juce::jmax (right, centres[(size_t) osc].x + radius + 6.0f + captionWidth);
+                    right = juce::jmax (right, centres[(size_t) osc].x + boxHalfWidth (radius) + haloReach + haloGap + captionWidth);
                 }
             }
         }
@@ -1253,7 +1255,7 @@ private:
         const auto centre = centres[(size_t) osc];
         // Clear of the box by the route knob's disc that sits on the loop, not only the loop.
         const auto knobHalf = juce::jmax (size * 0.5f, handleDisc * 0.5f);
-        const auto sideX = boxHalfWidth (radius) + knobHalf + 4.0f, sideY = boxHalfHeight (radius) + knobHalf + 4.0f;
+        const auto sideX = boxHalfWidth (radius) + knobHalf + haloReach + haloGap, sideY = boxHalfHeight (radius) + knobHalf + haloReach + haloGap;
         const juce::Point<float> offsets[] { { -sideX, 0.0f }, { -sideX, -sideY * 0.6f }, { 0.0f, -sideY }, { -sideX, sideY * 0.6f },
                                             { -sideX - handleDisc - 4.0f, 0.0f } }; // (last: past a route knob beside a tight stack)
         const auto shown = shownOscillators();
@@ -1278,7 +1280,7 @@ private:
     juce::Rectangle<float> getCaptionBounds (int osc, const std::array<juce::Point<float>, OscillatorIds::count>& centres, float radius) const
     {
         const auto centre = centres[(size_t) osc];
-        return { centre.x + boxHalfWidth (radius) + 5.0f, centre.y - 13.0f, captionWidth, 26.0f };
+        return { centre.x + boxHalfWidth (radius) + haloReach + haloGap, centre.y - 13.0f, captionWidth, 26.0f };
     }
 
     // The noise operator's node: in a corner clear of the operators and

@@ -984,10 +984,11 @@ private:
         }
         inner.removeFromTop (4);
         addRouteButton.setBounds (inner.removeFromTop (26).withWidth (juce::jmin (inner.getWidth(), 130)));
-        inner.removeFromTop (routes.empty() ? 44 : 14);
+        // (Polish pass 6: FM MODE and EXTRAS stack right under the list, a 10 px gap each; OUTPUT takes what is left.)
+        inner.removeFromTop (routes.empty() ? 32 : 10);
 
-        mode.setBounds (inner.removeFromTop (44));
-        inner.removeFromTop (18);
+        mode.setBounds (inner.removeFromTop (38));
+        inner.removeFromTop (10);
 
         extrasTitle = inner.removeFromTop (titleHeight);
         auto extras = inner.removeFromTop (extrasRowHeight);
@@ -1022,7 +1023,7 @@ private:
 
         // The rest: the sound's wave and spectrum, live, so a route's depth shows as sidebands as it turns (no bare
         // foot under a short list).
-        inner.removeFromTop (14);
+        inner.removeFromTop (10);
         outputTitle = inner.removeFromTop (titleHeight);
         outputView.setVisible (inner.getHeight() >= 70);
         outputView.setBounds (inner.withTrimmedTop (4));
