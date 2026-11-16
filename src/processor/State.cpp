@@ -1,4 +1,5 @@
 #include "ProcessorInternal.h"
+#include "../ThreadChecks.h"
 #include "../BuildInfo.h"
 
 namespace
@@ -2114,6 +2115,7 @@ struct IlanaSynthAudioProcessor::PatchDataEdit : public juce::UndoableAction
 
 void IlanaSynthAudioProcessor::beginEdit (const juce::String& name)
 {
+    ILANA_ASSERT_MESSAGE_THREAD();
     if (pendingEditData.has_value()) // a gesture that never saw its mouse-up
         endEdit();
 
@@ -2126,6 +2128,7 @@ void IlanaSynthAudioProcessor::beginEdit (const juce::String& name)
 
 void IlanaSynthAudioProcessor::endEdit()
 {
+    ILANA_ASSERT_MESSAGE_THREAD();
     if (! pendingEditData.has_value())
         return;
 

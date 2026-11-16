@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include "ThreadChecks.h"
 #include "dsp/BuiltInTables.h"
 #include "dsp/MultiSample.h"
 #include "gui/SampleBrowserModel.h"
@@ -1120,6 +1121,8 @@ bool IlanaSynthAudioProcessor::isBusesLayoutSupported (const BusesLayout& layout
 
 void IlanaSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
+    ILANA_AUDIO_THREAD_SCOPE(); // debug and test builds only (src/ThreadChecks.h)
+
     // Flush-to-zero and denormals-are-zero from the first instruction of the
     // callback: hosts reset MXCSR between calls (see docs/ROUTING-CPU.md).
     juce::ScopedNoDenormals noDenormals;
