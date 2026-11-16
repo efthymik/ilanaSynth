@@ -211,7 +211,12 @@ public:
 
     void refresh()
     {
+        // The selection follows its preset, not its old place in the list (a
+        // save or import moves the others; DELETE named a neighbour).
+        const auto selectedName = juce::isPositiveAndBelow (selectedPreset, names.size()) ? names[selectedPreset] : juce::String();
         names = processorRef.getAllPresetNames();
+        if (selectedPreset >= 0)
+            selectedPreset = selectedName.isNotEmpty() ? names.indexOf (selectedName) : -1;
         macroTextCache.clear();
         infoCache.clear();
         categories = processorRef.getAllPresetCategories();

@@ -825,6 +825,10 @@ void IlanaSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
 // the pedal is still physically down: tell the synth again.
 void IlanaSynthAudioProcessor::restoreSustainPedal()
 {
+    // (The arp / Euclid NOTES keep the pedal from the synth: it would never
+    // hear the pedal come up.)
+    if (arpWasEnabled)
+        return;
     for (int channel = 0; channel < 16; ++channel)
         if (pedalChannelDown[(size_t) channel])
             synth.handleController (channel + 1, 64, 127);
