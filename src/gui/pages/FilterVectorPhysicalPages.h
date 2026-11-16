@@ -657,32 +657,19 @@ public:
         }
 
         auto corners = cornersBox.reduced (padding, 0).withTrimmedTop (boxHeaderHeight + 10).withTrimmedBottom (8);
-        // A row whose corners all name no oscillator ("OSC 4: none") keeps only its menus: its pictures would be
-        // empty boxes (UI review 27), so the other rows' pictures take the room.
+        // Every corner has the same cell (menu, picture, LEVEL and on switch), so the rows stay even. A corner with
+        // no oscillator ("OSC 4: none") shows a dimmed empty picture over the whole of its cell with "+ add OSC n".
         const auto missing = [this] (int corner)
         {
             const auto osc = processorRef.getVectorCorner (corner);
             return ! (osc >= 0 && osc < OscillatorIds::count && processorRef.isOscillatorShown (osc));
         };
-        constexpr int menuOnly = 46 + 4;
-        std::vector<bool> bare;
-        auto first = 0, fullRows = 0;
-        for (const auto inRow : rows)
-        {
-            auto all = true;
-            for (int c = first; c < first + inRow; ++c)
-                all = all && missing (c);
-            bare.push_back (all);
-            fullRows += all ? 0 : 1;
-            first += inRow;
-        }
-        const auto bareHeight = menuOnly * (int) std::count (bare.begin(), bare.end(), true);
-        const auto fullHeight = fullRows > 0 ? (corners.getHeight() - bareHeight) / fullRows : 0;
+        const auto rowHeight = rows.empty() ? 0 : corners.getHeight() / (int) rows.size();
 
-        first = 0;
+        auto first = 0;
         for (size_t r = 0; r < rows.size(); ++r)
         {
-            auto row = corners.removeFromTop (bare[r] ? menuOnly : (r + 1 == rows.size() ? corners.getHeight() : fullHeight));
+            auto row = corners.removeFromTop (r + 1 == rows.size() ? corners.getHeight() : rowHeight);
             const auto inRow = rows[r];
             const auto cellWidth = row.getWidth() / inRow;
             for (int i = 0; i < inRow; ++i)
@@ -697,19 +684,21 @@ public:
                 auto* level = cornerLevels[(size_t) (first + i)].get();
                 auto* power = cornerSwitches[(size_t) (first + i)].get();
                 const auto controlled = level != nullptr && power != nullptr && ! missing (first + i);
-                // (A corner with no oscillator beside one that has its controls keeps the same picture height, so the
-                // row's pictures line up.)
-                const auto halved = controlled || ! bare[r];
                 if (level != nullptr && power != nullptr)
                 {
                     level->setVisible (controlled);
                     power->setVisible (controlled);
                 }
+                if (! controlled)
+                {
+                    wave.setBounds (cell);
+                    wave.setVisible (cell.getHeight() > 20);
+                    continue;
+                }
                 // (Half the height; a tall cell keeps more picture rather than an empty band round the ring.)
-                const auto picture = halved ? cell.removeFromTop (juce::jmax (cell.getHeight() / 2, cell.getHeight() - 96)) : cell;
+                const auto picture = cell.removeFromTop (juce::jmax (cell.getHeight() / 2, cell.getHeight() - 96));
                 wave.setBounds (picture);
                 wave.setVisible (picture.getHeight() > 20);
-                if (controlled)
                 {
                     // The ring and the switch as one group in the middle of the band, the switch level with the
                     // ring's middle and its name on the ring's name line (as PATH in the row below).

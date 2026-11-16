@@ -2,6 +2,8 @@
 // contents stay in the same anonymous namespace.
 #pragma once
 
+#include <complex>
+
 namespace
 {
 // A small selector of two or three solid-fill pills (the slope, SUB's octave).
@@ -1099,16 +1101,54 @@ public:
     }
 };
 
-// NOISE: its spectrum's slope, low pitches on the left: white is flat, pink falls 3 dB an octave, brown 6,
-// blue and violet rise, grey dips in the middle like the ear's own curve.
+// NOISE: its spectrum, 20 Hz to 20 kHz across (ten octaves, log), drawn from the same filters the voice runs
+// (NoiseColours.h's generators at 48 kHz) and the COLOUR knob's one-pole low-pass (Voice.cpp's heard-noise colour:
+// a corner from 200 Hz to white, with its partial gain make-up). White is flat, pink falls about 3 dB an octave,
+// brown about 6 (flat under its 40 Hz leak), blue rises 6 and violet 12 (first and second difference), grey is the
+// ear's inverse curve. The shape always shows; LEVEL lifts the whole picture.
 class NoiseColourDisplay : public ParamPicture
 {
 public:
     explicit NoiseColourDisplay (IlanaSynthAudioProcessor& p)
         : ParamPicture (p, { "noise_type", "noise_on", "noise_level", "noise_color" },
-                        "The noise's spectrum, as high as its LEVEL: low pitches left, high right.\nDrag: across for COLOUR, up or down for LEVEL. Double-click resets them.")
+                        "The noise's spectrum: low pitches left, high right. TYPE sets its slope, COLOUR darkens the top.\nDrag: across for COLOUR, up or down for LEVEL. Double-click resets them.")
     {
         setDragParameters ("noise_color", "noise_level");
+        generator.prepare (sampleRateShown);
+    }
+
+    // The filter's gain at `hz` for noise type `type` (white is 1), as the voice's generator makes it.
+    double typeGainAt (int type, double hz) const
+    {
+        using C = std::complex<double>;
+        const auto w = juce::MathConstants<double>::twoPi * hz / sampleRateShown;
+        const C z1 = std::polar (1.0, -w); // z^-1
+        const auto pole = [&] (double a, double b) { return C (a) / (C (1.0) - b * z1); };
+        switch (type)
+        {
+            case NoiseColours::pink:
+            {
+                C sum = pole (0.0555179, 0.99886) + pole (0.0750759, 0.99332) + pole (0.1538520, 0.96900)
+                        + pole (0.3104856, 0.86650) + pole (0.5329522, 0.55000) + pole (-0.0168980, -0.7616)
+                        + 0.5362 + 0.115926 * z1;
+                return std::abs (sum) * generator.pinkTrim;
+            }
+            case NoiseColours::brown:
+            {
+                const auto leak = (double) generator.brownLeak;
+                const auto blocker = (double) generator.blockerCoeff;
+                return std::abs (pole ((double) generator.brownGain, leak) * (C (1.0) - z1) / (C (1.0) - blocker * z1));
+            }
+            case NoiseColours::blue:   return std::abs (C (1.0) - z1) * generator.blueTrim;
+            case NoiseColours::violet: return std::abs ((C (1.0) - z1) * (C (1.0) - z1)) * generator.violetTrim;
+            case NoiseColours::grey:
+            {
+                const auto low = pole ((double) generator.greyLowCoeff, 1.0 - generator.greyLowCoeff);
+                const auto high = pole ((double) generator.greyHighCoeff, 1.0 - generator.greyHighCoeff);
+                return std::abs (0.35 + 2.6 * low + 0.9 * (C (1.0) - high)) * generator.greyTrim;
+            }
+            default: return 1.0;
+        }
     }
 
     void paint (juce::Graphics& g) override
@@ -1116,19 +1156,36 @@ public:
         const auto bounds = getLocalBounds().toFloat();
         IlanaTheme::paintWell (g, bounds, 4.0f);
         const auto plot = bounds.reduced (4.0f, 2.0f);
-        const auto type = juce::jlimit (0, 5, juce::roundToInt (read ("noise_type")));
-        const auto level = juce::jlimit (0.0f, 1.0f, read ("noise_level"));
-        const std::array<double, 6> slope { 0.0, -3.0, -6.0, 3.0, 6.0, 0.0 };
+        const auto type = juce::jlimit (0, NoiseColours::count - 1, juce::roundToInt (read ("noise_type")));
+        const auto level = (double) juce::jlimit (0.0f, 1.0f, read ("noise_level"));
+        const auto colour01 = (double) juce::jlimit (0.0f, 1.0f, read ("noise_color"));
+
+        // COLOUR's low-pass as the voice builds it (untouched at 1).
+        auto colourCoeff = 1.0, colourGain = 1.0;
+        if (colour01 < 0.999)
+        {
+            const auto cutoff = juce::jmin (0.45 * sampleRateShown, 200.0 * std::pow (100.0, colour01));
+            colourCoeff = 1.0 - std::exp (-juce::MathConstants<double>::twoPi * cutoff / sampleRateShown);
+            colourGain = std::pow (colourCoeff / (2.0 - colourCoeff), -0.25);
+        }
+
+        constexpr auto lowHz = 20.0, highHz = 20000.0, floorDb = -54.0, topDb = 24.0;
+        // (LEVEL lifts the picture from 60 percent to its full height, so a quiet noise still shows its shape.)
+        const auto height = plot.getHeight() * (float) (0.6 + 0.4 * level);
         juce::Path path;
         const auto steps = juce::jmax (16, (int) plot.getWidth());
         for (int i = 0; i <= steps; ++i)
         {
-            const auto x = (double) i / (double) steps; // 0..1 across ten octaves
-            auto db = slope[(size_t) type] * (x - 0.5) * 10.0;
-            if (type == 5)
-                db = 9.0 * (std::cos (juce::MathConstants<double>::twoPi * x * 0.9 + 0.2) * 0.5 - 0.1);
-            // (UI review 31, 29: the spectrum stands as high as LEVEL, so LEVEL 0 reads as silence.)
-            const auto y = plot.getBottom() - level * (0.55f + 0.45f * (float) juce::jlimit (-1.0, 1.0, db / 15.0)) * plot.getHeight();
+            const auto x = (double) i / (double) steps;
+            const auto hz = lowHz * std::pow (highHz / lowHz, x);
+            auto gain = typeGainAt (type, hz);
+            if (colour01 < 0.999)
+            {
+                const auto w = juce::MathConstants<double>::twoPi * hz / sampleRateShown;
+                gain *= colourCoeff / std::abs (std::complex<double> (1.0) - (1.0 - colourCoeff) * std::polar (1.0, -w)) * colourGain;
+            }
+            const auto db = juce::jlimit (floorDb, topDb, 20.0 * std::log10 (juce::jmax (1.0e-6, gain)));
+            const auto y = plot.getBottom() - (float) ((db - floorDb) / (topDb - floorDb)) * height;
             const auto point = juce::Point<float> (plot.getX() + (float) x * plot.getWidth(), y);
             if (i == 0)
                 path.startNewSubPath (point);
@@ -1139,6 +1196,10 @@ public:
         IlanaTrace::paintArea (g, path, colour, plot.getBottom(), plot.getX(), plot.getRight());
         IlanaTrace::paintTrace (g, path, colour);
     }
+
+private:
+    static constexpr double sampleRateShown = 48000.0;
+    NoiseColours::Generator generator;
 };
 
 // BOARD: the soundboard's modes as bars across the pitch range (70 Hz to 3.6 kHz), each as tall as it
