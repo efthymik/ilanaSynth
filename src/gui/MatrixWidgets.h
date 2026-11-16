@@ -694,7 +694,7 @@ public:
         viaButton.setTooltip ("Via (aux)\nScale this routing by a second source (the mod wheel fading an LFO in, say).");
         viaButton.onClick = [this]
         {
-            via.getRootMenu()->showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&viaButton),
+            via.getRootMenu()->showMenuAsync (IlanaTheme::menuOptions (&viaButton),
                                               [safeThis = juce::Component::SafePointer<MatrixRow> (this)] (int result)
                                               {
                                                   if (safeThis != nullptr && result > 0)
@@ -974,7 +974,7 @@ public:
         menu.addItem (4, "Polarity: auto (the source's range)", true, current == 0);
         menu.addSeparator();
         menu.addItem (5, "Type an amount...");
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&amount),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&amount),
                             [safe = juce::Component::SafePointer<MatrixRow> (this)] (int result)
                             {
                                 if (safe == nullptr || result == 0)

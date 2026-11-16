@@ -1,4 +1,5 @@
 #include "ProcessorInternal.h"
+#include "../ThreadChecks.h"
 #include "../dsp/VectorShape.h"
 
 void IlanaSynthAudioProcessor::setLfoCustomPoint (int lfoIndex, int step, float value)
@@ -336,6 +337,7 @@ juce::String IlanaSynthAudioProcessor::getModSlotParamId (int slotIndex, const j
 
 void IlanaSynthAudioProcessor::setModSlotValue (int slotIndex, const juce::String& field, float value)
 {
+    ILANA_ASSERT_NOT_AUDIO();
     if (auto* parameter = apvts.getParameter (getModSlotParamId (slotIndex, field)))
         parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
 }

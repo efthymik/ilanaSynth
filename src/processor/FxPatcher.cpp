@@ -1,4 +1,5 @@
 #include "ProcessorInternal.h"
+#include "../ThreadChecks.h"
 
 // Roadmap step 17: effect instances and the FX patcher (FxPatch.h for the
 // data, FxEngine.h for an instance's engine, docs/ROUTING-CPU.md for the
@@ -623,6 +624,7 @@ PatchGraph::Graph IlanaSynthAudioProcessor::getFxPatchGraph() const
 
 void IlanaSynthAudioProcessor::setFxPatchGraph (const PatchGraph::Graph& graph)
 {
+    ILANA_ASSERT_NOT_AUDIO();
     const juce::ScopedLock edit (fxEditLock);
     auto patch = getFxPatch();
     auto next = graph;
@@ -666,6 +668,7 @@ bool IlanaSynthAudioProcessor::isFxSlotInFront (int slotIndex) const
 
 int IlanaSynthAudioProcessor::addFxEffect (int type)
 {
+    ILANA_ASSERT_NOT_AUDIO();
     const juce::ScopedLock edit (fxEditLock);
     if (type <= 0 || type > numFxTypes)
         return -1;

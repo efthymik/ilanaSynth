@@ -1,6 +1,6 @@
 # Review plan: state and what's next
 
-Updated 2026-09-30, at the move from the Windows PC to cloud sessions.
+Updated 2026-11-16 (the standing decisions below are unchanged since 2026-09-30, the move from the Windows PC to cloud sessions). Live state and open issues: [HANDOFF.md](../HANDOFF.md); what is left before RC 1.0: [RC-1.0-CHECKLIST.md](RC-1.0-CHECKLIST.md).
 Review: claude.ai/artifact/LAbrHT1KnLVEiv8Yd3SjHS. Projected "potential" review
 (what the synth should be once this plan ships): claude.ai/artifact/XecerytfKfBKdepvZLxKZt.
 
@@ -22,6 +22,6 @@ Review: claude.ai/artifact/LAbrHT1KnLVEiv8Yd3SjHS. Projected "potential" review
 ## Next
 All steps 1-51 of the old "Next, in order" list are done; the full record is in [REVIEW-PLAN-HISTORY.md](REVIEW-PLAN-HISTORY.md) (Done table, gate state, content, steps). Live state and open issues: [HANDOFF.md](../HANDOFF.md). Exit criteria for RC 1.0: [RC-1.0-CHECKLIST.md](RC-1.0-CHECKLIST.md).
 Still open (details in the history, step numbers as there):
-- Step 45 Granular controls (grain position vs sample start, scan speed, freeze, stereo spread destination): in progress in its own thread.
+- Step 45 Granular controls: built 2026-10-14 (see [HANDOFF-HISTORY.md](HANDOFF-HISTORY.md), "Granular controls, roadmap step 45"); the step table in the history file still says in progress.
 - Physical modelling overhaul: Phase 1 (audible knobs) built 2026-10-19; Phase 2 (fit to real recordings, her blind A/B votes) and Phase 3 (missing real-instrument behaviour) wait for her answers to the plan's four questions.
 - Listening rounds by ilana are tracked in ROADMAP.md.

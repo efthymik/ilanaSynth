@@ -675,7 +675,7 @@ private:
         menu.addItem ((int) RowAction::remove, "Remove");
         menuOpen = true;
         const auto slot = rows[(size_t) row].slot;
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (getRowBounds (row))),
+        menu.showMenuAsync (IlanaTheme::menuOptions (this).withTargetScreenArea (localAreaToGlobal (getRowBounds (row))),
                             [safeThis = juce::Component::SafePointer<ModHoverPopup> (this), slot] (int result)
                             {
                                 if (safeThis == nullptr)
