@@ -70,15 +70,20 @@ inline void searchAndRelink (IlanaSynthAudioProcessor& processor, Owner owner, c
 {
     auto found = std::make_shared<std::vector<std::pair<int, juce::File>>>();
     auto* job = new Job ("Searching " + folder.getFileName(),
-                         [&processor, folder, recursive, found] (Job& self)
+                         [&processor, life = processor.getLifetime(), folder, recursive, found] (Job& self)
                          {
+                             const auto alive = life.lock(); // (the processor's destructor waits for this)
+                             if (alive == nullptr)
+                                 return;
                              self.setStatusMessage ("Looking for the missing samples...");
                              self.setProgress (-1.0);
-                             *found = processor.findMissingSampleFiles (folder, recursive, [&self] { return self.threadShouldExit(); });
+                             *found = processor.findMissingSampleFiles (folder, recursive, [&self, &processor]
+                                                                        { return self.threadShouldExit() || processor.isShuttingDown(); });
                          },
-                         [&processor, owner, folder, found] (bool cancelled)
+                         [&processor, life = processor.getLifetime(), owner, folder, found] (bool cancelled)
                          {
-                             if (cancelled)
+                             const auto alive = life.lock();
+                             if (cancelled || alive == nullptr)
                                  return;
                              auto relinked = 0;
                              for (const auto& [osc, file] : *found)
@@ -166,13 +171,16 @@ inline void collect (IlanaSynthAudioProcessor& processor, Owner owner)
                                     return;
                                 auto result = std::make_shared<IlanaSynthAudioProcessor::CollectResult>();
                                 auto* job = new Job ("Collecting samples",
-                                                     [&processor, folder, result] (Job& self)
+                                                     [&processor, life = processor.getLifetime(), folder, result] (Job& self)
                                                      {
+                                                         const auto alive = life.lock(); // (the processor's destructor waits for this)
+                                                         if (alive == nullptr)
+                                                             return;
                                                          self.setStatusMessage ("Copying into " + folder.getFileName() + "...");
-                                                         *result = processor.collectSamples (folder, [&self] (float done)
+                                                         *result = processor.collectSamples (folder, [&self, &processor] (float done)
                                                                                              {
                                                                                                  self.setProgress ((double) done);
-                                                                                                 return ! self.threadShouldExit();
+                                                                                                 return ! self.threadShouldExit() && ! processor.isShuttingDown();
                                                                                              });
                                                      },
                                                      [result, folder, owner] (bool)

@@ -18,6 +18,7 @@ juce::AudioProcessorEditor* IlanaSynthAudioProcessor::createEditor()
 #endif
 
 #include "processor/ProcessorInternal.h"
+#include "SafeXml.h"
 
 #if defined(_M_X64) || defined(__x86_64__) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2) || defined(__SSE2__)
  #include <emmintrin.h>
@@ -819,7 +820,10 @@ void IlanaSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
         freeRetiredFx (true);
     }
     chunkMidi.ensureSize (65536);
+    pendingMidi.ensureSize (4096);
+    hasPendingMidi = false;
     updateLatency();
+    prepared.store (true, std::memory_order_release);
 }
 
 // A reset forgets the sustain pedal (the synth's allNotesOff clears it), but
@@ -1137,9 +1141,43 @@ void IlanaSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     const juce::ScopedTryLock callbackLock (getCallbackLock());
     if (! callbackLock.isLocked())
     {
+        // Silence for this block, but its note-offs, all-notes-off and
+        // sustain messages are kept for the next one (a lost note-off left
+        // the key stuck). Notes-on are dropped with the block.
+        buffer.clear();
+        for (const auto metadata : midiMessages)
+        {
+            const auto message = metadata.getMessage();
+            if (message.isNoteOff() || message.isAllNotesOff() || message.isAllSoundOff()
+                || (message.isController() && message.getControllerNumber() == 64))
+            {
+                if (pendingMidi.getNumEvents() < 1024)
+                {
+                    pendingMidi.addEvent (message, 0);
+                    hasPendingMidi = true;
+                }
+            }
+        }
+        midiMessages.clear();
+        return;
+    }
+
+    // (The FX build writes the live input into buffers that prepareToPlay
+    // sizes: a block before it is silence.)
+    if (isEffectBuild && ! prepared.load (std::memory_order_acquire))
+    {
         buffer.clear();
         midiMessages.clear();
         return;
+    }
+
+    // The control messages kept from a dropped block come first in this one.
+    if (hasPendingMidi)
+    {
+        hasPendingMidi = false;
+        pendingMidi.addEvents (midiMessages, 0, -1, 0);
+        midiMessages.swapWith (pendingMidi);
+        pendingMidi.clear();
     }
 
     if (hostWorkgroupPending)
@@ -1162,10 +1200,21 @@ void IlanaSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
         juce::AudioBuffer<float> chunk (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), start, length);
         chunkMidi.clear();
         chunkMidi.addEvents (midiMessages, start, length, -start);
+        chunkOffsetSamples = start;
         processChunk (chunk, chunkMidi);
     }
 
+    chunkOffsetSamples = 0;
     mixSamplePreview (buffer);
+}
+
+void IlanaSynthAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+{
+    // The next processed block lets the notes go (their note-offs are lost
+    // here). The audio is the host's bypass as JUCE does it: the input passes
+    // through, an instrument is silent.
+    bypassCut.store (true, std::memory_order_release);
+    juce::AudioProcessor::processBlockBypassed (buffer, midiMessages);
 }
 
 // Called by the host on its audio thread (an AU's render context). The
@@ -1325,8 +1374,13 @@ void IlanaSynthAudioProcessor::prepareLiveInput (int numSamples, int factor, juc
 
     for (int i = 0; i < numSamples; ++i)
     {
-        const auto l = i < valid ? left[i] * gain : 0.0f;
-        const auto r = i < valid ? right[i] * gain : 0.0f;
+        auto l = i < valid ? left[i] * gain : 0.0f;
+        auto r = i < valid ? right[i] * gain : 0.0f;
+        // (One NaN / Inf from upstream must not latch the follower or the history.)
+        if (! std::isfinite (l)) l = 0.0f;
+        if (! std::isfinite (r)) r = 0.0f;
+        if (! std::isfinite (liveEnvState)) liveEnvState = 0.0f;
+        if (! std::isfinite (liveLast)) liveLast = 0.0f;
         const auto x = 0.5f * (l + r);
         const auto magnitude = std::abs (x);
         liveEnvState = magnitude > liveEnvState ? attack * liveEnvState + (1.0f - attack) * magnitude
@@ -1432,6 +1486,26 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
 
     if (patchCut.exchange (false))
         cutPatchTails();
+
+    // A bypass or reset happened since the last block: the key and pedal
+    // events of that time were never seen, so nothing may stay held.
+    if (bypassCut.exchange (false))
+    {
+        synth.allNotesOff (0, false);
+        numHeldKeys = 0;
+        numResumeKeys.store (0, std::memory_order_release);
+        pedalChannelDown.fill (false);
+        keysPedalDown = false;
+        pedalHeldNotes.fill (false);
+        msegKeyDown.fill (false);
+        msegKeysDown = 0;
+        arpHeldNotes.clearQuick();
+        clipHeld.clearQuick();
+        clipActive.clear();
+        clipRunning = clipUsedHost = false;
+        noteSpray.reset();
+        clearPostVoiceMemory();
+    }
 
     // REPEATABLE RANDOM: the transport starting re-seeds (off: nothing changes).
     {
@@ -2574,7 +2648,7 @@ void IlanaSynthAudioProcessor::copyScopeDataSmooth (float* left, float* right, i
     const juce::SpinLock::ScopedLockType lock (scopeLock);
     const auto block = scopeBlockSamples.load();
     const auto sinceBlockMs = juce::Time::getMillisecondCounterHiRes() - scopeBlockMs.load();
-    const auto advanced = (int) juce::jlimit (0.0, (double) block, sinceBlockMs * 0.001 * currentSampleRate);
+    const auto advanced = (int) juce::jlimit (0.0, (double) block, sinceBlockMs * 0.001 * displaySampleRate.load());
     const auto lag = juce::jlimit (0, scopeSize - numSamples, block - advanced);
     auto start = ((scopeWritePos.load() - lag - numSamples) % scopeSize + scopeSize) % scopeSize;
 
@@ -2791,7 +2865,7 @@ bool IlanaSynthAudioProcessor::loadUserSample (int oscIndex, const juce::File& f
     juce::ValueTree options;
     if (fromUser)
         setSampleOptions (oscIndex, {});
-    else if (const auto xml = juce::parseXML (getSampleOptions (oscIndex)))
+    else if (const auto xml = SafeXml::parse (getSampleOptions (oscIndex)))
         if (const auto tree = juce::ValueTree::fromXml (*xml); tree.isValid() && tree.getProperty ("path").toString() == file.getFullPathName())
             options = tree;
 
@@ -2854,8 +2928,11 @@ SampleSlicer::Settings IlanaSynthAudioProcessor::getSampleSlices (int oscIndex) 
 {
     if (oscIndex < 0 || oscIndex >= numSampleOscs || (int) getRawParam (sampleFactoryIds[(size_t) oscIndex]) > 0)
         return {};
-    const juce::SpinLock::ScopedLockType lock (sampleLock);
-    const auto& current = sampleSlots[(size_t) oscIndex];
+    std::shared_ptr<SampleData> current;
+    {
+        const juce::SpinLock::ScopedLockType lock (sampleLock);
+        current = sampleSlots[(size_t) oscIndex];
+    }
     return current != nullptr ? SampleSlicer::settingsOf (*current) : SampleSlicer::Settings {};
 }
 
@@ -2887,7 +2964,7 @@ bool IlanaSynthAudioProcessor::setSampleSlices (int oscIndex, const SampleSlicer
         // Saved with the file's options: how it is cut. Edits to the old
         // slices (the zone map) don't carry over to new ones.
         juce::ValueTree options ("SampleOptions");
-        if (const auto xml = juce::parseXML (getSampleOptions (oscIndex)))
+        if (const auto xml = SafeXml::parse (getSampleOptions (oscIndex)))
             if (const auto old = juce::ValueTree::fromXml (*xml); old.isValid() && old.getProperty ("path").toString() == path)
                 options = old.createCopy();
         options.setProperty ("path", path, nullptr);
@@ -2910,7 +2987,7 @@ bool IlanaSynthAudioProcessor::setSampleSlices (int oscIndex, const SampleSlicer
 
 std::pair<int, int> IlanaSynthAudioProcessor::getSoundFontPreset (int oscIndex) const
 {
-    if (const auto xml = juce::parseXML (getSampleOptions (oscIndex)))
+    if (const auto xml = SafeXml::parse (getSampleOptions (oscIndex)))
         if (const auto tree = juce::ValueTree::fromXml (*xml); tree.isValid() && tree.getProperty ("path").toString() == getSamplePath (oscIndex))
             return { (int) tree.getProperty ("bank", -1), (int) tree.getProperty ("program", -1) };
     return { -1, -1 };
@@ -2953,7 +3030,7 @@ void IlanaSynthAudioProcessor::setSampleOptions (int oscIndex, const juce::Strin
 
 void IlanaSynthAudioProcessor::retargetSampleOptions (int oscIndex, const juce::String& newPath)
 {
-    if (const auto xml = juce::parseXML (getSampleOptions (oscIndex)))
+    if (const auto xml = SafeXml::parse (getSampleOptions (oscIndex)))
         if (auto tree = juce::ValueTree::fromXml (*xml); tree.isValid())
         {
             tree.setProperty ("path", newPath, nullptr);
@@ -3078,7 +3155,7 @@ bool IlanaSynthAudioProcessor::setSampleZones (int oscIndex, std::vector<SampleZ
         // Saved as edits to the file: which of its zones (or which added
         // file) each one plays, with its keys, velocities, root and level.
         juce::ValueTree options ("SampleOptions");
-        if (const auto xml = juce::parseXML (getSampleOptions (oscIndex)))
+        if (const auto xml = SafeXml::parse (getSampleOptions (oscIndex)))
             if (const auto old = juce::ValueTree::fromXml (*xml); old.isValid() && old.getProperty ("path").toString() == path)
                 options = old.createCopy();
         options.setProperty ("path", path, nullptr);

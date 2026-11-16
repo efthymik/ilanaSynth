@@ -7,6 +7,7 @@
 
 #include "Formula.h"
 #include "TableFactory.h"
+#include "../SafeXml.h"
 
 namespace
 {
@@ -434,8 +435,13 @@ bool WavetableDoc::decodeFrames (const juce::String& text, std::vector<std::vect
         return false;
     juce::MemoryInputStream source (compressed, false);
     juce::GZIPDecompressorInputStream zip (source);
+    // Read no more than the largest real table (count, peak, 16-bit frames):
+    // a small gzip of zeros in a hostile preset expanded to gigabytes here.
+    const auto limit = (juce::int64) 8 + (juce::int64) maxFrames * frameSize * 2;
     juce::MemoryBlock raw;
-    zip.readIntoMemoryBlock (raw);
+    zip.readIntoMemoryBlock (raw, (int) limit);
+    if (char extra = 0; zip.read (&extra, 1) > 0)
+        return false;
     juce::MemoryInputStream in (raw, false);
     const auto count = in.readInt();
     const auto peak = in.readFloat();
@@ -577,7 +583,15 @@ juce::File WavetableDoc::getLibraryFolder()
 
 juce::File WavetableDoc::getLibraryFile (const juce::String& fileName)
 {
-    const auto safeName = juce::File::createLegalFileName (fileName.isNotEmpty() ? fileName : juce::String ("Wavetable"));
+    auto safeName = juce::File::createLegalFileName (fileName).trim().trimCharactersAtEnd (". ");
+    if (safeName.isEmpty())
+        safeName = "Wavetable";
+    // Windows keeps CON, PRN, AUX, NUL, COM1-9 and LPT1-9 for devices, with any
+    // extension (as PresetFiles::legalName does for presets).
+    const auto stem = safeName.upToFirstOccurrenceOf (".", false, false).trimEnd().toUpperCase();
+    if (stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL"
+        || ((stem.startsWith ("COM") || stem.startsWith ("LPT")) && stem.length() == 4 && stem[3] >= '1' && stem[3] <= '9'))
+        safeName = "_" + safeName;
     return getLibraryFolder().getChildFile (safeName + ".wav");
 }
 
@@ -620,7 +634,7 @@ bool WavetableDoc::loadFromFile (const juce::File& file, WavetableDoc& doc, Wave
     // A library table's sidecar makes it editable again.
     const auto sidecar = file.withFileExtension ("ilwt");
     if (sidecar.existsAsFile())
-        if (auto xml = juce::XmlDocument::parse (sidecar))
+        if (auto xml = SafeXml::parse (sidecar))
         {
             auto attempt = doc;
             if (attempt.applyRecipeTree (juce::ValueTree::fromXml (*xml)))

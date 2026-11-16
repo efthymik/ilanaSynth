@@ -157,11 +157,27 @@ inline std::shared_ptr<SampleData> loadSfz (const juce::File& file, juce::String
 
     // Strip comments, then walk headers and opcodes. Values may contain
     // spaces (sample paths): a value runs to the next "name=" or header.
-    auto uncommented = text;
-    for (auto open = uncommented.indexOf ("/*"); open >= 0; open = uncommented.indexOf ("/*"))
+    // One forward pass over the bytes (rebuilding the text per comment was O(n^2)).
+    juce::String uncommented;
     {
-        const auto close = uncommented.indexOf (open + 2, "*/");
-        uncommented = uncommented.substring (0, open) + (close < 0 ? juce::String() : uncommented.substring (close + 2));
+        const auto raw = text.toStdString();
+        std::string kept;
+        kept.reserve (raw.size());
+        for (size_t from = 0;;)
+        {
+            const auto open = raw.find ("/*", from);
+            if (open == std::string::npos)
+            {
+                kept.append (raw, from, std::string::npos);
+                break;
+            }
+            kept.append (raw, from, open - from);
+            const auto close = raw.find ("*/", open + 2);
+            if (close == std::string::npos)
+                break;
+            from = close + 2;
+        }
+        uncommented = juce::String::fromUTF8 (kept.data(), (int) kept.size());
     }
     juce::String clean;
     for (auto line : juce::StringArray::fromLines (uncommented))
@@ -233,6 +249,15 @@ inline std::shared_ptr<SampleData> loadSfz (const juce::File& file, juce::String
         {
             if (trimEnd - trimStart <= 1)
                 return;
+            // Each trimmed region is a copy of its own: it counts against the
+            // same budget (200 regions trimming one long file asked for GBs).
+            const auto trimBytes = (juce::int64) (trimEnd - trimStart) * zone.data->getNumChannels() * (juce::int64) sizeof (float);
+            if (totalBytes + trimBytes > maxBytes)
+            {
+                overBudget = true;
+                return;
+            }
+            totalBytes += trimBytes;
             auto trimmed = std::make_shared<SampleData>();
             trimmed->sampleRate = zone.data->sampleRate;
             trimmed->name = zone.data->name;
@@ -531,6 +556,10 @@ inline std::shared_ptr<SampleData> loadSf2 (const juce::File& file, juce::String
     const auto numSampleHeaders = (int) (shdr.size / 46) - 1;
     const auto numFrames = smplSize / 2;
     std::map<std::tuple<int, int, int>, std::shared_ptr<SampleData>> audio; // by sample header and range
+    // All zones' audio together (a real bank stays far below): zones whose
+    // ranges differ by a frame each get a full copy.
+    constexpr juce::int64 maxAudioBytes = (juce::int64) 4 * 1024 * 1024 * 1024; // above any real bank
+    juce::int64 audioBytes = 0;
 
     const auto readSample = [&] (int header, int start, int end) -> std::shared_ptr<SampleData>
     {
@@ -547,6 +576,12 @@ inline std::shared_ptr<SampleData> loadSf2 (const juce::File& file, juce::String
             const auto link = (int) u16 (h + 42);
             const auto stereo = (type & 4) != 0 && link < numSampleHeaders;
             const auto partnerStart = stereo ? (int) u32 (shdr.data + link * 46 + 20) : 0;
+            audioBytes += (juce::int64) length * (stereo ? 2 : 1) * (juce::int64) sizeof (float);
+            if (audioBytes > maxAudioBytes)
+            {
+                audio[key] = nullptr;
+                return nullptr;
+            }
             data = std::make_shared<SampleData>();
             data->sampleRate = juce::jmax (1000.0, (double) u32 (h + 36));
             data->name = juce::String (h, 20).trim();

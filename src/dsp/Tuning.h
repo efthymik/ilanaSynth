@@ -76,7 +76,7 @@ public:
             return fail (error, "no note count after the description");
 
         const auto countToken = firstToken (lines[1]);
-        if (! isUnsigned (countToken))
+        if (! isSmallUnsigned (countToken))
             return fail (error, "the note count '" + countToken + "' is not a whole number");
 
         const auto count = countToken.getIntValue();
@@ -115,7 +115,7 @@ public:
         for (int i = 0; i < 5; ++i)
         {
             const auto token = firstToken (lines[i]);
-            if (! isUnsigned (token))
+            if (! isSmallUnsigned (token))
                 return fail (error, "line " + juce::String (i + 1) + " ('" + token + "') is not a whole number");
             header[i] = token.getIntValue();
         }
@@ -140,7 +140,7 @@ public:
         out.referenceFrequency = frequencyToken.getDoubleValue();
 
         const auto octaveToken = firstToken (lines[6]);
-        if (! isUnsigned (octaveToken))
+        if (! isSmallUnsigned (octaveToken))
             return fail (error, "the octave degree '" + octaveToken + "' is not a whole number");
         out.octaveDegree = octaveToken.getIntValue();
 
@@ -151,7 +151,7 @@ public:
             const auto token = firstToken (lines[7 + i]);
             if (token.equalsIgnoreCase ("x"))
                 continue;
-            if (! isUnsigned (token))
+            if (! isSmallUnsigned (token))
                 return fail (error, "mapping entry " + juce::String (i + 1) + " ('" + token + "') is neither a degree nor x");
             out.mapping[(size_t) i] = token.getIntValue();
         }
@@ -205,7 +205,7 @@ public:
         {
             double cents = 0.0;
             const auto inRange = note >= map.firstNote && note <= map.lastNote;
-            result.mapped[(size_t) note] = inRange && centsOf (note, cents);
+            result.mapped[(size_t) note] = inRange && centsOf (note, cents) && std::isfinite (cents - referenceCents);
             result.frequencies[(size_t) note] = result.mapped[(size_t) note]
                 ? juce::jlimit (1.0, 30000.0, map.referenceFrequency * std::exp2 ((cents - referenceCents) / 1200.0))
                 : 0.0;
@@ -250,6 +250,14 @@ private:
     static bool isUnsigned (const juce::String& token)
     {
         return token.isNotEmpty() && token.containsOnly ("0123456789");
+    }
+
+    // A whole number that fits an int with room for the degree arithmetic
+    // (getIntValue wraps: "2147483648" read as negative and passed the range
+    // checks, then the map size asked for 2^64 entries and threw).
+    static bool isSmallUnsigned (const juce::String& token)
+    {
+        return isUnsigned (token) && token.length() <= 6;
     }
 
     static bool isDecimal (const juce::String& token)

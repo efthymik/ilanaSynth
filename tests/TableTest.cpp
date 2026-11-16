@@ -17,6 +17,10 @@
 #include "dsp/FilterUnit.h"
 #include "dsp/FmAlgorithms.h"
 #include "dsp/Formula.h"
+#include "SafeXml.h"
+#include "ClipState.h"
+#include "dsp/Tuning.h"
+#include "dsp/MultiSample.h"
 #include "dsp/GranularSmear.h"
 #include "dsp/LfoCurve.h"
 #include "dsp/LfoShape.h"
@@ -102,6 +106,8 @@ void timedRun (const char* name, Suite&& suite)
 #include "BuiltInTableTests.inc"
 #include "ParamInfoTests.inc"
 #include "HostIntegrationTests.inc"
+#include "HostHardeningTests.inc"
+#include "HardeningTests.inc"
 #include "DemoRender.inc"
 #include "OldStateTests.inc"
 
@@ -347,9 +353,17 @@ int main()
         return failures == 0 ? 0 : 1;
     }
 
+    if (juce::SystemStats::getEnvironmentVariable ("ILANA_HARDENING_TEST", "").isNotEmpty())
+    {
+        runHardeningTests();
+        std::cout << (failures == 0 ? "HARDENING TESTS PASSED" : "HARDENING TESTS FAILED") << " (" << failures << " failures)" << std::endl;
+        return failures == 0 ? 0 : 1;
+    }
+
     if (juce::SystemStats::getEnvironmentVariable ("ILANA_HOST_TEST", "").isNotEmpty())
     {
         runHostIntegrationTests();
+        runHostHardeningTests();
         std::cout << (failures == 0 ? "HOST TESTS PASSED" : "HOST TESTS FAILED") << " (" << failures << " failures)" << std::endl;
         return failures == 0 ? 0 : 1;
     }
@@ -890,6 +904,8 @@ int main()
     timedRun ("runGranularControlTests", [] { runGranularControlTests(); });
     timedRun ("runParamInfoTests", [] { runParamInfoTests(); });
     timedRun ("runHostIntegrationTests", [] { runHostIntegrationTests(); });
+    timedRun ("runHostHardeningTests", [] { runHostHardeningTests(); });
+    timedRun ("runHardeningTests", [] { runHardeningTests(); });
     timedRun ("runAirwindowsFilterTests", [] { runAirwindowsFilterTests(); });
 
     // Thread-ownership checks (src/ThreadChecks.h): the audio-thread flag is

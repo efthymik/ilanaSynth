@@ -690,7 +690,17 @@ void IlanaSynthAudioProcessor::renderLfos (int numSamples, const juce::MidiBuffe
             hostPlaying = position->getIsPlaying() && ppqGood;
 
             if (ppqGood)
-                hostPpq = *ppq;
+            {
+                // A block longer than prepareToPlay announced is processed in
+                // chunks (processBlock) while the playhead still reads the start
+                // of the whole block: a later chunk adds its own offset.
+                // (0 for a block that fits: the value is untouched.)
+                if (chunkOffsetSamples > 0)
+                    hostPpq = *ppq + (double) chunkOffsetSamples / juce::jmax (1.0, baseSampleRate)
+                                         * (currentBpm.load() / 60.0);
+                else
+                    hostPpq = *ppq;
+            }
         }
     }
 

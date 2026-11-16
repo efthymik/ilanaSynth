@@ -1,6 +1,7 @@
 #include "ProcessorInternal.h"
 #include "Migrations.h"
 #include "../SamplePaths.h"
+#include "../SafeXml.h"
 
 #include <cstring>
 #include <map>
@@ -173,7 +174,7 @@ const IlanaSynthAudioProcessor::UserPresetMeta& IlanaSynthAudioProcessor::getUse
         // in the 8 KB that JUCE's outer-element-only read takes (the drawn
         // LFOs alone are longer), so the whole file is parsed (once per
         // change: the cache is keyed by the modification time).
-        if (auto xml = juce::XmlDocument::parse (file); xml != nullptr && xml->hasTagName (apvts.state.getType().toString()))
+        if (auto xml = SafeXml::parse (file); xml != nullptr && xml->hasTagName (apvts.state.getType().toString()))
         {
             const auto category = xml->getStringAttribute ("presetCategory").trim();
 
@@ -1136,7 +1137,7 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
     // One of ilana's own presets: her file's state, loaded as the file loads.
     if (const auto* saved = presets[(size_t) index].savedState)
     {
-        if (const auto xml = juce::parseXML (juce::String::fromUTF8 (saved)))
+        if (const auto xml = SafeXml::parse (juce::String::fromUTF8 (saved)))
         {
             applyFullState (juce::ValueTree::fromXml (*xml));
             loadedPresetFile = juce::File();
@@ -1463,7 +1464,7 @@ bool IlanaSynthAudioProcessor::savePresetToFile (const juce::File& file)
 bool IlanaSynthAudioProcessor::loadPresetFromFile (const juce::File& file)
 {
     ++dataEpoch; // what the editor draws changes
-    std::unique_ptr<juce::XmlElement> xml (juce::XmlDocument::parse (file));
+    std::unique_ptr<juce::XmlElement> xml (SafeXml::parse (file));
 
     if (xml == nullptr || ! xml->hasTagName (apvts.state.getType()))
         return false;

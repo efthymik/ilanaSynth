@@ -8,6 +8,16 @@
 
 IlanaSynthAudioProcessor::~IlanaSynthAudioProcessor()
 {
+    // Background jobs and delayed callbacks of the editor hold a weak
+    // lifetime token: cancel them and wait for the ones that are using us.
+    {
+        shuttingDown.store (true, std::memory_order_release);
+        std::weak_ptr<void> weak = lifetime;
+        lifetime.reset();
+        for (int waited = 0; ! weak.expired() && waited < 30000; ++waited)
+            juce::Thread::sleep (1);
+    }
+
     for (auto* parameter : getParameters())
     {
         parameter->removeListener (&paramEpochListener);
@@ -521,11 +531,12 @@ std::shared_ptr<SampleData> IlanaSynthAudioProcessor::decodeSample (const juce::
                 if (zone.origin >= 0)
                     slices.push_back (&zone);
             std::sort (slices.begin(), slices.end(), [] (const SampleZone* a, const SampleZone* b) { return a->origin < b->origin; });
-            auto length = 0;
+            juce::int64 total = 0; // 64-bit: 256 long zones summed past INT_MAX
             auto channels = 1;
             for (const auto* zone : slices)
-                length += zone->data->getNumSamples(), channels = juce::jmax (channels, zone->data->getNumChannels());
-            if (! slices.empty() && length > 1)
+                total += zone->data->getNumSamples(), channels = juce::jmax (channels, zone->data->getNumChannels());
+            const auto length = (int) juce::jmin (total, (juce::int64) std::numeric_limits<int>::max());
+            if (! slices.empty() && length > 1 && total == length)
             {
                 data->buffer.setSize (channels, length);
                 data->sampleRate = slices.front()->data->sampleRate;
@@ -552,7 +563,7 @@ std::shared_ptr<SampleData> IlanaSynthAudioProcessor::decodeSample (const juce::
     const auto rate = (double) tree.getProperty ("rate", 0.0);
     const auto channels = (int) tree.getProperty ("channels", 0);
     const auto length = (int) tree.getProperty ("length", 0);
-    if (rate < 1000.0 || rate > 400000.0 || channels < 1 || channels > 2 || length < 2 || length > (int) (rate * 120.0))
+    if (! std::isfinite (rate) || rate < 1000.0 || rate > 400000.0 || channels < 1 || channels > 2 || length < 2 || length > (int) (rate * 120.0))
         return nullptr;
     juce::MemoryBlock block;
     if (! block.fromBase64Encoding (tree.getProperty ("data").toString()))
