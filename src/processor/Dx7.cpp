@@ -65,13 +65,25 @@ std::vector<std::pair<Dx7::Voice, juce::String>> readSyx (const juce::MemoryBloc
 
 int IlanaSynthAudioProcessor::importDx7File (const juce::File& file, juce::String& message)
 {
+    // A real bank is 4104 bytes; a few banks in one dump at most. A huge file
+    // of repeated blocks made hundreds of thousands of preset files.
+    constexpr juce::int64 maxFileBytes = 1024 * 1024;
+    constexpr size_t maxVoices = 1024;
+    if (file.getSize() > maxFileBytes)
+    {
+        message = file.getFileName() + " is too big for a DX7 bank (over 1 MB).";
+        return 0;
+    }
     juce::MemoryBlock data;
     if (! file.loadFileAsData (data))
     {
         message = "Could not read " + file.getFileName() + ".";
         return 0;
     }
-    const auto voices = readSyx (data);
+    auto voices = readSyx (data);
+    const auto capped = voices.size() > maxVoices;
+    if (capped)
+        voices.resize (maxVoices);
     if (voices.empty())
     {
         message = file.getFileName() + " has no DX7 voices (a 32-voice bank or a single voice .syx).";
@@ -100,5 +112,7 @@ int IlanaSynthAudioProcessor::importDx7File (const juce::File& file, juce::Strin
             ++count;
     }
     message = "Imported " + juce::String (count) + (count == 1 ? " voice to " : " voices to ") + folder.getFullPathName() + ".";
+    if (capped)
+        message << " Only the first " << (int) maxVoices << " voices were read.";
     return count;
 }

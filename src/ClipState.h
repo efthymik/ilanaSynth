@@ -1,5 +1,7 @@
 #pragma once
 
+#include <deque>
+
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_data_structures/juce_data_structures.h>
 #include <algorithm>
@@ -226,7 +228,9 @@ public:
 
         juce::MidiFile midi;
 
-        if (! midi.readFrom (stream))
+        // No matched note-offs: the pairing below is ours, and JUCE's is O(n^2)
+        // on overlapping notes of one key.
+        if (! midi.readFrom (stream, false))
         {
             error = file.getFileName() + " is not a MIDI file";
             return false;
@@ -243,7 +247,7 @@ public:
         for (int t = 0; t < midi.getNumTracks(); ++t)
         {
             const auto* track = midi.getTrack (t);
-            std::array<std::vector<std::pair<double, int>>, 128> open; // per note: (start beat, velocity) of unfinished notes
+            std::array<std::deque<std::pair<double, int>>, 128> open; // per note: (start beat, velocity) of unfinished notes
             Clip clip;
             auto lastEnd = 0.0;
 
@@ -264,7 +268,7 @@ public:
                         continue;
 
                     const auto [start, velocity] = pending.front();
-                    pending.erase (pending.begin());
+                    pending.pop_front(); // a deque: a file of 500k overlapping notes was O(n^2) here
                     clip.notes.push_back ({ (float) start, (float) juce::jmax (0.0625, beat - start),
                                             message.getNoteNumber(), juce::jlimit (1, 127, velocity) });
                     lastEnd = juce::jmax (lastEnd, beat);
@@ -283,7 +287,8 @@ public:
                     break;
                 }
 
-            clip.bars = juce::jlimit (1, maxBars, (int) std::ceil (lastEnd / beatsPerBar - 1.0e-6));
+            // Clamped as a double first: a huge end time cast to int was undefined.
+            clip.bars = (int) juce::jlimit (1.0, (double) maxBars, std::ceil (lastEnd / beatsPerBar - 1.0e-6));
             const auto lengthBeats = (float) (clip.bars * beatsPerBar);
             clip.notes.erase (std::remove_if (clip.notes.begin(), clip.notes.end(),
                                               [lengthBeats] (const ClipNote& n) { return n.start >= lengthBeats; }),

@@ -133,6 +133,15 @@ public:
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
     // macOS (AU): the host's audio workgroup, for the MULTI-CORE threads.
     void audioWorkgroupContextChanged (const juce::AudioWorkgroup& workgroup) override;
+    // The host bypassed the plug-in: no block runs, so the note-offs and
+    // pedal of the bypassed time are never heard. The next processed block
+    // lets every note go. (No reset() override: VST3 hosts call it from
+    // setProcessing, and a cut there would end held notes and tails.)
+    void processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
+    // For work that outlives a call (sample jobs, delayed note-offs): lock the
+    // token before touching the processor; the destructor waits for holders.
+    std::weak_ptr<void> getLifetime() const { return lifetime; }
+    bool isShuttingDown() const { return shuttingDown.load (std::memory_order_acquire); }
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
@@ -1349,6 +1358,13 @@ private:
     // block, easing from the last output sample to silence rather than
     // stepping to it.
     std::atomic<bool> patchCut { false };
+    std::shared_ptr<void> lifetime { std::make_shared<int> (0) };
+    std::atomic<bool> shuttingDown { false };
+    std::atomic<bool> bypassCut { false };    // (a bypassed block / host reset: release the notes at the next block)
+    std::atomic<bool> prepared { false };     // (prepareToPlay has sized the buffers)
+    int chunkOffsetSamples = 0;               // (audio thread: where this chunk starts in an over-long host block)
+    juce::MidiBuffer pendingMidi;             // (control messages of a block dropped while the callback lock was taken)
+    bool hasPendingMidi = false;
     std::atomic<bool> easeStep { false };
     // VoiceParams::exciterLevels; saved as the state's "exciterLevels".
     std::atomic<int> exciterLevels { Voice::currentExciterLevels };

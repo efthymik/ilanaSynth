@@ -1,5 +1,6 @@
 #include "ProcessorInternal.h"
 #include "../BuildInfo.h"
+#include "../SafeXml.h"
 
 namespace
 {
@@ -96,7 +97,7 @@ juce::ValueTree IlanaSynthAudioProcessor::buildFullState()
         juce::ValueTree options ("SampleOptions");
         for (int i = 0; i < numSampleOscs; ++i)
             if (samplePaths[(size_t) i].isNotEmpty() && sampleOptions[(size_t) i].isNotEmpty())
-                if (const auto xml = juce::parseXML (sampleOptions[(size_t) i]))
+                if (const auto xml = SafeXml::parse (sampleOptions[(size_t) i]))
                     if (auto tree = juce::ValueTree::fromXml (*xml); tree.isValid() && tree.getProperty ("path").toString() == samplePaths[(size_t) i])
                     {
                         tree.setProperty ("osc", i, nullptr);
@@ -1855,7 +1856,8 @@ void IlanaSynthAudioProcessor::setStateInformation (const void* data, int sizeIn
         if (juce::ByteOrder::littleEndianInt (bytes) == 0x21324356)
         {
             const auto length = (int) juce::ByteOrder::littleEndianInt (bytes + 4);
-            if (length < 0 || length > sizeInBytes - 8 || ! juce::CharPointer_UTF8::isValidString (bytes + 8, length))
+            if (length < 0 || length > sizeInBytes - 8 || ! juce::CharPointer_UTF8::isValidString (bytes + 8, length)
+                || ! SafeXml::depthIsSafe (juce::String::fromUTF8 (bytes + 8, length)))
             {
                 keepUnreadableState (data, sizeInBytes);
                 return;

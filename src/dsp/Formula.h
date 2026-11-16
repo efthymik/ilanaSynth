@@ -4,6 +4,7 @@
 
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
@@ -29,8 +30,14 @@ public:
     {
         source = text.toStdString();
         position = 0;
+        depth = 0;
+        nodes = 0;
         error.clear();
         root.reset();
+        // Hostile text (a preset can carry a formula) must not overflow the
+        // stack or take minutes: real formulas are a line or two.
+        if (source.size() > maxLength)
+            return error = "formula is too long";
         try
         {
             root = parseComparison();
@@ -38,7 +45,7 @@ public:
             if (position < source.size())
                 fail ("unexpected '" + juce::String::charToString ((juce::juce_wchar) source[position]) + "'");
         }
-        catch (const std::runtime_error& failure)
+        catch (const std::exception& failure)
         {
             error = failure.what();
             root.reset();
@@ -126,19 +133,44 @@ private:
         return false;
     }
 
+    // Limits for hostile text: nesting (parentheses, unary signs, powers) and
+    // the node count (a long chain evaluates and frees recursively).
+    static constexpr size_t maxLength = 4096;
+    static constexpr int maxDepth = 128, maxNodes = 2048;
+
+    template <typename NodeType, typename... Args>
+    std::unique_ptr<Node> make (Args&&... args)
+    {
+        if (++nodes > maxNodes)
+            fail ("formula is too long");
+        return std::make_unique<NodeType> (std::forward<Args> (args)...);
+    }
+
+    struct DepthGuard
+    {
+        explicit DepthGuard (int& d) : count (d)
+        {
+            if (++count > maxDepth)
+                fail ("formula is nested too deeply");
+        }
+        ~DepthGuard() { --count; }
+        int& count;
+    };
+
     std::unique_ptr<Node> parseComparison()
     {
+        const DepthGuard guard (depth);
         auto left = parseSum();
         for (;;)
         {
             if (accept ("<="))
-                left = std::make_unique<Binary> (std::move (left), parseSum(), [] (double a, double b) { return a <= b ? 1.0 : 0.0; });
+                left = make<Binary> (std::move (left), parseSum(), [] (double a, double b) { return a <= b ? 1.0 : 0.0; });
             else if (accept (">="))
-                left = std::make_unique<Binary> (std::move (left), parseSum(), [] (double a, double b) { return a >= b ? 1.0 : 0.0; });
+                left = make<Binary> (std::move (left), parseSum(), [] (double a, double b) { return a >= b ? 1.0 : 0.0; });
             else if (accept ("<"))
-                left = std::make_unique<Binary> (std::move (left), parseSum(), [] (double a, double b) { return a < b ? 1.0 : 0.0; });
+                left = make<Binary> (std::move (left), parseSum(), [] (double a, double b) { return a < b ? 1.0 : 0.0; });
             else if (accept (">"))
-                left = std::make_unique<Binary> (std::move (left), parseSum(), [] (double a, double b) { return a > b ? 1.0 : 0.0; });
+                left = make<Binary> (std::move (left), parseSum(), [] (double a, double b) { return a > b ? 1.0 : 0.0; });
             else
                 return left;
         }
@@ -150,9 +182,9 @@ private:
         for (;;)
         {
             if (accept ("+"))
-                left = std::make_unique<Binary> (std::move (left), parseProduct(), [] (double a, double b) { return a + b; });
+                left = make<Binary> (std::move (left), parseProduct(), [] (double a, double b) { return a + b; });
             else if (accept ("-"))
-                left = std::make_unique<Binary> (std::move (left), parseProduct(), [] (double a, double b) { return a - b; });
+                left = make<Binary> (std::move (left), parseProduct(), [] (double a, double b) { return a - b; });
             else
                 return left;
         }
@@ -164,12 +196,12 @@ private:
         for (;;)
         {
             if (accept ("*"))
-                left = std::make_unique<Binary> (std::move (left), parseUnary(), [] (double a, double b) { return a * b; });
+                left = make<Binary> (std::move (left), parseUnary(), [] (double a, double b) { return a * b; });
             else if (accept ("/"))
-                left = std::make_unique<Binary> (std::move (left), parseUnary(),
+                left = make<Binary> (std::move (left), parseUnary(),
                                                  [] (double a, double b) { return b == 0.0 ? 0.0 : a / b; });
             else if (accept ("%"))
-                left = std::make_unique<Binary> (std::move (left), parseUnary(),
+                left = make<Binary> (std::move (left), parseUnary(),
                                                  [] (double a, double b) { return b == 0.0 ? 0.0 : a - b * std::floor (a / b); });
             else
                 return left;
@@ -178,8 +210,9 @@ private:
 
     std::unique_ptr<Node> parseUnary()
     {
+        const DepthGuard guard (depth);
         if (accept ("-"))
-            return std::make_unique<Unary> (parseUnary(), [] (double a) { return -a; });
+            return make<Unary> (parseUnary(), [] (double a) { return -a; });
         if (accept ("+"))
             return parseUnary();
         return parsePower();
@@ -189,7 +222,7 @@ private:
     {
         auto base = parsePrimary();
         if (accept ("^"))
-            return std::make_unique<Binary> (std::move (base), parseUnary(), [] (double a, double b) { return std::pow (a, b); });
+            return make<Binary> (std::move (base), parseUnary(), [] (double a, double b) { return std::pow (a, b); });
         return base;
     }
 
@@ -227,10 +260,15 @@ private:
         const auto c = source[position];
         if (std::isdigit ((unsigned char) c) || c == '.')
         {
-            size_t used = 0;
-            const auto value = std::stod (source.substr (position), &used);
-            position += used;
-            return std::make_unique<Constant> (value);
+            // strtod on the text in place: no copy per number, and a lone "."
+            // or an out-of-range number is an error, not an exception.
+            const char* start = source.c_str() + position;
+            char* end = nullptr;
+            const auto value = std::strtod (start, &end);
+            if (end == start)
+                fail ("bad number");
+            position += (size_t) (end - start);
+            return make<Constant> (std::isfinite (value) ? value : 0.0);
         }
 
         if (! std::isalpha ((unsigned char) c))
@@ -240,11 +278,11 @@ private:
         while (position < source.size() && (std::isalnum ((unsigned char) source[position]) || source[position] == '_'))
             word += source[position++];
 
-        if (word == "x" || word == "t") return std::make_unique<Variable> ('x');
-        if (word == "f") return std::make_unique<Variable> ('f');
-        if (word == "n") return std::make_unique<Variable> ('n');
-        if (word == "pi") return std::make_unique<Constant> (juce::MathConstants<double>::pi);
-        if (word == "e") return std::make_unique<Constant> (juce::MathConstants<double>::euler);
+        if (word == "x" || word == "t") return make<Variable> ('x');
+        if (word == "f") return make<Variable> ('f');
+        if (word == "n") return make<Variable> ('n');
+        if (word == "pi") return make<Constant> (juce::MathConstants<double>::pi);
+        if (word == "e") return make<Constant> (juce::MathConstants<double>::euler);
 
         struct OneArgument { const char* name; double (*function) (double); };
         static const OneArgument oneArgument[] {
@@ -278,21 +316,21 @@ private:
             {
                 auto arguments = parseArguments();
                 if (arguments.size() != 1) fail (juce::String (entry.name) + " takes 1 argument");
-                return std::make_unique<Unary> (std::move (arguments[0]), entry.function);
+                return make<Unary> (std::move (arguments[0]), entry.function);
             }
         for (const auto& entry : twoArguments)
             if (word == entry.name)
             {
                 auto arguments = parseArguments();
                 if (arguments.size() != 2) fail (juce::String (entry.name) + " takes 2 arguments");
-                return std::make_unique<Binary> (std::move (arguments[0]), std::move (arguments[1]), entry.function);
+                return make<Binary> (std::move (arguments[0]), std::move (arguments[1]), entry.function);
             }
         for (const auto& entry : threeArguments)
             if (word == entry.name)
             {
                 auto arguments = parseArguments();
                 if (arguments.size() != 3) fail (juce::String (entry.name) + " takes 3 arguments");
-                return std::make_unique<Ternary> (std::move (arguments[0]), std::move (arguments[1]),
+                return make<Ternary> (std::move (arguments[0]), std::move (arguments[1]),
                                                   std::move (arguments[2]), entry.function);
             }
 
@@ -301,6 +339,7 @@ private:
 
     std::string source;
     size_t position = 0;
+    int depth = 0, nodes = 0;
     juce::String error;
     std::unique_ptr<Node> root;
 };

@@ -693,7 +693,11 @@ private:
 
         parameter->setValueNotifyingHost (parameter->convertTo0to1 ((float) value));
         processorRef.triggerPreviewNote (60, true, 0.7f);
-        juce::Timer::callAfterDelay (700, [&processor = processorRef] { processor.triggerPreviewNote (60, false); });
+        juce::Timer::callAfterDelay (700, [&processor = processorRef, life = processorRef.getLifetime()]
+                                     {
+                                         if (const auto alive = life.lock()) // (the plug-in may be gone by now)
+                                             processor.triggerPreviewNote (60, false);
+                                     });
         content.repaint();
     }
 

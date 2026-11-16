@@ -3,6 +3,7 @@
 #include "PatchGraphState.h"
 #include "../dsp/FastMath.h"
 #include "../dsp/airwindows/DelaySync.h"
+#include "../SafeXml.h"
 
 // The rack. PATCHER on: the slots as the nodes of the patcher's graph
 // (processEffectsPatched). Otherwise the rack's routing (fx_routing): SERIES,
@@ -2385,7 +2386,7 @@ void IlanaSynthAudioProcessor::FxEngine::loadReverbIr (const juce::File& file)
 
 bool IlanaSynthAudioProcessor::loadFxChainFromFile (const juce::File& file)
 {
-    std::unique_ptr<juce::XmlElement> xml (juce::XmlDocument::parse (file));
+    std::unique_ptr<juce::XmlElement> xml (SafeXml::parse (file));
 
     if (xml == nullptr || ! xml->hasTagName ("ilanafxchain"))
         return false;
@@ -2402,9 +2403,10 @@ bool IlanaSynthAudioProcessor::loadFxChainFromFile (const juce::File& file)
         if (id.isEmpty())
             continue;
 
-        if (auto* parameter = apvts.getParameter (id))
-            parameter->setValueNotifyingHost (
-                parameter->convertTo0to1 ((float) element->getDoubleAttribute ("v")));
+        // jlimit lets NaN through: a "nan" in a chain file stayed in the knob.
+        const auto value = (float) element->getDoubleAttribute ("v");
+        if (auto* parameter = apvts.getParameter (id); parameter != nullptr && std::isfinite (value))
+            parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
     }
 
     // Its instances and patcher graph (none in a chain saved before step 17).
@@ -2461,12 +2463,12 @@ void IlanaSynthAudioProcessor::applyFxChain (const juce::String& state)
         {
             juce::MemoryOutputStream decoded;
             if (juce::Base64::convertFromBase64 (decoded, text))
-                if (const auto xml = juce::parseXML (decoded.toString()))
+                if (const auto xml = SafeXml::parse (decoded.toString()))
                     fx = FxPatchData::fromValueTree (juce::ValueTree::fromXml (*xml));
             continue;
         }
 
-        if (auto* parameter = apvts.getParameter (id))
+        if (auto* parameter = apvts.getParameter (id); parameter != nullptr && std::isfinite (text.getFloatValue()))
             parameter->setValueNotifyingHost (parameter->convertTo0to1 (text.getFloatValue()));
     }
     // After the slots are set (a chain from before step 17: no instances).
