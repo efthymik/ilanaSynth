@@ -356,7 +356,6 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
         settings->setValue ("playBandsFolded", folded);
         settings->saveIfNeeded();
     };
-    auto* envLfoPage = new EnvLfoPage (p, *settings);
 
     // Eight tabs; the ones holding several pages switch them from the tab
     // row (PLAY: overview and vector, MOD: envelopes, LFOs and the MSEG).
@@ -467,20 +466,10 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
     if (IlanaSynthAudioProcessor::isEffectBuild)
         addSection ("INPUT", { { "INPUT", "INPUT", new InputPage (p) } });
 
-    // One-tab PLAY (ilana's mockup v3, 2026-10-25): the OSC, FILTER and MOD tabs are gone from the row, PLAY
-    // holds what they did. Their pages stay behind the row (no tab button, last so the shortcuts stay):
-    // the UI tests reach them (a pop-up editor holds every setting MOD's ENV / LFO page had).
+    // One-tab PLAY (ilana's mockup v3, 2026-10-25): the OSC, FILTER and MOD tabs are gone, PLAY holds what
+    // they did (its oscillator cards, its filter card, its envelope and LFO carousels; a source's pop-up
+    // editor holds every setting MOD's ENV / LFO page had).
     visibleTabCount = tabs.getNumTabs();
-    auto* oscViewport = new OscPageViewport (p);
-    addSection ("OSC", { { "OSC", "OSCILLATORS", oscViewport } });
-    addSection ("FILTER", { { "FILTER", "FILTER", new FilterPage (p) } });
-    addSection ("MOD", { { "ENV/LFO", "ENV / LFO", envLfoPage } });
-    for (int index = visibleTabCount; index < tabs.getNumTabs(); ++index)
-        if (auto* button = tabs.getTabbedButtonBar().getTabButton (index))
-        {
-            button->getProperties().set ("hiddenTab", true);
-            button->setInterceptsMouseClicks (false, false);
-        }
 
     // EDIT (or the title) on PLAY's ENVELOPE and LFO: the source's pop-up editor, as a dock chip opens it.
     playPage->onEditSource = [this] (int source, juce::Component& anchor) { toggleSourcePopover (source, anchor); };
@@ -503,9 +492,9 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
         if (voiceModeMenu != nullptr)
             voiceModeMenu->getComboBox().showPopup();
     };
-    getOscCardBounds = [this, oscViewport] (int osc) -> juce::Rectangle<int>
+    getOscCardBounds = [this, playPage] (int osc) -> juce::Rectangle<int>
     {
-        if (auto* page = oscViewport->getPage())
+        if (auto* page = playPage->getOscView().getPage())
             return getLocalArea (page, page->getCardBounds (osc));
         return {};
     };
@@ -2373,17 +2362,10 @@ void IlanaSynthAudioProcessorEditor::showPage (const juce::String& id)
 
     closeWavetableEditor(); // it belongs to the page it was opened from
 
-    // STEPS & MSEG went into ENV / LFO (UI review 6, V5-7): its old id
-    // opens there.
-    if (id == "STEPS")
-    {
-        showPage ("ENV/LFO");
-        return;
-    }
-
     // The PHYSICAL tab folded into the oscillator cards (2026-10-10), and
-    // the cards onto PLAY (2026-10-25): its old id opens PLAY.
-    if (id == "PHYSICAL")
+    // the cards onto PLAY (2026-10-25): its old id opens PLAY. So do the old OSC, FILTER and
+    // ENV / LFO ids (their pages are gone; PLAY and the source pop-ups hold what they had).
+    if (id == "PHYSICAL" || id == "OSC" || id == "FILTER" || id == "ENV/LFO" || id == "STEPS")
     {
         showPage ("MAIN");
         return;

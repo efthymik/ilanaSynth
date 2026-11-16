@@ -492,7 +492,7 @@ void runGlobalReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudio
     // strip is one card, its groups named in colour, no dots). What stays true:
     // an off oscillator says nothing in words and its card dims in place.
     {
-        editor.showPage ("OSC");
+        editor.showPage ("MAIN");
         settle (300);
         std::vector<StateTabs*> rows;
         findAll<StateTabs> (editor, rows);

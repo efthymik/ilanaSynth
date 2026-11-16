@@ -168,6 +168,8 @@ public:
 
     void mouseDown (const juce::MouseEvent&) override { setValue (current > 0 ? 0 : 1); }
 
+    juce::String getDisplayText() const override { return label; }
+
     void setText (const juce::String& text)
     {
         if (text != label)

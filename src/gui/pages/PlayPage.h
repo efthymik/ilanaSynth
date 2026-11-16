@@ -1978,6 +1978,7 @@ public:
     }
 
     std::function<void (int)> onEditOperator;
+    OscPageViewport& getOscView() { return oscView; }
     std::function<void (const juce::String&)> onOpenPage;
     // EDIT on ENVELOPE or LFO: the source's floating editor, by the button.
     std::function<void (int source, juce::Component& anchor)> onEditSource;

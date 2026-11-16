@@ -152,7 +152,7 @@ void runOperatorReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAud
         settle (400);
         const auto fmOutput = textOf (knobFor ("osc1_eg_out", "OUTPUT"));
         const auto fmLevel = knobFor ("osc1_level") != nullptr;
-        editor.showPage ("OSC");
+        editor.showPage ("MAIN");
         settle (400);
         const auto oscOutput = textOf (knobFor ("osc1_eg_out", "OUTPUT"));
         const auto voiceLevel = textOf (knobFor ("osc1_level", "VOICE LEVEL"));
@@ -165,12 +165,14 @@ void runOperatorReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAud
     // I12-6: the OSC drawer on an operator voice has no STRINGS or SOUNDBOARD
     // tab; I12-3: a modulator says what it modulates and its level is still OUTPUT (I15-1).
     {
-        editor.showPage ("OSC");
+        editor.showPage ("MAIN");
         settle (400);
         // The approved OSC design has no tabs: the bottom strip is one card whose
         // STRINGS and SOUNDBOARD dim in place while off, on an operator voice too
         // (their keys-only tabs are gone, so the old "no such tab" check is now
         // "no tabs at all, and both groups dimmed, not drawn live").
+        editor.showPlayViews (-1, 0, 1); // (PLAY's STRINGS and SOUNDBOARD (BOARD) views)
+        settle (200);
         std::vector<StateTabs*> rows;
         findAll<StateTabs> (editor, rows);
         auto tabs = 0;
@@ -181,6 +183,7 @@ void runOperatorReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAud
         expect (tabs == 0 && knobFor ("noise_level") != nullptr && amount != nullptr && amount->getAlpha() < 0.99f
                     && board != nullptr && board->getAlpha() < 0.99f,
                 "OSC: the strip has no tabs, and STRINGS and SOUNDBOARD sit dimmed on an operator voice (I12-6)");
+        editor.showPlayViews (-1, -1, 0);
         editor.showPage ("MAIN");
         settle (300);
         expect (knobFor ("osc2_eg_out", "OUTPUT") != nullptr && knobFor ("osc2_eg_out", "DEPTH") == nullptr && knobFor ("osc1_eg_out", "OUTPUT") != nullptr,
@@ -301,7 +304,7 @@ void runOperatorReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAud
 
     // OSC: the picture opens FM; no table tools; SEMI and OUTPUT / LEVEL in
     // FM's order; the caption names OP ENV (I8-15, I8-30, S8-9, V8-16).
-    editor.showPage ("OSC");
+    editor.showPage ("MAIN");
     settle (400);
     {
         std::vector<OperatorEnvDisplay*> graphs;
@@ -352,7 +355,7 @@ void runOperatorReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAud
 
     // MOD: OP PITCH's TRANSPOSE is a knob beside SCALE SHIFT (S8-19); the
     // OP ENV card's badge is short (S8-10).
-    editor.showPage ("ENV/LFO");
+    editor.showPage ("MAIN");
     settle (500);
     if (auto* modPage = editor.getCurrentPage())
         if (auto* envCards = findChild<EnvThumbBar> (*modPage))
@@ -402,7 +405,7 @@ void runOperatorReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAud
     // I8-5: the Operator Env's parts only where used). I8-39: the editor
     // itself, opened there anyway, greys its knobs and offers USE ON OSC.
     loadNamed ("Neuro Wobble");
-    editor.showPage ("ENV/LFO");
+    editor.showPage ("MAIN");
     settle (400);
     if (auto* modPage = editor.getCurrentPage())
         if (auto* envCards = findChild<EnvThumbBar> (*modPage))

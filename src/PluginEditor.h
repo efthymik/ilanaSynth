@@ -79,9 +79,8 @@ public:
     SampleBrowser* getSampleBrowser() const { return sampleBrowser.get(); }
     WavetableEditor* getWavetableEditor() const { return wavetableEditor.get(); }
 
-    // Pages by id ("MAIN", "VECTOR", "OSC", "FILTER", "ENV/LFO",
-    // "MATRIX", "FM", "ARP/SEQ", "FX", "INPUT"): each lives in one of
-    // the seven top-level tabs. "SCOPE" opens the scope panel.
+    // Pages by id ("MAIN", "VECTOR", "MATRIX", "FM", "ARP/SEQ", "FX",
+    // "PATCH", "INPUT"): each lives in one of the top-level tabs. "SCOPE" opens the scope panel.
     void showPage (const juce::String& id);
     // PLAY's card views, for the tests and snapshots: FILTER 1 or 2, STRINGS or KEYS, BODY or BOARD (-1 keeps one).
     std::function<void (int filter, int strings, int body)> showPlayViews;
@@ -324,7 +323,7 @@ private:
     std::unique_ptr<IlanaAnim::PopGrow> stereoGrow; // (grows from STEREO, folds back into it)
     void setStereoOpen (bool open);
     juce::Rectangle<int> stereoPopoverBounds() const;
-    int visibleTabCount = 0; // the tabs with a button in the row; the rest (OSC, FILTER, MOD) sit behind it
+    int visibleTabCount = 0; // the tabs with a button in the row; (all of them now)
     std::unique_ptr<juce::Component> scopePanel;
     std::unique_ptr<juce::Component> scopeWindow; // the scope popped out (WINDOW)
     GhostButton scopeButton { "SCOPE" };
