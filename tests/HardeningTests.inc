@@ -154,5 +154,45 @@ void runHardeningTests()
                    + juce::String (seconds, 1) + " s)");
     }
 
+    // Round B: routes summed into a per-voice LFO's RATE (three at +1 is 2^36
+    // times the knob) made the random and friction shapes' catch-up loops
+    // run for ever; the rate now stops at 0.45 cycles a sample.
+    for (const auto shape : { (int) LfoSimShapes::RandomHold, (int) LfoSimShapes::Friction })
+    {
+        IlanaSynthAudioProcessor processor;
+        processor.prepareToPlay (48000.0, 512);
+        setParam (processor, "lfo1_shape", (float) shape);
+        setParam (processor, "lfo1_retrig", 1.0f);
+        setParam (processor, "lfo1_rate", 40.0f);
+        setParam (processor, "macro1", 1.0f);
+        for (int slot = 1; slot <= 3; ++slot)
+        {
+            setParam (processor, "mod" + juce::String (slot) + "_src", (float) Mod::Source::Macro1);
+            setParam (processor, "mod" + juce::String (slot) + "_dst", (float) Mod::lfoRateDestinationFor (0));
+            setParam (processor, "mod" + juce::String (slot) + "_amt", 1.0f);
+        }
+        juce::AudioBuffer<float> buffer (2, 512);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+        const auto start = juce::Time::getMillisecondCounterHiRes();
+        for (int b = 0; b < 8; ++b)
+        {
+            buffer.clear();
+            processor.processBlock (buffer, midi);
+            midi.clear();
+        }
+        const auto seconds = (juce::Time::getMillisecondCounterHiRes() - start) / 1000.0;
+        check (seconds < 5.0, "lfo: a per-voice LFO's rate pushed 36 octaves up still renders (shape " + juce::String (shape) + ", "
+                                  + juce::String (seconds, 2) + " s)");
+    }
+
+    // Round B: a hostile preset's drawn LFO curve stops at 1024 points.
+    {
+        juce::String text;
+        for (int i = 0; i < 20000; ++i)
+            text << (float) i / 20000.0f << ",0;";
+        check (LfoCurve::fromString (text).points.size() <= LfoCurve::maxParsedPoints, "lfo: a 20000-point curve is cut to 1024");
+    }
+
     temp.deleteRecursively();
 }

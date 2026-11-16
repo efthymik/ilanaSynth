@@ -1325,7 +1325,8 @@ float IlanaSynthAudioProcessorEditor::hostScaleFactor() const
 
 void IlanaSynthAudioProcessorEditor::applyUiZoom (float newZoom)
 {
-    uiZoom = juce::jlimit (0.75f, 2.0f, newZoom);
+    // (jlimit passes NaN: a "nan" in the settings file sized the window to nothing.)
+    uiZoom = std::isfinite (newZoom) ? juce::jlimit (0.75f, 2.0f, newZoom) : 1.0f;
 
     if (settings != nullptr)
     {
@@ -2152,7 +2153,7 @@ void IlanaSynthAudioProcessorEditor::resized()
 
     // A corner drag changes the zoom; remember it (saved on the timer so a
     // drag doesn't hit the disk on every step).
-    if (displayScaleApplied && std::abs (scale - juce::jmin (uiZoom, fitZoom())) > 0.005f)
+    if (displayScaleApplied && std::isfinite (scale) && scale > 0.0f && std::abs (scale - juce::jmin (uiZoom, fitZoom())) > 0.005f)
     {
         uiZoom = scale;
         zoomNeedsSaving = true;
