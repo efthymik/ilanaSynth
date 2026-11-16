@@ -24,7 +24,6 @@
 #include "gui/FilterDisplay.h"
 #include "gui/LfoDisplay.h"
 #include "gui/CardTabs.h"
-#include "gui/EnvThumbs.h"
 #include "gui/FilterWidgets.h"
 #include "gui/VectorPad.h"
 #include "gui/PhysicalView.h"
@@ -40,7 +39,7 @@
 #include "gui/ZoneMapEditor.h"
 #include "gui/SampleBrowser.h"
 #include "gui/LfoShapeMenu.h"
-#include "gui/LfoThumbs.h"
+#include "gui/ModRoutes.h"
 #include "gui/ModuleMenu.h"
 #include "gui/ModulationCardView.h"
 #include "gui/MatrixWidgets.h"
@@ -3019,7 +3018,7 @@ void IlanaSynthAudioProcessorEditor::updateAbMarks()
             const auto n = it != counts.end() ? it->second : 0;
             button->getProperties().set ("abCount", n);
             button->repaint();
-            if (n > 0 && ! (bool) button->getProperties()["hiddenTab"])
+            if (n > 0)
                 where.add (tabs.getTabNames()[t]);
         }
 

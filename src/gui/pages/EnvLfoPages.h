@@ -252,15 +252,6 @@ public:
     EnvSection (IlanaSynthAudioProcessor& p, juce::PropertiesFile& settingsRef)
         : processorRef (p),
           settings (settingsRef),
-          thumbs (p, []
-          {
-              std::vector<EnvThumbBar::Env> envs;
-              const char* const prefixes[] { "amp", "fe", "f2e", "me", "e4" };
-              for (int env = 0; env < 16; ++env)
-                  envs.push_back ({ envelopeTitle (env), env < 5 ? juce::String (prefixes[env]) : "env" + juce::String (env + 1),
-                                    envelopeSource (env), colourOf (env) });
-              return envs;
-          }()),
           ampDisplay (p, "amp", modSourceColour ((int) Mod::Source::AmpEnv), false),
           feDisplay (p, "fe", IlanaTheme::envIdentityColour (1)),
           f2eDisplay (p, "f2e", IlanaTheme::envIdentityColour (2)),
@@ -282,66 +273,6 @@ public:
           e4S (p.apvts, "e4_sustain", "SUSTAIN"), e4R (p.apvts, "e4_release", "RELEASE"),
           e4Vel (p.apvts, "e4_velocity", "VELOCITY", IlanaTheme::envIdentityColour (4), false)
     {
-        // One card per envelope in the patch, the Operator Env's two, and a
-        // "+" (no 1-16 ruler: UI review 6, V6-8). Past what fits, cards fold
-        // into a "N MORE" card; the pool never scrolls (UI review 7, V7-17).
-        // The design's pool: the cards share the bar, the "+" 50 px wide.
-        thumbs.setFillWidth (true, 50.0f);
-        addAndMakeVisible (thumbs);
-
-        // OP ENV and OP PITCH, pool members edited below like the others
-        // (UI review 7, I7-7), only on a patch that plays the Operator Env
-        // (a DX7 voice), and there first in the row (UI review 8, I8-5 /
-        // S8-1 / V8-1). OP PITCH stays, greyed, while the matrix still
-        // routes it on a patch that no longer plays the Operator Env.
-        {
-            const auto anyOperator = [&p] { return FmOperatorInfo::anyOperatorEnv (p); };
-            EnvThumbBar::ExtraCard opEnv;
-            opEnv.title = "OP ENV";
-            opEnv.colour = OperatorPool::colour();
-            opEnv.isShown = [&p] { return operatorPoolShown (p); };
-            opEnv.pinnedFirst = true;
-            opEnv.tooltip = "OP ENV\nThe Operator Env: the DX7 envelope each oscillator on it plays (its level). Click to edit it "
-                            "below, an operator at a time. It shapes its operators only, so it isn't a modulation source (its dashed edge: "
-                            "nothing to drag).";
-            opEnv.paintShape = [this] (juce::Graphics& g, juce::Rectangle<float> plot, bool active)
-            {
-                const auto onEnv = OperatorPool::operatorsOnEnv (processorRef);
-                const auto osc = opEditor.isPitch() || onEnv.empty() ? (onEnv.empty() ? 0 : onEnv.front()) : opEditor.getSelectedOperator();
-                OperatorPool::paintEnvelopeShape (g, plot, OperatorPool::envelopeShape (processorRef, FmOperatorInfo::prefixOf (osc), opEnvShape).values,
-                                                  OperatorPool::colour(), active);
-            };
-            opEnv.targets = [&p]
-            {
-                const auto count = (int) OperatorPool::operatorsOnEnv (p).size();
-                // Short enough for the narrowest card (UI review 8, S8-10).
-                return count == 0 ? juce::String() : juce::String (count) + (count == 1 ? " op" : " ops");
-            };
-            thumbs.addExtraCard (std::move (opEnv));
-
-            EnvThumbBar::ExtraCard opPitch;
-            opPitch.title = "OP PITCH";
-            opPitch.source = Mod::Source::OpPitchEnv;
-            opPitch.colour = OperatorPool::colour();
-            opPitch.isShown = [&p] { return operatorSourceShown (p, Mod::Source::OpPitchEnv); };
-            opPitch.isActive = anyOperator;
-            opPitch.pinnedFirst = true;
-            opPitch.tooltip = "OP PITCH\nThe Operator Env's pitch envelope, for the whole voice. Click to edit it below; drag it onto "
-                              "a knob to modulate that knob too (source: OP PITCH).";
-            opPitch.paintShape = [this] (juce::Graphics& g, juce::Rectangle<float> plot, bool active)
-            {
-                OperatorPool::paintEnvelopeShape (g, plot, OperatorPool::envelopeShape (processorRef, {}, opPitchShape).values,
-                                                  OperatorPool::colour(), active);
-            };
-            opPitch.targets = [this, &p]
-            {
-                juce::StringArray fixed;
-                if (OperatorPool::envelopeShape (p, {}, opPitchShape).moves && FmOperatorInfo::anyOperatorEnv (p))
-                    fixed.add ("Op pitch");
-                return describeModTargets (processorRef, Mod::Source::OpPitchEnv, fixed);
-            };
-            thumbs.addExtraCard (std::move (opPitch));
-        }
         addChildComponent (opEditor);
 
         addAll (*this, ampDisplay, feDisplay, f2eDisplay, meDisplay, e4Display,
@@ -414,43 +345,8 @@ public:
             if (knob != nullptr)
                 ampRules.add (*knob, [&p] { return FmOperatorInfo::ampEnvelopeInUse (p); }, ampUnusedText());
 
-        thumbs.onSelect = [this] (int index) { select (index); };
-        thumbs.onLayoutChanged = [this] { resized(); repaint(); };
-        // The Operator Env, absent from a patch that doesn't play it, is
-        // one pick away under "+" (UI review 8, S8-1 / V8-1).
-        thumbs.plusOffer = [this] { return operatorEnvOffer(); };
-        thumbs.onPlusOffer = [this] { addOperatorEnv(); };
-
         updateVisibility();
         startTimerHz (4);
-    }
-
-    // The "+" menu's Operator Env item; empty while the patch plays it.
-    juce::String operatorEnvOffer() const
-    {
-        if (operatorPoolShown (processorRef))
-            return {};
-        return "OP ENV (DX7): OSC " + juce::String (operatorEnvTarget() + 1) + " plays the Operator Env";
-    }
-
-    // Puts the Operator Env in the patch: the first playing oscillator's
-    // ENVELOPE becomes OP ENV (its cards then appear), and OP ENV opens.
-    void addOperatorEnv()
-    {
-        if (auto* param = processorRef.apvts.getParameter (FmOperatorInfo::prefixOf (operatorEnvTarget()) + "_amp_env"))
-        {
-            // (OP ENV is FM / DX7's: a Wavetable becomes one, the same sound otherwise.)
-            if (juce::roundToInt (FmOperatorInfo::read (processorRef, FmOperatorInfo::prefixOf (operatorEnvTarget()) + "_mode")) == OscMode::wavetable)
-                processorRef.setOscillatorMode (operatorEnvTarget(), OscMode::fmOperator);
-            param->beginChangeGesture();
-            param->setValueNotifyingHost (param->convertTo0to1 ((float) OperatorEg::envelopeChoice));
-            param->endChangeGesture();
-        }
-
-        thumbs.refreshLayout();
-        select (opEnvId);
-        resized();
-        repaint();
     }
 
     // The bend of an envelope's segments has one name everywhere it is
@@ -472,7 +368,6 @@ public:
         if (selected < opEnvId && ! envelopeShown (processorRef, selected))
         {
             processorRef.setRevealed (IlanaSynthAudioProcessor::Module::Envelope, selected, true);
-            thumbs.refreshLayout();
         }
 
         settings.setValue ("envSelected", selected);
@@ -485,7 +380,6 @@ public:
     void setCompact (bool shouldBeCompact)
     {
         compact = shouldBeCompact;
-        thumbs.setVisible (! compact);
         opEditor.setCompact (compact);
         for (auto& unit : units)
             if (auto* envelope = dynamic_cast<EnvelopeDisplay*> (unit.display))
@@ -504,9 +398,6 @@ public:
     // The pop-up's graph starts this much above the knobs (ilana's layout, 2026-10-29): its owner gives the section the room.
     static constexpr int compactGraphRise = 6;
 
-    // What the section needs below its cards: the panel's header and one
-    // row of full-size knobs.
-    static constexpr int cardHeight = 48;
     // The editor row under the cards (the design's 118 px): the graph at the
     // left (40 %), the knob card at the right, exactly as tall as its nine
     // knobs and its header need.
@@ -518,13 +409,6 @@ public:
     void resized() override
     {
         auto area = getLocalBounds();
-
-        if (! compact)
-        {
-            thumbs.setViewWidth (area.getWidth());
-            thumbs.setBounds (area.removeFromTop (cardHeight));
-            area.removeFromTop (8);
-        }
 
         if (selected >= opEnvId)
         {
@@ -584,17 +468,7 @@ public:
                                      colour, 0);
     }
 
-    // How many envelopes the pool holds (the heading's caption).
-    int countShown() const
-    {
-        auto count = 0;
-        for (int env = 0; env < opEnvId; ++env)
-            count += envelopeShown (processorRef, env) ? 1 : 0;
-        return count;
-    }
-
     int getSelected() const { return selected; }
-    EnvThumbBar& getThumbs() { return thumbs; }
     OperatorEnvEditor& getOperatorEditor() { return opEditor; }
 
     // ENV 1-16's colours, 0-based.
@@ -663,21 +537,16 @@ private:
 
     std::vector<std::unique_ptr<KnobControl>> stageTwoKnobs;
 
-    // Which oscillator "+ › OP ENV" puts on the Operator Env: the first
-    // playing one (OSC 1 when none plays).
-    int operatorEnvTarget() const
-    {
-        for (int osc = 0; osc < OscillatorIds::count; ++osc)
-            if (FmOperatorInfo::isPlaying (processorRef, osc))
-                return osc;
-        return 0;
-    }
-
     // The selection points at a card the pool doesn't have (an envelope
-    // removed, or OP ENV / OP PITCH on a patch without the Operator Env).
+    // removed, or OP ENV / OP PITCH on a patch without the Operator Env:
+    // they are in the pool only on a patch that plays it, OP PITCH also
+    // while the matrix still routes it).
     bool selectionGone() const
     {
-        return selected < opEnvId ? ! envelopeShown (processorRef, selected) : ! thumbs.isCardInPool (selected);
+        if (selected < opEnvId)
+            return ! envelopeShown (processorRef, selected);
+        return selected == opEnvId ? ! operatorPoolShown (processorRef)
+                                   : ! (selected == opPitchId && operatorSourceShown (processorRef, Mod::Source::OpPitchEnv));
     }
 
     void updateVisibility()
@@ -706,7 +575,6 @@ private:
             opEditor.setPitch (selected == opPitchId);
         opEditor.setVisible (selected >= opEnvId);
 
-        thumbs.setSelected (selected);
         resized();
         repaint();
     }
@@ -714,10 +582,8 @@ private:
     IlanaSynthAudioProcessor& processorRef;
     juce::PropertiesFile& settings;
     juce::Rectangle<int> panel;
-    EnvThumbBar thumbs;
     bool compact = false;
     OperatorEnvEditor opEditor { processorRef };
-    OperatorPool::ShapeCache opEnvShape, opPitchShape;
     EffectRules ampRules { processorRef };
     bool ampWasUsed = true;
     EnvelopeDisplay ampDisplay, feDisplay, f2eDisplay, meDisplay, e4Display;
@@ -814,7 +680,6 @@ public:
     LfoSection (IlanaSynthAudioProcessor& p, juce::PropertiesFile& settingsRef)
         : processorRef (p),
           settings (settingsRef),
-          thumbs (p, [] (int index) { return lfoColour (index); }),
           msegEditor (p),
           msegLoop (p.apvts, "mseg_loop", "LOOP"),
           msegRate (p.apvts, "mseg_rate", "RATE", MsegEditor::colour(), false),
@@ -822,76 +687,6 @@ public:
           clockDiv (p.apvts, "clock_div", "DIVISION"),
           opLfoEditor (p)
     {
-        // One card per LFO in the patch, the modulators edited beside them,
-        // then a "+" (no 1-16 ruler: UI review 6, V6-8). Past what fits,
-        // cards fold into a "N MORE" card; the pool never scrolls (V7-17).
-        thumbs.setFillWidth (true, 50.0f); // the design's pool: the cards share the bar, the "+" 50 px wide
-        addAndMakeVisible (thumbs);
-        thumbs.onLayoutChanged = [this] { resized(); repaint(); };
-
-        // The MSEG module: MSEG is an LFO shape now (SHAPE › MSEG: UI review
-        // 7, S7-7 / V7-19; review 8, I8-4 / S8-5 / V8-2), so the patch's own
-        // older one has a card only while the patch uses it (a route, an
-        // oscillator's ENVELOPE), and its panel moves its routes onto an LFO.
-        LfoThumbBar::ExtraCard mseg;
-        mseg.title = "MSEG";
-        mseg.source = Mod::Source::Mseg;
-        mseg.colour = MsegEditor::colour();
-        mseg.isShown = [&p] { return msegModuleInUse (p); };
-        mseg.tooltip = "MSEG\nThe patch's own MSEG, from older presets (as an oscillator's ENVELOPE it plays once per note). "
-                       "Click to edit it below; MOVE TO LFO there draws it on an LFO instead (SHAPE \xe2\x80\xba MSEG), the "
-                       "one drawn-shape editor.";
-        mseg.valueAt = [this] (double phase) { return msegValueAt ((float) phase); };
-        mseg.phase = [this] { return (double) processorRef.getMsegPhase(); };
-        mseg.rateText = [this] { return describeValue ("mseg_rate", read ("mseg_rate")); };
-        mseg.fixedUses = [this] { return envelopeUses (16, 17); };
-        thumbs.addExtraCard (std::move (mseg));
-
-        LfoThumbBar::ExtraCard clock;
-        clock.title = "CLOCKED S&H";
-        clock.source = Mod::Source::ClockSh;
-        clock.colour = ClockShView::colour();
-        clock.isShown = [this] { return ! modSlotsUsing (processorRef, { Mod::Source::ClockSh }).empty(); };
-        clock.valueAt = [] (double phase)
-        {
-            static const float held[] { 0.6f, -0.3f, 0.9f, -0.8f, 0.1f, -0.5f, 0.4f, -0.1f };
-            return held[juce::jlimit (0, 7, (int) (phase * 8.0))];
-        };
-        clock.stepped = true;
-        clock.rateText = [this]
-        {
-            auto* parameter = processorRef.apvts.getParameter ("clock_div");
-            return parameter != nullptr ? parameter->getCurrentValueAsText() : juce::String();
-        };
-        thumbs.addExtraCard (std::move (clock));
-
-        LfoThumbBar::ExtraCard opLfo;
-        opLfo.title = "OP LFO";
-        opLfo.source = Mod::Source::OpLfo;
-        opLfo.colour = OperatorPool::colour();
-        // Only on a patch that plays the Operator Env, and there first (UI
-        // review 8, I8-5); greyed while only an old route keeps it.
-        opLfo.isShown = [&p] { return operatorSourceShown (p, Mod::Source::OpLfo); };
-        opLfo.isActive = [&p] { return FmOperatorInfo::anyOperatorEnv (p); };
-        opLfo.pinnedFirst = true;
-        opLfo.tooltip = "OP LFO\nThe Operator Env's LFO (the DX7's), for the whole voice. Click to edit it below; drag it onto a "
-                        "knob to modulate that knob too (source: OP LFO).";
-        opLfo.valueAt = [this] (double phase)
-        {
-            return OperatorPool::lfoWaveValue (juce::roundToInt (read ("opeg_lfo_wave")), phase);
-        };
-        opLfo.stepped = false;
-        opLfo.rateText = [this] { return describeValue ("opeg_lfo_speed", read ("opeg_lfo_speed")); };
-        opLfo.fixedUses = [this]
-        {
-            juce::StringArray uses;
-            if (read ("opeg_lfo_pmd") > 0.5f && read ("opeg_lfo_pms") > 0.5f)
-                uses.add ("Op pitch");
-            if (read ("opeg_lfo_amd") > 0.5f)
-                uses.add ("Op amp");
-            return uses;
-        };
-        thumbs.addExtraCard (std::move (opLfo));
         addChildComponent (opLfoEditor);
 
         msegLoop.showAsSwitch();
@@ -930,13 +725,6 @@ public:
 
         selected = juce::jlimit (0, opLfoId, settings.getIntValue ("lfoSelected", 0));
 
-        thumbs.onSelect = [this] (int index)
-        {
-            selected = index;
-            settings.setValue ("lfoSelected", selected);
-            updateVisibility();
-        };
-
         updateVisibility();
         for (int lfo = 1; lfo <= IlanaSynthAudioProcessor::numLfos; ++lfo)
             processorRef.apvts.addParameterListener ("lfo" + juce::String (lfo) + "_shape", this);
@@ -966,7 +754,6 @@ public:
     void setCompact (bool shouldBeCompact)
     {
         compact = shouldBeCompact;
-        thumbs.setVisible (! compact);
         opLfoEditor.setCompact (compact);
         for (auto& display : displays)
             display->setRulerInside (compact);
@@ -1062,19 +849,11 @@ public:
     static constexpr float compactDial = 28.0f;
     static constexpr int compactColumn = 4 * 46, compactPitch = 46, compactRow = 39, compactGap = 10, compactLine = 16, compactLineGap = 4;
 
-    static constexpr int cardHeight = 48;
     static constexpr int lfoRulerBand = 16; // (LfoDisplay: its ruler and the 2 px before it)
 
     void resized() override
     {
         auto area = getLocalBounds();
-
-        if (! compact)
-        {
-            thumbs.setViewWidth (area.getWidth());
-            thumbs.setBounds (area.removeFromTop (cardHeight));
-            area.removeFromTop (8);
-        }
 
         if (selected == opLfoId)
         {
@@ -1254,7 +1033,6 @@ public:
         if (selected < msegId && ! processorRef.isLfoShown (selected))
         {
             processorRef.setRevealed (IlanaSynthAudioProcessor::Module::Lfo, selected, true);
-            thumbs.refreshLayout();
         }
 
         settings.setValue ("lfoSelected", selected);
@@ -1419,7 +1197,6 @@ public:
     // The UI test reaches these through here.
     int getSelected() const { return selected; }
     LfoRateControl& getRateControl (int lfo) { return controlsList[(size_t) juce::jlimit (0, (int) controlsList.size() - 1, lfo)]->rate; }
-    LfoThumbBar& getThumbs() { return thumbs; }
     juce::Rectangle<int> getPanelBounds() const { return panel; }
     OperatorLfoEditor& getOperatorEditor() { return opLfoEditor; }
 
@@ -1490,33 +1267,6 @@ private:
     {
         const auto* value = processorRef.apvts.getRawParameterValue (id);
         return value != nullptr ? value->load() : 0.0f;
-    }
-
-    // The level the MSEG plays at `phase` (0..1), as Mseg::valueAt does,
-    // for its card.
-    float msegValueAt (float phase) const
-    {
-        float levels[4], times[4], total = 0.0f;
-        for (int i = 0; i < 4; ++i)
-        {
-            levels[i] = read ("mseg_level" + juce::String (i + 1));
-            times[i] = juce::jmax (0.01f, read ("mseg_time" + juce::String (i + 1)));
-            total += times[i];
-        }
-
-        auto cumulative = 0.0f;
-        for (int i = 0; i < 4; ++i)
-        {
-            const auto duration = times[i] / total;
-            if (phase < cumulative + duration || i == 3)
-            {
-                const auto local = juce::jlimit (0.0f, 1.0f, duration > 0.0001f ? (phase - cumulative) / duration : 0.0f);
-                const auto to = i < 3 ? levels[i + 1] : (read ("mseg_loop") > 0.5f ? levels[0] : levels[3]);
-                return levels[i] + (to - levels[i]) * local;
-            }
-            cumulative += duration;
-        }
-        return levels[3];
     }
 
     // Oscillators that play (or warp with) an envelope choice, for the
@@ -1886,17 +1636,29 @@ private:
             return;
 
         processorRef.performEdit ("Move MSEG to LFO " + juce::String (lfo + 1), [this] { processorRef.moveLegacyMsegToLfo(); });
-        thumbs.refreshLayout();
         select (lfo);
+    }
+
+    // The MSEG, the Clocked S&H and OP LFO are in the pool only while the
+    // patch uses them: the MSEG while a route or an oscillator's ENVELOPE
+    // plays it, the Clocked S&H while routed, OP LFO on a patch that plays
+    // the Operator Env (or still routes it).
+    bool cardInPool (int id) const
+    {
+        if (id == msegId)
+            return msegModuleInUse (processorRef);
+        if (id == clockId)
+            return ! modSlotsUsing (processorRef, { Mod::Source::ClockSh }).empty();
+        return id == opLfoId && operatorSourceShown (processorRef, Mod::Source::OpLfo);
     }
 
     void updateVisibility()
     {
         // A remembered selection can point at a card this patch doesn't
         // show: the first LFO shown instead, else the MSEG.
-        if ((selected < msegId && ! processorRef.isLfoShown (selected)) || (selected >= msegId && ! thumbs.isCardInPool (selected)))
+        if ((selected < msegId && ! processorRef.isLfoShown (selected)) || (selected >= msegId && ! cardInPool (selected)))
         {
-            selected = thumbs.isCardInPool (opLfoId) ? opLfoId : thumbs.isCardInPool (msegId) ? msegId : 0;
+            selected = cardInPool (opLfoId) ? opLfoId : cardInPool (msegId) ? msegId : 0;
             for (int lfo = 0; lfo < IlanaSynthAudioProcessor::numLfos; ++lfo)
                 if (processorRef.isLfoShown (lfo))
                 {
@@ -1961,7 +1723,6 @@ private:
             }
         }
 
-        thumbs.setSelected (selected);
         resized();
         repaint();
 
@@ -1979,7 +1740,7 @@ private:
     void timerCallback() override
     {
         // A card that went (a patch load, the Clocked S&H unrouted).
-        if ((selected < msegId && ! processorRef.isLfoShown (selected)) || (selected >= msegId && ! thumbs.isCardInPool (selected)))
+        if ((selected < msegId && ! processorRef.isLfoShown (selected)) || (selected >= msegId && ! cardInPool (selected)))
             updateVisibility();
 
         if (selected >= msegId)
@@ -2014,7 +1775,6 @@ private:
     IlanaSynthAudioProcessor& processorRef;
     juce::PropertiesFile& settings;
     juce::Rectangle<int> panel;
-    LfoThumbBar thumbs;
     bool compact = false;
     int lastCompactHeight = -1;
     bool lastCompactWide = false;

@@ -1359,15 +1359,11 @@ public:
 
     int getTabButtonBestWidth (juce::TabBarButton& button, int) override
     {
-        if (button.getProperties()["hiddenTab"]) // (a page behind the row: no button)
-            return 0;
         return juce::GlyphArrangement::getStringWidthInt (juce::Font (tabFont()), button.getButtonText()) + 22;
     }
 
     void drawTabButton (juce::TabBarButton& button, juce::Graphics& g, bool isMouseOver, bool isMouseDown) override
     {
-        if (button.getProperties()["hiddenTab"])
-            return;
         const auto bounds = button.getLocalBounds().toFloat();
         const auto active = button.getToggleState();
         const auto hover = animatedHover (&button, isMouseOver || isMouseDown, 14.0f);
@@ -1437,7 +1433,7 @@ public:
         juce::LookAndFeel_V4::drawTabAreaBehindFrontButton (bar, g, w, h);
 
         const auto* front = bar.getTabButton (bar.getCurrentTabIndex());
-        const auto shown = front != nullptr && ! (bool) front->getProperties()["hiddenTab"] && front->getWidth() > 20;
+        const auto shown = front != nullptr && front->getWidth() > 20;
         const auto alpha = IlanaTheme::fade (bar, 902, shown ? 1.0f : 0.0f);
 
         if (! shown && alpha < 0.01f)

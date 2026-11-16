@@ -30,7 +30,6 @@
 #include "gui/VectorPad.h"
 #include "dsp/VectorShape.h"
 #include "gui/PhysicalView.h"
-#include "gui/EnvThumbs.h"
 #if ILANA_VULKAN
  #include "gpu/VulkanCanvas.h"
  #include "gpu/VulkanDevice.h"
@@ -44,7 +43,7 @@
 #include "gui/FmDiagram.h"
 #include "gui/OperatorEnvDisplay.h"
 #include "gui/OperatorPoolCards.h"
-#include "gui/LfoThumbs.h"
+#include "gui/ModRoutes.h"
 #include "gui/ModulationCardView.h"
 #include "gui/MatrixWidgets.h"
 #include "gui/FilterDisplay.h"
@@ -13918,9 +13917,6 @@ int main (int argc, char** argv)
         setParam ("lfo1_rate", 1.0f);
         pages->showPage ("MAIN");
         settle (400);
-        if (auto* page = pages->getCurrentPage())
-            if (auto* thumbs = findChild<LfoThumbBar> (*page); thumbs != nullptr && thumbs->onSelect != nullptr)
-                thumbs->onSelect (0);
         juce::AudioBuffer<float> audio (2, 512);
         const auto sampleRate = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 44100.0;
         const auto blocksPerCycle = sampleRate / 512.0; // 1 Hz
@@ -13954,35 +13950,6 @@ int main (int argc, char** argv)
         pages->showPage ("MAIN");
         settle (500);
         save (*editor, outDir.getChildFile ("r-filter.png"));
-        pages->showPage ("MAIN");
-        settle (400);
-        if (auto* page = pages->getCurrentPage())
-            if (auto* thumbs = findChild<LfoThumbBar> (*page); thumbs != nullptr && thumbs->onSelect != nullptr)
-            {
-                thumbs->onSelect (0);
-                settle (300);
-                save (*editor, outDir.getChildFile ("r-lfo1.png"));
-                setParam ("lfo1_shape", (float) LfoShapes::Pendulum);
-                settle (400);
-                save (*editor, outDir.getChildFile ("r-lfo-physics.png"));
-                for (const auto& [shape, name] : std::initializer_list<std::pair<int, const char*>> {
-                         { LfoSimShapes::Lorenz, "lorenz" }, { LfoSimShapes::Pendulum, "pendulum" }, { LfoSimShapes::Spring, "spring" },
-                         { LfoSimShapes::Henon, "henon" } })
-                {
-                    setParam ("lfo1_shape", (float) shape);
-                    const auto& info = LfoSimInfo::get (shape);
-                    for (int param = 0; param < LfoSimInfo::numParams; ++param)
-                        if (auto* parameter = processor.apvts.getParameter ("lfo1_p" + juce::String (param + 1)))
-                            parameter->setValueNotifyingHost (info.params[(size_t) param].defaultValue);
-                    setParam ("lfo1_rate", 1.0f);
-                    settle (1500);
-                    save (*editor, outDir.getChildFile ("r-lfo-" + juce::String (name) + ".png"));
-                }
-                setParam ("lfo1_shape", 0.0f);
-                thumbs->onSelect (IlanaSynthAudioProcessor::numLfos + 2);
-                settle (400);
-                save (*editor, outDir.getChildFile ("r-oplfo.png"));
-            }
         pages->showPage ("MATRIX");
         settle (500);
         save (*editor, outDir.getChildFile ("r-matrix.png"));
@@ -14262,46 +14229,6 @@ int main (int argc, char** argv)
                                   knob->getWidth(), knob->getHeight(), knob->getMaxDial(), knob->getDialSize(), knob->getDialRadius());
         }
 
-        if (pageIds[i] == "OSC")
-        {
-            if (auto* mode = processor.apvts.getParameter ("osc1_mode"))
-            {
-                // (Put back as it was, not to Wavetable: a DX7 patch's OSC 1 is an operator, N16-3.)
-                const auto modeBefore = mode->getValue();
-                mode->setValueNotifyingHost (mode->convertTo0to1 (1.0f));
-                settle (300);
-                save (*editor, outDir.getChildFile ("osc-physical.png"));
-                if (auto* excite = processor.apvts.getParameter ("osc1_excite"))
-                    excite->setValueNotifyingHost (excite->convertTo0to1 (4.0f));
-                if (auto* buzz = processor.apvts.getParameter ("osc1_bridge_buzz"))
-                    buzz->setValueNotifyingHost (buzz->convertTo0to1 (0.6f));
-                if (auto* rattle = processor.apvts.getParameter ("osc1_fret_rattle"))
-                    rattle->setValueNotifyingHost (rattle->convertTo0to1 (0.4f));
-                settle (300);
-                save (*editor, outDir.getChildFile ("osc-bow-buzz.png"));
-                if (auto* viewport = dynamic_cast<juce::Viewport*> (pages->getCurrentPage()))
-                {
-                    if (auto* on = processor.apvts.getParameter ("sym_on"))
-                        on->setValueNotifyingHost (on->convertTo0to1 (1.0f));
-                    if (auto* amount = processor.apvts.getParameter ("sym_amount"))
-                        amount->setValueNotifyingHost (amount->convertTo0to1 (0.5f));
-                    // Let the page grow for the opened card, then scroll to it.
-                    settle (250);
-                    viewport->setViewPosition (0, 10000);
-                    settle (100);
-                    save (*editor, outDir.getChildFile ("osc-sympathetic.png"));
-                    if (auto* manual = processor.apvts.getParameter ("sym_manual"))
-                        manual->setValueNotifyingHost (manual->convertTo0to1 (1.0f));
-                    settle (250);
-                    viewport->setViewPosition (0, 10000);
-                    settle (100);
-                    save (*editor, outDir.getChildFile ("osc-sympathetic-manual.png"));
-                    viewport->setViewPosition (0, 0);
-                }
-                mode->setValueNotifyingHost (modeBefore);
-            }
-        }
-
         // Every sub-tab past the first on this page.
         std::vector<SubTabBar*> bars;
 
@@ -14338,32 +14265,6 @@ int main (int argc, char** argv)
                     settle (300);
                     break;
                 }
-        }
-
-        // Every envelope card on the ENV/LFO page.
-        if (auto* page = pages->getCurrentPage())
-        {
-            if (auto* envCards = findChild<EnvThumbBar> (*page); envCards != nullptr && envCards->onSelect != nullptr)
-            {
-                for (int env = 1; env < 5; ++env)
-                {
-                    envCards->onSelect (env);
-                    settle (300);
-                    save (*editor, outDir.getChildFile (stem + "-env" + juce::String (env + 1) + ".png"));
-                }
-
-                processor.setRevealed (IlanaSynthAudioProcessor::Module::Envelope, 5, true);
-                envCards->onSelect (5);
-                settle (300);
-                save (*editor, outDir.getChildFile ("env-pool-revealed.png"));
-                for (int env = 0; env < 16; ++env)
-                    processor.setRevealed (IlanaSynthAudioProcessor::Module::Envelope, env, true);
-                envCards->onSelect (15);
-                settle (300);
-                save (*editor, outDir.getChildFile ("env-pool-full.png"));
-
-                envCards->onSelect (0);
-            }
         }
 
         // Each FX module's editor, placed in slot 1.
@@ -14459,9 +14360,6 @@ int main (int argc, char** argv)
     if (auto* shape = processor.apvts.getParameter ("lfo1_shape"))
     {
         pages->showPage ("MAIN");
-        if (auto* page = pages->getCurrentPage())
-            if (auto* thumbs = findChild<LfoThumbBar> (*page); thumbs != nullptr && thumbs->onSelect != nullptr)
-                thumbs->onSelect (0);
         for (const auto physicsShape : { LfoShapes::Bounce, LfoShapes::Pendulum, LfoShapes::Spring, LfoShapes::Friction })
         {
             shape->setValueNotifyingHost (shape->convertTo0to1 ((float) physicsShape));
@@ -14477,9 +14375,6 @@ int main (int argc, char** argv)
         processor.setLfoCurve (0, LfoCurve::preset (9));
         pages->showPage ("MAIN");
 
-        if (auto* page = pages->getCurrentPage())
-            if (auto* thumbs = findChild<LfoThumbBar> (*page); thumbs != nullptr && thumbs->onSelect != nullptr)
-                thumbs->onSelect (0);
 
         settle (500);
         save (*editor, outDir.getChildFile ("lfo-curve.png"));
@@ -14488,14 +14383,6 @@ int main (int argc, char** argv)
         shape->setValueNotifyingHost (shape->convertTo0to1 ((float) LfoShapes::Steps));
         settle (400);
         save (*editor, outDir.getChildFile ("lfo-steps.png"));
-        if (auto* page = pages->getCurrentPage())
-            if (auto* thumbs = findChild<LfoThumbBar> (*page); thumbs != nullptr && thumbs->onSelect != nullptr)
-            {
-                thumbs->onSelect (IlanaSynthAudioProcessor::numLfos);
-                settle (400);
-                save (*editor, outDir.getChildFile ("lfo-mseg.png"));
-                thumbs->onSelect (0);
-            }
         shape->setValueNotifyingHost (shape->convertTo0to1 ((float) IlanaSynthAudioProcessor::curveShape));
     }
 
@@ -14504,9 +14391,6 @@ int main (int argc, char** argv)
         for (int lfo = 0; lfo < IlanaSynthAudioProcessor::numLfos; ++lfo)
             processor.setRevealed (IlanaSynthAudioProcessor::Module::Lfo, lfo, true);
         pages->showPage ("MAIN");
-        if (auto* page = pages->getCurrentPage())
-            if (auto* thumbs = findChild<LfoThumbBar> (*page); thumbs != nullptr && thumbs->onSelect != nullptr)
-                thumbs->onSelect (13);
         settle (400);
         save (*editor, outDir.getChildFile ("lfo-pool-full.png"));
         pages->showPage ("MAIN");
@@ -14522,9 +14406,6 @@ int main (int argc, char** argv)
         for (int env = 3; env < 16; ++env)
             processor.setRevealed (IlanaSynthAudioProcessor::Module::Envelope, env, false);
         pages->showPage ("MAIN");
-        if (auto* page = pages->getCurrentPage())
-            if (auto* thumbs = findChild<LfoThumbBar> (*page); thumbs != nullptr && thumbs->onSelect != nullptr)
-                thumbs->onSelect (0);
         const std::pair<int, const char*> shapes[] {
             { LfoSimShapes::Bounce, "bounce" }, { LfoSimShapes::Pendulum, "pendulum" }, { LfoSimShapes::Spring, "spring" },
             { LfoSimShapes::Friction, "friction" }, { LfoSimShapes::Lorenz, "lorenz" }, { LfoSimShapes::DoublePendulum, "double-pendulum" },
