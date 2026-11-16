@@ -8,6 +8,8 @@
 #   tools/verify.sh --quick      skip pluginval
 #   tools/verify.sh --all        also build the dev tools the gate does not run
 #                                (ilanaStress, ilanaKnobAudit, ilanaMidiRender, ...)
+#   (tools/compare_pictures.sh BASE_SNAPSHOT is the optional picture compare for
+#   a change that must not move a pixel; it is not part of this gate.)
 #   ILANA_JOBS=2 tools/verify.sh build parallelism (default: every core)
 #
 # Needs: cmake, ninja, python3; on a headless Linux box xvfb-run; pluginval
@@ -44,6 +46,9 @@ fi
 
 step "Doc paths"
 python3 tools/check_doc_paths.py
+
+step "Layout literal ratchet"
+python3 tools/layout_literal_ratchet.py
 
 step "Unit tests"
 ILANA_CI=1 build/ilanaTableTest_artefacts/Release/ilanaTableTest | tee build/table-test.txt | grep -E "^FAIL|TESTS" || true
