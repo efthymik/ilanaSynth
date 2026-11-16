@@ -385,7 +385,7 @@ private:
         menu.addItem (2, "Open in MATRIX");
         menu.addItem (3, "Remove");
         juce::Component::SafePointer<SourceRouteList> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safeThis, slot, bypass = routing.bypass] (int result)
+        menu.showMenuAsync (IlanaTheme::menuOptions (this), [safeThis, slot, bypass = routing.bypass] (int result)
         {
             if (safeThis == nullptr)
                 return;
@@ -1592,7 +1592,7 @@ private:
         if (envelopes.getNumItems() > 0)
             menu.addSubMenu ("Envelopes", envelopes);
         juce::Component::SafePointer<ModulationCard> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addTab), [safeThis] (int result)
+        menu.showMenuAsync (IlanaTheme::menuOptions (&addTab), [safeThis] (int result)
         {
             if (safeThis == nullptr || result <= 0)
                 return;
@@ -1611,7 +1611,7 @@ private:
         for (size_t i = 0; i < hiddenSources.size(); ++i)
             menu.addItem ((int) i + 1, sourceTabName (hiddenSources[i], processorRef), true, hiddenSources[i] == selected);
         juce::Component::SafePointer<ModulationCard> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&moreTab), [safeThis] (int result)
+        menu.showMenuAsync (IlanaTheme::menuOptions (&moreTab), [safeThis] (int result)
         {
             if (safeThis != nullptr && juce::isPositiveAndNotGreaterThan (result, (int) safeThis->hiddenSources.size()) && result > 0)
                 safeThis->select (safeThis->hiddenSources[(size_t) result - 1]);

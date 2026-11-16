@@ -317,7 +317,7 @@ public:
     {
         juce::Component::SafePointer<FilterTypePicker> safeThis (this);
         FilterTypes::buildMenu (current, colour)
-            .showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMinimumWidth (getWidth()),
+            .showMenuAsync (IlanaTheme::menuOptions (this).withMinimumWidth (getWidth()),
                             [safeThis] (int result)
                             {
                                 if (safeThis != nullptr && result > 0)
@@ -1033,7 +1033,7 @@ private:
             menu.addItem (i + 1, options[i], true, i == current);
 
         juce::Component::SafePointer<SignalFlow> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
+        menu.showMenuAsync (IlanaTheme::menuOptions (this),
                             [safeThis, parameter] (int result)
                             {
                                 if (result <= 0 || safeThis == nullptr)

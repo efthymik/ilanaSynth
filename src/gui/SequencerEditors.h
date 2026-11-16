@@ -362,7 +362,7 @@ private:
             menu.addItem (200 + divisions, divisions == 0 ? juce::String ("Off") : juce::String (divisions) + " columns",
                           true, gridDivisions == divisions);
         juce::Component::SafePointer<MsegEditor> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safeThis] (int result)
+        menu.showMenuAsync (IlanaTheme::menuOptions (this), [safeThis] (int result)
         {
             if (safeThis != nullptr && result >= 200)
                 safeThis->setGridDivisions (result - 200);
@@ -685,7 +685,7 @@ private:
         menu.addItem (2, "Even timing");
 
         juce::Component::SafePointer<MsegEditor> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safeThis] (int result)
+        menu.showMenuAsync (IlanaTheme::menuOptions (this), [safeThis] (int result)
         {
             if (safeThis == nullptr || result == 0)
                 return;

@@ -615,7 +615,7 @@ public:
         menu.addItem (3, soloSlot == slot ? "End solo (the other routes back on)" : "Solo this route", routing.source != Mod::Source::None || soloSlot == slot);
         menu.addSeparator();
         menu.addItem (4, "Remove");
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (rows[(size_t) slot].get()),
+        menu.showMenuAsync (IlanaTheme::menuOptions (rows[(size_t) slot].get()),
                             [safeThis = juce::Component::SafePointer<MatrixPage> (this), slot] (int result)
                             {
                                 if (safeThis != nullptr && result > 0)
@@ -776,7 +776,7 @@ public:
         menu.addSeparator();
         menu.addItem (1000, "Remove this row");
 
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (rows[(size_t) slot].get()),
+        menu.showMenuAsync (IlanaTheme::menuOptions (rows[(size_t) slot].get()),
                             [safeThis = juce::Component::SafePointer<MatrixPage> (this), slot] (int result)
                             {
                                 if (safeThis == nullptr || result <= 0)

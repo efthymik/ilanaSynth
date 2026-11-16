@@ -36,6 +36,7 @@
 #include "gui/ModSourceChip.h"
 #include "gui/OutputMeter.h"
 #include "gui/OutputView.h"
+#include "gui/PopupStack.h"
 #include "gui/PresetPanel.h"
 #include "gui/SavePresetOverlay.h"
 #include "gui/SectionPage.h"
@@ -114,6 +115,7 @@ public:
     void savePreset();
     void savePresetAs();
     SavePresetOverlay& getSaveOverlay() { return saveOverlay; }
+    PopupStack& getPopups() { return popups; }
     // The header arrows: the preset before (-1) or after (1) in the browser's list.
     void stepPreset (int delta);
 
@@ -176,6 +178,8 @@ private:
     void paintHeader (juce::Graphics& g);
     void presetSaved (bool inPlace);
     bool closeTopPopup();
+    void registerPopups();
+    PopupStack popups; // everything Esc can close, top first (see registerPopups)
     void exportPreset();
     void loadPreset();
     void togglePresetPanel();

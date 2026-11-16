@@ -2048,7 +2048,7 @@ private:
 
         juce::Component::SafePointer<PresetPanel> safeThis (this);
 
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&list),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&list),
                             [safeThis, presetIndex] (int result)
                             {
                                 if (safeThis == nullptr || result == 0)
@@ -2299,7 +2299,7 @@ private:
                 menu.addItem (1 + keys.size(), entry.label, true, entry.selected);
             }
 
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&chips),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&chips),
                             [safeThis = juce::Component::SafePointer<PresetPanel> (this), keys] (int result)
                             {
                                 if (safeThis == nullptr || result <= 0)
@@ -2388,7 +2388,7 @@ private:
         menu.addItem (3, "Favourites first", true, sortMode == sortFavouritesFirst);
         menu.addItem (4, "Recently loaded first", true, sortMode == sortRecentFirst);
 
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&sortButton),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&sortButton),
                             [safeThis = juce::Component::SafePointer<PresetPanel> (this)] (int result)
                             {
                                 if (safeThis != nullptr && result > 0)

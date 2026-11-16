@@ -9393,6 +9393,118 @@ int runUiTests()
             expect (false, "the dock has an LFO chip");
     }
 
+    // ARCH-9: the pop-up stack. Esc closes one overlay per press, top first: save, wavetable, zones,
+    // samples, tutorial, presets, source, dock, mod cards, remap, stereo, tuning, scope (the old chain's order,
+    // whichever was opened first).
+    {
+        const auto esc = [&] { return pages->keyPressed (juce::KeyPress (juce::KeyPress::escapeKey)); };
+        const auto names = pages->getPopups().names();
+        const auto order = juce::StringArray { "save", "wavetable", "zones", "samples", "tutorial", "presets", "source", "dock",
+                                               "modcard", "remap", "stereo", "tuning", "scope" };
+        auto sameOrder = (int) names.size() == order.size();
+        for (size_t i = 0; sameOrder && i < names.size(); ++i)
+            sameOrder = order[(int) i] == juce::String (names[i]);
+        expect (sameOrder, "pop-up stack: registered in the old Esc order");
+
+        pages->showPage ("MAIN");
+        settle (200);
+        while (pages->getPopups().closeTop()) {} // start clean
+        expect (! pages->getPopups().closeTop(), "pop-up stack: nothing open, closeTop is false");
+
+        const auto closedName = [&] { return juce::String (pages->getPopups().lastClosed()); };
+
+        pages->setScopeOpen (true);
+        settle (200);
+        expect (pages->isScopeOpen(), "pop-up stack: the scope opens");
+        esc();
+        settle (200);
+        expect (! pages->isScopeOpen() && closedName() == "scope", "pop-up stack: Esc closes the scope");
+
+        pages->openWavetableEditor (0, IlanaTheme::accent());
+        settle (200);
+        expect (pages->getWavetableEditor() != nullptr, "pop-up stack: the wavetable editor opens");
+        esc();
+        settle (200);
+        expect (pages->getWavetableEditor() == nullptr && closedName() == "wavetable", "pop-up stack: Esc closes the wavetable editor");
+
+        pages->openZoneEditor (0, IlanaTheme::accent());
+        settle (200);
+        expect (pages->getZoneEditor() != nullptr, "pop-up stack: the zone map opens");
+        esc();
+        settle (200);
+        expect (pages->getZoneEditor() == nullptr && closedName() == "zones", "pop-up stack: Esc closes the zone map");
+
+        pages->openSampleBrowser (0);
+        settle (200);
+        expect (pages->getSampleBrowser() != nullptr, "pop-up stack: the sample browser opens");
+        esc();
+        settle (200);
+        expect (pages->getSampleBrowser() == nullptr && closedName() == "samples", "pop-up stack: Esc closes the sample browser");
+
+        // Two open at once: the wavetable editor goes before the scope, though the scope opened first.
+        pages->setScopeOpen (true);
+        pages->openWavetableEditor (0, IlanaTheme::accent());
+        settle (200);
+        pages->getPopups().closeTop();
+        expect (closedName() == "wavetable" && pages->getWavetableEditor() == nullptr && pages->isScopeOpen(),
+                "pop-up stack: wavetable editor and scope open: the editor closes first");
+        pages->getPopups().closeTop();
+        expect (closedName() == "scope" && ! pages->isScopeOpen(), "pop-up stack: then the scope");
+
+        // The save panel is above the wavetable editor, even though it opened after... and before.
+        pages->openWavetableEditor (0, IlanaTheme::accent());
+        pages->savePresetAs();
+        settle (200);
+        const auto bothOpen = pages->getSaveOverlay().isShowing() && pages->getWavetableEditor() != nullptr;
+        pages->getPopups().closeTop();
+        expect (bothOpen && closedName() == "save" && ! pages->getSaveOverlay().isShowing() && pages->getWavetableEditor() != nullptr,
+                "pop-up stack: save panel and wavetable editor open: the save panel closes first");
+        pages->getPopups().closeTop();
+        expect (closedName() == "wavetable" && pages->getWavetableEditor() == nullptr, "pop-up stack: then the wavetable editor");
+
+        // The zone map before the sample browser before the scope.
+        pages->setScopeOpen (true);
+        pages->openSampleBrowser (0);
+        pages->openZoneEditor (0, IlanaTheme::accent());
+        settle (200);
+        pages->getPopups().closeTop();
+        const auto first = closedName();
+        pages->getPopups().closeTop();
+        const auto second = closedName();
+        pages->getPopups().closeTop();
+        expect (first == "zones" && second == "samples" && closedName() == "scope" && ! pages->isScopeOpen(),
+                "pop-up stack: zone map, then sample browser, then scope (" + first + ", " + second + ")");
+
+        // The source pop-up goes before the scope.
+        pages->showPage ("FILTER");
+        settle (200);
+        {
+            std::vector<ModSourceChip*> chips;
+            findAll<ModSourceChip> (*editor, chips);
+            ModSourceChip* chip = nullptr;
+            for (auto* candidate : chips)
+                if (candidate->isVisible() && candidate->onClick != nullptr && chip == nullptr
+                    && Mod::lfoIndexFor ((Mod::Source) candidate->getSourceIndex()) >= 0)
+                    chip = candidate;
+            if (chip != nullptr)
+            {
+                pages->setScopeOpen (true);
+                chip->onClick (*chip);
+                settle (200);
+                const auto opened = pages->getSourcePopover() != nullptr && pages->getSourcePopover()->isVisible();
+                pages->getPopups().closeTop();
+                expect (opened && closedName() == "source" && pages->isScopeOpen(), "pop-up stack: source pop-up and scope open: the pop-up closes first");
+                pages->getPopups().closeTop();
+                expect (closedName() == "scope" && ! pages->isScopeOpen(), "pop-up stack: then the scope");
+            }
+            else
+                expect (false, "pop-up stack: a source chip to open");
+        }
+        expect (! pages->getPopups().closeTop(), "pop-up stack: all closed, nothing left");
+        pages->showPage ("MAIN");
+        settle (100);
+    }
+
     pages->setAsksBeforeReplacingEdits (askedBefore);
     editor.reset();
     expect (dynamic_cast<IlanaLookAndFeel*> (&juce::LookAndFeel::getDefaultLookAndFeel()) == nullptr,

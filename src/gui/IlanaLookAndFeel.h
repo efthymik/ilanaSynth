@@ -1042,6 +1042,15 @@ inline void makePill (juce::Button& button, juce::Colour colour)
     button.repaint();
 }
 
+// The one place that builds the options for a pop-up menu anchored to a component. Every menu
+// launch site goes through here, so a change to how menus open (parent, scale, renderer) is one edit.
+// Returns the options so a site can still chain .withMousePosition(), .withMinimumWidth() and so on.
+inline juce::PopupMenu::Options menuOptions (juce::Component* target)
+{
+    return juce::PopupMenu::Options().withTargetComponent (target);
+}
+inline juce::PopupMenu::Options menuOptions (juce::Component& target) { return menuOptions (&target); }
+
 } // namespace IlanaTheme
 
 class IlanaLookAndFeel : public juce::LookAndFeel_V4

@@ -680,7 +680,7 @@ private:
         const auto dot = dots[(size_t) index];
         juce::PopupMenu menu;
         addRouteItems (menu, dot);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this)
+        menu.showMenuAsync (IlanaTheme::menuOptions (this)
                                 .withTargetScreenArea (localAreaToGlobal (dotBounds (index).expanded (2.0f).getSmallestIntegerContainer())),
                             [safeThis = juce::Component::SafePointer<ModDotStrip> (this), dot] (int result)
                             {
@@ -2740,7 +2740,7 @@ private:
             const auto dot = owner.routings[(size_t) ring];
             juce::PopupMenu menu;
             ModDotStrip::addRouteItems (menu, dot);
-            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
+            menu.showMenuAsync (IlanaTheme::menuOptions (this),
                                 [safeOwner = juce::Component::SafePointer<KnobControl> (&owner), dot] (int result)
                                 {
                                     if (safeOwner != nullptr)
@@ -3135,7 +3135,7 @@ private:
         auto menu = buildModMenu();
         juce::Component::SafePointer<KnobControl> safeThis (this);
 
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
+        menu.showMenuAsync (IlanaTheme::menuOptions (this),
                             [safeThis, routes = routings] (int result)
                             {
                                 if (safeThis == nullptr || result == 0)
@@ -4616,7 +4616,7 @@ private:
 
         juce::PopupMenu menu;
         addMidiLearnItems (menu, *processorRef, parameterId);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&button),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&button),
                             [safeThis = juce::Component::SafePointer<ToggleControl> (this)] (int result)
                             {
                                 if (safeThis != nullptr && safeThis->processorRef != nullptr)

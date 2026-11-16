@@ -940,7 +940,7 @@ private:
             }
             menu.addSubMenu (source < 0 ? juce::String ("NOISE into") : "OSC " + juce::String (source + 1) + " into", into);
         }
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (addRouteButton));
+        menu.showMenuAsync (IlanaTheme::menuOptions (addRouteButton));
     }
 
     // ROUTES (a row per route: its colour, its name, its depth, a remove cross), + ADD ROUTE, FM MODE, then the

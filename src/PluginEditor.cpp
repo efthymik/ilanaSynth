@@ -295,6 +295,7 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
 
     setLookAndFeel (&lookAndFeel);
     tooltipWindow.setOpaque (false);
+    registerPopups();
 
     {
         juce::PropertiesFile::Options options;
@@ -793,7 +794,7 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
         juce::PopupMenu menu;
         menu.addItem (1, "Copy A to B");
         menu.addItem (2, "Copy B to A", ! showingA || slotB.isValid()); // (B is empty until the first flip)
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&abButton),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&abButton),
                             [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)] (int result)
                             {
                                 if (safeThis != nullptr && result > 0)
@@ -1544,7 +1545,7 @@ void IlanaSynthAudioProcessorEditor::showSourceMenu (juce::Component& target, in
         menu.addSubMenu ("Show in the matrix", matrixRows);
     }
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target),
+    menu.showMenuAsync (IlanaTheme::menuOptions (&target),
                         [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this), source] (int result)
                         {
                             if (safeThis == nullptr || result <= 0)
@@ -1783,7 +1784,7 @@ void IlanaSynthAudioProcessorEditor::showChipPicker()
     if (envelopes.getNumItems() > 0)
         menu.addSubMenu ("Envelopes", envelopes);
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&moreChipsButton),
+    menu.showMenuAsync (IlanaTheme::menuOptions (&moreChipsButton),
                         [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)] (int result)
                         {
                             if (safeThis != nullptr && result > 0)
@@ -3531,7 +3532,7 @@ void IlanaSynthAudioProcessorEditor::showHistoryMenu()
         }
     }
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&historyButton),
+    menu.showMenuAsync (IlanaTheme::menuOptions (&historyButton),
                         [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)] (int result)
                         {
                             if (safeThis == nullptr || result < 1000)
@@ -3735,7 +3736,7 @@ void IlanaSynthAudioProcessorEditor::showPresetMenu()
     menu.addSeparator();
     menu.addItem (6, "Import DX7 / Dexed bank (.syx)...");
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&moreButton),
+    menu.showMenuAsync (IlanaTheme::menuOptions (&moreButton),
                         [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)] (int result)
                         {
                             if (safeThis == nullptr)
@@ -3788,7 +3789,7 @@ void IlanaSynthAudioProcessorEditor::showDiceMenu()
     menu.addItem (10, "Nudge  (small changes)");
     menu.addItem (11, "Shake  (bigger changes)");
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&diceButton),
+    menu.showMenuAsync (IlanaTheme::menuOptions (&diceButton),
                         [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)] (int result)
                         {
                             if (safeThis == nullptr || result == 0)
@@ -3931,7 +3932,7 @@ void IlanaSynthAudioProcessorEditor::showSettingsMenu (bool tuningOnly)
     }
 
     auto* target = tuningOnly ? static_cast<juce::Component*> (&presetDisplay) : &settingsButton;
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target),
+    menu.showMenuAsync (IlanaTheme::menuOptions (target),
                         [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)] (int result)
                         {
                             if (safeThis == nullptr || result == 0)
@@ -4435,56 +4436,90 @@ void IlanaSynthAudioProcessorEditor::mutate (float amount)
 // the scope. False when nothing was open.
 bool IlanaSynthAudioProcessorEditor::closeTopPopup()
 {
-    if (saveOverlay.isShowing())
+    return popups.closeTop();
+}
+
+// Registers every overlay with the pop-up stack, top first. This order is the Esc order
+// (it is the order of the old hand-written chain, kept exactly): where two are open at
+// once the earlier one closes first, whichever was opened first.
+void IlanaSynthAudioProcessorEditor::registerPopups()
+{
+    popups.add ("save", [this]
     {
+        if (! saveOverlay.isShowing())
+            return false;
+
         saveOverlay.cancel();
         return true;
-    }
+    });
 
     // Esc closes the wavetable editor wherever the focus is in the window
     // (a text field there would otherwise keep the key).
-    if (wavetableEditor != nullptr)
+    popups.add ("wavetable", [this]
     {
+        if (wavetableEditor == nullptr)
+            return false;
+
         closeWavetableEditor();
         return true;
-    }
+    });
 
-    if (zoneEditor != nullptr)
+    popups.add ("zones", [this]
     {
+        if (zoneEditor == nullptr)
+            return false;
+
         closeZoneEditor();
         return true;
-    }
+    });
 
-    if (sampleBrowser != nullptr)
+    popups.add ("samples", [this]
     {
+        if (sampleBrowser == nullptr)
+            return false;
+
         closeSampleBrowser();
         return true;
-    }
+    });
 
-    if (tutorial.isVisible())
+    popups.add ("tutorial", [this]
     {
+        if (! tutorial.isVisible())
+            return false;
+
         tutorial.dismiss();
         return true;
-    }
+    });
 
-    if (presetPanel != nullptr && presetPanel->isOpen() && ! presetPanel->isDocked())
+    popups.add ("presets", [this]
     {
+        if (presetPanel == nullptr || ! presetPanel->isOpen() || presetPanel->isDocked())
+            return false;
+
         presetPanel->close();
         return true;
-    }
+    });
 
-    if (getSourcePopoverSource() != 0)
+    popups.add ("source", [this]
     {
+        if (getSourcePopoverSource() == 0)
+            return false;
+
         closeSourcePopover();
         return true;
-    }
+    });
 
-    if (presetDockShown)
+    popups.add ("dock", [this]
     {
+        if (! presetDockShown)
+            return false;
+
         setPresetDockShown (false);
         return true;
-    }
+    });
 
+    // Held mod cards (every knob that has one open closes together), then the remap editor.
+    popups.add ("modcard", [this]
     {
         std::vector<KnobControl*> knobs;
         std::function<void (juce::Component&)> collect = [&] (juce::Component& parent)
@@ -4509,9 +4544,11 @@ bool IlanaSynthAudioProcessorEditor::closeTopPopup()
             }
         }
 
-        if (closed)
-            return true;
+        return closed;
+    });
 
+    popups.add ("remap", [this]
+    {
         std::function<RemapEditor* (juce::Component&)> findRemap = [&] (juce::Component& parent) -> RemapEditor*
         {
             for (auto* child : parent.getChildren())
@@ -4526,17 +4563,21 @@ bool IlanaSynthAudioProcessorEditor::closeTopPopup()
             return nullptr;
         };
 
-        if (auto* remap = findRemap (content); remap != nullptr && remap->close())
-            return true;
-    }
+        auto* remap = findRemap (content);
+        return remap != nullptr && remap->close();
+    });
 
-    if (stereoPopover != nullptr && stereoPopover->isVisible() && ! stereoGrow->isClosing())
+    popups.add ("stereo", [this]
     {
+        if (stereoPopover == nullptr || ! stereoPopover->isVisible() || stereoGrow->isClosing())
+            return false;
+
         setStereoOpen (false);
         return true;
-    }
+    });
 
     // The tuning pop-over of PLAY (or of the OSC page behind it).
+    popups.add ("tuning", [this]
     {
         std::function<bool (juce::Component&)> closeTuning = [&] (juce::Component& parent)
         {
@@ -4555,17 +4596,17 @@ bool IlanaSynthAudioProcessorEditor::closeTopPopup()
             return false;
         };
 
-        if (closeTuning (content))
-            return true;
-    }
+        return closeTuning (content);
+    });
 
-    if (isScopeOpen())
+    popups.add ("scope", [this]
     {
+        if (! isScopeOpen())
+            return false;
+
         setScopeOpen (false);
         return true;
-    }
-
-    return false;
+    });
 }
 
 bool IlanaSynthAudioProcessorEditor::keyPressed (const juce::KeyPress& key)

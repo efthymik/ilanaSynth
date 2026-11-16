@@ -81,7 +81,7 @@ inline void confirmPoolRemoval (juce::Component& target, const juce::String& hea
     menu.addItem (1, action);
     menu.addItem (2, "Keep it");
     juce::Component::SafePointer<juce::Component> safeTarget (&target);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target),
+    menu.showMenuAsync (IlanaTheme::menuOptions (&target),
                         [safeTarget, onRemove = std::move (onRemove)] (int result)
                         {
                             if (safeTarget != nullptr && result == 1 && onRemove != nullptr)
@@ -666,7 +666,7 @@ private:
 
     void showTileMenu (int lfo)
     {
-        buildTileMenu (lfo).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+        buildTileMenu (lfo).showMenuAsync (IlanaTheme::menuOptions (this).withMousePosition());
     }
 
     void removeLfo (int lfo)

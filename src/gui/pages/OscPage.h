@@ -115,7 +115,7 @@ inline void bindModeMenu (ComboControl& control, IlanaSynthAudioProcessor& p, in
             menu.addItem (entry + 1, modeName (entry), true, entry == current);
 
         juce::Component::SafePointer<juce::ComboBox> safe (box);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (box), [safe, &p, osc] (int result)
+        menu.showMenuAsync (IlanaTheme::menuOptions (box), [safe, &p, osc] (int result)
         {
             if (safe != nullptr && result > 0)
                 chooseMode (p, osc, result - 1);
@@ -437,7 +437,7 @@ inline void groupExciteMenu (ComboControl& control)
         }
 
         juce::Component::SafePointer<juce::ComboBox> safe (combo);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (combo), [safe] (int result)
+        menu.showMenuAsync (IlanaTheme::menuOptions (combo), [safe] (int result)
         {
             if (safe != nullptr && result > 0)
                 safe->setSelectedId (result);
@@ -538,7 +538,7 @@ inline void groupWarpMenu (ComboControl& control, int osc, std::function<bool (i
         add (Warp::NoiseFm, "FM from Noise", "NOISE" + arrow + "OSC " + juce::String (osc + 1));
 
         juce::Component::SafePointer<juce::ComboBox> safe (combo);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (combo), [safe] (int result)
+        menu.showMenuAsync (IlanaTheme::menuOptions (combo), [safe] (int result)
         {
             if (safe != nullptr && result > 0)
                 safe->setSelectedId (result);
@@ -1659,7 +1659,7 @@ public:
                         menu.addItem (excite + 1, Exciters::name (excite), true, box.getSelectedId() == excite + 1);
                 }
                 juce::Component::SafePointer<OscPage> safe (this);
-                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&box), [safe, i] (int result)
+                menu.showMenuAsync (IlanaTheme::menuOptions (&box), [safe, i] (int result)
                 {
                     if (safe != nullptr && result > 0)
                         safe->chooseExciter (i, result - 1);
@@ -4483,8 +4483,8 @@ private:
         menu.addSeparator();
         menu.addItem (4, "Colour...");
         juce::Component::SafePointer<OscPage> safe (this);
-        menu.showMenuAsync (target != nullptr ? juce::PopupMenu::Options().withTargetComponent (target)
-                                              : juce::PopupMenu::Options().withTargetComponent (this).withMousePosition(),
+        menu.showMenuAsync (target != nullptr ? IlanaTheme::menuOptions (target)
+                                              : IlanaTheme::menuOptions (this).withMousePosition(),
                             [safe, band, on] (int result)
                             {
                                 if (safe == nullptr || result == 0)
@@ -4550,7 +4550,7 @@ private:
             menu.addItem (3, "(Any audio: the pitch is detected and one cycle per frame is taken across the file)", false);
 
             juce::Component::SafePointer<OscPage> safeMenu (this);
-            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&button),
+            menu.showMenuAsync (IlanaTheme::menuOptions (&button),
                                 [safeMenu, tableId, tableChoiceOffset] (int result)
                                 {
                                     if (safeMenu != nullptr && (result == 1 || result == 2 || result == 4 || result == 5))
@@ -4644,7 +4644,7 @@ private:
         menu.addItem (6, "Use as a sample instead");
 
         juce::Component::SafePointer<OscPage> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&waveDisplay (oscIndex)),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&waveDisplay (oscIndex)),
                             [safeThis, tableId, file, oscIndex] (int result)
                             {
                                 if (safeThis == nullptr || result == 0)
@@ -5128,7 +5128,7 @@ public:
         menu.addSubMenu ("Velocity layers", layers);
 
         juce::Component::SafePointer<OscPage> safe (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (bounceButtons[(size_t) index].get()),
+        menu.showMenuAsync (IlanaTheme::menuOptions (bounceButtons[(size_t) index].get()),
                             [safe, index] (int result)
                             {
                                 if (safe == nullptr || result == 0)
@@ -5171,7 +5171,7 @@ public:
         if (sample == nullptr || sample->getNumSamples() < 2)
         {
             menu.addItem (1, "Load a sample first", false);
-            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&aux[(size_t) index]->sampleExportButton));
+            menu.showMenuAsync (IlanaTheme::menuOptions (&aux[(size_t) index]->sampleExportButton));
             return;
         }
         menu.addItem (1, "Export Played Range as WAV...");
@@ -5179,7 +5179,7 @@ public:
                                                : juce::String ("Export Whole Region as WAV (the one under middle C)..."));
         const auto name = sample->name.isNotEmpty() ? sample->name : juce::String ("Sample");
         juce::Component::SafePointer<OscPage> safe (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&aux[(size_t) index]->sampleExportButton),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&aux[(size_t) index]->sampleExportButton),
                             [safe, index, name] (int result)
                             {
                                 if (safe == nullptr || result == 0)

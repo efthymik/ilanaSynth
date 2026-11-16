@@ -486,7 +486,7 @@ public:
 
     void showModuleMenu (int source)
     {
-        buildModuleMenu (source).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+        buildModuleMenu (source).showMenuAsync (IlanaTheme::menuOptions (this).withMousePosition());
     }
 
     // A click on the dot, left of the pills, opens the pop-up editor too.
@@ -570,7 +570,7 @@ private:
                     menu.addItem (1 + lfo, "LFO " + juce::String (lfo + 1));
         }
         juce::Component::SafePointer<SourceCarouselCard> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&add), [safeThis] (int result)
+        menu.showMenuAsync (IlanaTheme::menuOptions (&add), [safeThis] (int result)
         {
             if (safeThis == nullptr || result <= 0)
                 return;
@@ -2057,7 +2057,7 @@ public:
         if (filter == 2)
             return; // (WEST has no Copy / Paste / Init)
 
-        buildFilterMenu (filter).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&filterTabs).withMousePosition());
+        buildFilterMenu (filter).showMenuAsync (IlanaTheme::menuOptions (&filterTabs).withMousePosition());
     }
 
     juce::PopupMenu buildFilterMenu (int filter)
@@ -2929,7 +2929,7 @@ private:
         }
 
         juce::Component::SafePointer<PlayPage> safe (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&combo),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&combo),
                             [safe, parameter, filterIndex] (int result)
                             {
                                 if (safe == nullptr || result <= 0)

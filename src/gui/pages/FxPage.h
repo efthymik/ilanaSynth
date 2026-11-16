@@ -1149,7 +1149,7 @@ private:
         menu.addItem (1, "Save chain...");
         menu.addItem (2, "Load chain...");
         juce::Component::SafePointer<FxPage> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&fileButton),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&fileButton),
                             [safeThis] (int result)
                             {
                                 if (safeThis == nullptr)
@@ -1166,7 +1166,7 @@ private:
     void showTypeMenu (int slot, juce::Component* target = nullptr)
     {
         juce::Component::SafePointer<FxPage> safeThis (this);
-        buildTypeMenu (slot).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target != nullptr ? target : this),
+        buildTypeMenu (slot).showMenuAsync (IlanaTheme::menuOptions (target != nullptr ? target : this),
                                             [safeThis, slot] (int result)
                                             {
                                                 if (safeThis != nullptr && result > 0)
@@ -3520,7 +3520,7 @@ private:
         }
 
         juce::Component::SafePointer<FxPage> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&awAlgo),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&awAlgo),
                             [safeThis] (int result)
                             {
                                 if (safeThis != nullptr && result > 0)
@@ -3629,7 +3629,7 @@ private:
             }
             menu.addSubMenu (FilterTypeGrid::getPageName (page), pageMenu, true, nullptr, holdsCurrent);
         }
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&filterType),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&filterType),
                             [safeThis = juce::Component::SafePointer<FxPage> (this), parameter] (int result)
                             {
                                 if (safeThis == nullptr || result <= 0)
@@ -3653,7 +3653,7 @@ private:
             menu.addItem (i + 1, airwindowsDisplayName (airwindows::registry()[(size_t) category.algorithms[(size_t) i]].name), true, i == chosen);
 
         juce::Component::SafePointer<FxPage> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (awCategories[(size_t) c].algo.get()),
+        menu.showMenuAsync (IlanaTheme::menuOptions (awCategories[(size_t) c].algo.get()),
                             [safeThis, c] (int result)
                             {
                                 if (safeThis != nullptr && result > 0)

@@ -675,7 +675,7 @@ private:
         juce::PopupMenu menu;
         menu.addItem (1, "Remove Folder From Places");
         const auto stored = placeList[(size_t) index].stored;
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&places),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&places),
                             [safe = juce::Component::SafePointer<SampleBrowser> (this), stored] (int result)
                             {
                                 if (safe == nullptr || result != 1)

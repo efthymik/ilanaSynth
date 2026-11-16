@@ -431,7 +431,7 @@ private:
 
     void showTileMenu (int tile)
     {
-        buildTileMenu (tile).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+        buildTileMenu (tile).showMenuAsync (IlanaTheme::menuOptions (this).withMousePosition());
     }
 
     void removeEnvelope (int env)

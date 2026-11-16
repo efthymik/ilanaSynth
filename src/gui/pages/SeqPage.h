@@ -133,7 +133,7 @@ public:
                 juce::PopupMenu menu;
                 for (int i = 1; i < box->getNumItems(); ++i)
                     menu.addItem (box->getItemId (i), box->getItemText (i), true, box->getSelectedItemIndex() == i);
-                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (box.getComponent()).withMinimumWidth (box->getWidth()),
+                menu.showMenuAsync (IlanaTheme::menuOptions (box.getComponent()).withMinimumWidth (box->getWidth()),
                                     [box] (int id)
                                     {
                                         if (id > 0 && box != nullptr)

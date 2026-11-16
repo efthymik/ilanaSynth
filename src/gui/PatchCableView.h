@@ -148,7 +148,7 @@ public:
     // How menus open. The tests swap it for one that picks an item.
     std::function<void (juce::PopupMenu&, std::function<void (int)>)> openMenu = [this] (juce::PopupMenu& menu, std::function<void (int)> done)
     {
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition(), std::move (done));
+        menu.showMenuAsync (IlanaTheme::menuOptions (this).withMousePosition(), std::move (done));
     };
 
     void setLoopLatencyMs (float ms) { loopLatencyMs = ms; repaint(); }
