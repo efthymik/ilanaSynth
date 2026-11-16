@@ -277,7 +277,7 @@ public:
         inner.removeFromRight (14.0f);
 
         g.setColour (IlanaTheme::Ui::text);
-        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::packedBody, true)); // (the tabs' and slope pills' size: one size in the block)
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::body, true));
         IlanaTheme::drawFitted (g, FilterTypes::displayName (current), inner.toNearestInt(), juce::Justification::centredLeft, 1);
 
         for (const auto direction : { -1, 1 })
