@@ -1980,7 +1980,7 @@ public:
             }
             g.setColour ((isPlaceholderValue (value) ? Ui::text3 : Ui::text).withMultipliedAlpha (textOn));
             g.setFont (font (packedMenuSizeOf (box)));
-            IlanaTheme::drawFitted (g, value, juce::Rectangle<int> (textX, 0, juce::jmax (0, width - textX - 15), height), juce::Justification::centredLeft, 1);
+            IlanaTheme::drawFitted (g, value, juce::Rectangle<int> (textX, 0, juce::jmax (0, width - textX - 13), height), juce::Justification::centredLeft, 1);
             return;
         }
 
@@ -1998,10 +1998,10 @@ public:
         const auto prefix = box.getProperties()["textPrefix"].toString();
         if (prefix.isNotEmpty() && (bool) box.getProperties().getWithDefault ("packedMenu", false))
         {
-            const auto prefixW = juce::GlyphArrangement::getStringWidthInt (IlanaTheme::font (packedNameText, true).withKerningFactor (0.09f), prefix) + 5;
+            const auto prefixW = juce::GlyphArrangement::getStringWidthInt (IlanaTheme::font (packedNameText, true).withKerningFactor (0.09f), prefix) + 3;
             // (The value comes first: a menu with no room for both drops its name, which the tooltip keeps.)
-            const auto valueW = juce::GlyphArrangement::getStringWidthInt (IlanaTheme::font (packedMenuSizeOf (box)), box.getText()) + 2;
-            return valueW > box.getWidth() - 5 - prefixW - 15 ? 0 : prefixW;
+            const auto valueW = juce::GlyphArrangement::getStringWidthInt (IlanaTheme::font (packedMenuSizeOf (box)), box.getText()) + 1;
+            return valueW > box.getWidth() - 5 - prefixW - 13 ? 0 : prefixW;
         }
         // (A menu too narrow for its name and a value drops the name: the 75 % zoom's.)
         if (prefix.isEmpty() || box.getWidth() < 118)

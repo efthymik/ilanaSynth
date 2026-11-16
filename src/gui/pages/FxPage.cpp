@@ -1806,6 +1806,7 @@ void FxPage::layoutStack ()
     // dials, if its cards still fit at their natural height with them;
     // a long one the compact dials (UI review 31, suggestion 12).
     bigDials = growRows && cards.size() <= 3;
+    loneCard = cards.size() == 1;
     measure();
     if (bigDials && naturalTotal > viewHeight)
     {
@@ -2122,7 +2123,19 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
     // Side columns: their items from the top of the knob rows' band, one under the other.
     // (On a tall card the rows stand apart, up to twice the grid, so the
     // knobs share the card's height rather than sitting in a band of air.)
-    const auto rowPitch = juce::jlimit (grid.rowHeight, grid.rowHeight * 2, knobsArea.getHeight() / juce::jmax (1, plan.knobRows));
+    // A tall card's dials grow with the room they have (up to 56), and the rows keep an even, modest pitch.
+    const auto roomPerRow = knobsArea.getHeight() / juce::jmax (1, plan.knobRows);
+    const auto dialSize = loneCard ? juce::jlimit (grid.dial, juce::jmax (grid.dial, 56.0f), grid.dial + (float) (roomPerRow - grid.rowHeight) * 0.5f) : grid.dial;
+    const auto growth = dialSize / grid.dial;
+    const auto scaledRow = juce::roundToInt ((float) grid.rowHeight * growth);
+    const auto rowPitch = juce::jlimit (scaledRow, juce::roundToInt ((float) scaledRow * 1.3f), roomPerRow);
+    if (growth > 1.01f)
+        for (auto* knob : knobs)
+            if (auto* k = dynamic_cast<KnobControl*> (knob))
+            {
+                k->setPackedDial (dialSize);
+                k->setPackedValueSize (grid.value * growth);
+            }
     const auto band = knobsArea.withSizeKeepingCentre (knobsArea.getWidth(), plan.knobRows * rowPitch);
     auto sideArea = band.withWidth (plan.sideColumns * (sideWidth + sideColumnGap));
     const auto sideHeight = juce::jmin ((int) sides.size(), plan.sidePerColumn) * (sideRow + sideGap) - sideGap;
@@ -2153,7 +2166,7 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
         const auto column = (int) i % juce::jmax (1, plan.knobColumns), row = (int) i / juce::jmax (1, plan.knobColumns);
         // (Each row's dial and name centred on the row, as the menus beside them are.)
         const auto rowCentre = band.getY() + rowPitch / 2 + row * rowPitch;
-        const auto cell = juce::Rectangle<int> (knobsX + column * grid.pitch, rowCentre - grid.drawnHeight() / 2, grid.pitch, grid.drawnHeight() + 13);
+        const auto cell = juce::Rectangle<int> (knobsX + column * grid.pitch, rowCentre - ((int) dialSize + 10) / 2, grid.pitch, (int) dialSize + 10 + 13);
         knobs[i]->setBounds (KnobControl::packedBoundsFor (cell));
     }
 
@@ -2340,7 +2353,9 @@ void FxPage::paintRailChip (juce::Graphics& g, const StackPanel& panel, float x)
         const auto font = IlanaTheme::font (IlanaTheme::TextSize::tiny, true);
         const auto textWidth = (float) juce::GlyphArrangement::getStringWidthInt (juce::Font (font), text);
         const auto chipWidth = (off ? 0.0f : 21.0f) + textWidth + 12.0f;
-        const auto chip = juce::Rectangle<float> (chipWidth, 16.0f).withCentre (chipCentre);
+        auto chip = juce::Rectangle<float> (chipWidth, 16.0f).withCentre (chipCentre.translated (0.0f, (float) -Space::s2));
+        // Keep the whole pill inside the rail column (it was cut by the window edge).
+        chip.setX (juce::jlimit (1.0f, juce::jmax (1.0f, (float) railWidth + (float) railGap * 0.5f - chip.getWidth()), chip.getX()));
         g.setColour (IlanaTheme::Ui::well);
         g.fillRoundedRectangle (chip, 8.0f);
         g.setColour (IlanaTheme::Ui::line);

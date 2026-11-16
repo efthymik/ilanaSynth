@@ -325,7 +325,9 @@ public:
             {
                 // On the corner, kept inside the pad.
                 const auto inside = area.reduced (6.0f);
+                // Beside the node, not on it: above a node in the lower half, below one in the upper.
                 pill = pill.withCentre (corner);
+                pill.setY (corner.y < area.getCentreY() - 1.0f ? corner.y + 11.0f : corner.y - 11.0f - pill.getHeight());
                 pill.setPosition (juce::jlimit (inside.getX(), inside.getRight() - pill.getWidth(), pill.getX()),
                                   juce::jlimit (inside.getY(), inside.getBottom() - pill.getHeight(), pill.getY()));
             }

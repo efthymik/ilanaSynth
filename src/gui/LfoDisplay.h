@@ -1308,16 +1308,25 @@ private:
                                          : wellArea().toNearestInt().reduced (10, 2).removeFromBottom (12);
         const auto hintFont = IlanaTheme::font (IlanaTheme::TextSize::tiny);
         juce::String hint;
+        auto hintFits = false;
         for (const auto* wording : { "click: add   drag: move   dot on a line: curve   double-click: delete   right-click: shapes",
                                      "click: add   drag: move   dot: curve   double-click: delete   right-click: shapes",
                                      "click: add   drag: move   dot: curve   double-click: delete",
-                                     "click: add   drag: move   double-click: delete" })
+                                     "click: add   drag: move   double-click: delete",
+                                     "click: add   drag: move" })
         {
             hint = wording;
-            if (juce::GlyphArrangement::getStringWidth (hintFont, hint) <= (float) hintBox.getWidth())
+            hintFits = juce::GlyphArrangement::getStringWidth (hintFont, hint) <= (float) hintBox.getWidth();
+            if (hintFits)
                 break;
         }
-        IlanaTheme::drawFitted (g, hint, hintBox, juce::Justification::centredLeft, 1);
+        // No room even for the shortest: say nothing rather than cut it (the tooltip and the right-click menu say it).
+        // Nor over the curve's own points: they are what the hint is about.
+        for (const auto& point : curve.points)
+            if (hintBox.toFloat().expanded ((float) Space::s6).contains (pointToScreen (point)))
+                hintFits = false;
+        if (hintFits)
+            IlanaTheme::drawFitted (g, hint, hintBox, juce::Justification::centredLeft, 1);
     }
 
     // Simulated physics output across physicsCycles cycles, one value per

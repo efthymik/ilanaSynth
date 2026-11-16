@@ -925,7 +925,8 @@ private:
         auto left = std::numeric_limits<float>::max(), right = std::numeric_limits<float>::lowest();
         for (const auto osc : shown)
         {
-            left = juce::jmin (left, centres[(size_t) osc].x - radius * (read (routeId (osc, osc)) > 0.001f ? 2.1f : 1.1f));
+            left = juce::jmin (left, centres[(size_t) osc].x - juce::jmax (boxHalfWidth (radius) + haloReach + haloGap, // (the halo and a selection ring reach past the box)
+                                                                    radius * (read (routeId (osc, osc)) > 0.001f ? 2.1f : 0.0f)));
             right = juce::jmax (right, centres[(size_t) osc].x + boxHalfWidth (radius) + haloReach + haloGap + captionWidth);
         }
         // Too wide (six columns in a narrow box): the columns close up a
@@ -948,7 +949,8 @@ private:
                 right = std::numeric_limits<float>::lowest();
                 for (const auto osc : shown)
                 {
-                    left = juce::jmin (left, centres[(size_t) osc].x - radius * (read (routeId (osc, osc)) > 0.001f ? 2.1f : 1.1f));
+                    left = juce::jmin (left, centres[(size_t) osc].x - juce::jmax (boxHalfWidth (radius) + haloReach + haloGap, // (the halo and a selection ring reach past the box)
+                                                                    radius * (read (routeId (osc, osc)) > 0.001f ? 2.1f : 0.0f)));
                     right = juce::jmax (right, centres[(size_t) osc].x + boxHalfWidth (radius) + haloReach + haloGap + captionWidth);
                 }
             }
@@ -1302,7 +1304,7 @@ private:
             const auto withName = node.withWidth (size + 52.0f).expanded (4.0f);
             auto clear = true;
             for (const auto osc : shownOscillators())
-                clear = clear && ! withName.intersects (juce::Rectangle<float> (radius * 2.3f, radius * 2.3f).withCentre (centres[(size_t) osc]))
+                clear = clear && ! withName.intersects (nodeBox (centres[(size_t) osc], radius).expanded (haloReach + haloGap))
                         && ! withName.intersects (getCaptionBounds (osc, centres, radius));
             if (clear)
                 return node;
