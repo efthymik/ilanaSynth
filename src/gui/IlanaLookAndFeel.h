@@ -233,6 +233,54 @@ namespace TextSize
     inline constexpr float zoomFloor     = screenFloorPx / smallestZoom;
 }
 
+// The spacing grid (ARCH-2): gaps, paddings and header heights, in component
+// units like TextSize. The scale is the only set of values a new layout line
+// should use; the named roles are the values the cards really have today
+// (some are off the scale on purpose: they are what the pictures show, and
+// moving one is a visual-polish decision). Layout code that has to use a
+// number the grid does not have is tagged "// off-grid", and
+// tools/layout_literal_ratchet.py stops the count of raw numbers rising.
+namespace Space
+{
+    // The scale.
+    inline constexpr int s2  = 2;
+    inline constexpr int s4  = 4;
+    inline constexpr int s6  = 6;
+    inline constexpr int s8  = 8;
+    inline constexpr int s12 = 12;
+    inline constexpr int s16 = 16;
+    inline constexpr int s24 = 24;
+
+    // Card paddings and gaps.
+    inline constexpr int cardPad   = s12; // inside a page card / pop-up window
+    inline constexpr int cardGap   = s8;  // between its cells
+    inline constexpr int packedPad = s6;  // inside a packed (PLAY) card
+    inline constexpr int pillGap   = s2;  // between a packed card's pills
+
+    // The one-line controls in a card header (a type menu, a tab strip, a pill).
+    inline constexpr int headerControlHeight = 16;
+
+    // Card header heights, as they really are (the distinct values in use).
+    inline constexpr int cardHeaderTight  = 16; // the mod hover pop-up
+    inline constexpr int cardHeaderPacked = 20; // PLAY cards, the wave display
+    inline constexpr int cardHeaderOsc    = 22; // OSC cards, the mod-source pop-ups, the matrix card
+    inline constexpr int cardHeaderMod    = 24; // the mod-source list
+    inline constexpr int cardHeaderFull   = 30; // FILTER / VECTOR / PHYSICAL, the mod-source tabs
+    inline constexpr int cardHeaderPopup  = 38; // a mod-source pop-up with its description
+
+    // A packed card's title starts this far in from the card's left edge
+    // (after the header dot, which sits headerDotInsetX in).
+    inline constexpr int titleInsetX     = 23;
+    inline constexpr int headerDotInsetX = 14;
+
+    // The FX / LFO pop-up windows (FxMiniWindow, FxLfoWindow) share one grid.
+    inline constexpr int windowPad         = cardPad;
+    inline constexpr int windowGap         = cardGap;
+    inline constexpr int windowTitleHeight = 40;
+    inline constexpr int windowCellWidth   = 116;
+    inline constexpr int windowCellHeight  = 44;
+}
+
 // The UI test's probe: while armed, the smallest text drawn (in device
 // pixels, through font() below) and how often it went under a limit.
 struct FontProbe
@@ -1052,6 +1100,8 @@ inline juce::PopupMenu::Options menuOptions (juce::Component* target)
 inline juce::PopupMenu::Options menuOptions (juce::Component& target) { return menuOptions (&target); }
 
 } // namespace IlanaTheme
+
+namespace Space = IlanaTheme::Space; // the short name for page code
 
 class IlanaLookAndFeel : public juce::LookAndFeel_V4
 {
