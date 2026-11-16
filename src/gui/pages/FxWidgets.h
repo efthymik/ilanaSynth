@@ -1,5 +1,6 @@
-// Included only from PluginEditor.cpp; the contents are in its anonymous
-// namespace. Includes what it uses (tools/check_headers.sh checks).
+// The FX rack's small widgets (TapGrid, GateGrid, FxStackContent,
+// SlotSwitch), shared by the FX and PATCH tabs. Global inline code, as the
+// widget headers in src/gui are.
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -9,10 +10,7 @@
 #include "../DisplayStyle.h"
 #include "../FxLibrary.h"
 #include "../IlanaLookAndFeel.h"
-#include "PageHelpers.h"
 
-namespace
-{
 class TapGrid : public juce::Component,
                 public juce::SettableTooltipClient,
                 private IlanaAnim::FrameTimer
@@ -468,4 +466,3 @@ private:
     juce::Colour colour = IlanaTheme::accent();
     bool shownOn = true, bare = false;
 };
-} // namespace

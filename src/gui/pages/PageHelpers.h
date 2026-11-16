@@ -1,5 +1,5 @@
 // What the pages share: addAll, the section and box titles, the heading
-// constants and PillToggle. Global inline code, as the widget headers are,
+// constants, PillToggle and PillChoice. Global inline code, as the widget headers are,
 // so a page in its own .cpp and the pages still in PluginEditor.cpp share it.
 #pragma once
 
@@ -115,4 +115,94 @@ public:
 private:
     juce::String label;
     juce::Colour colour;
+};
+
+// A small selector of two or three solid-fill pills (the slope, SUB's octave).
+class PillChoice : public ParamBoundComponent
+{
+public:
+    PillChoice (juce::AudioProcessorValueTreeState& state, const juce::String& id, juce::StringArray labelsIn, juce::Colour colourIn, const juce::String& tip, std::vector<int> valuesIn = {})
+        : ParamBoundComponent (state, id), labels (std::move (labelsIn)), colour (colourIn), values (std::move (valuesIn))
+    {
+        if (values.empty())
+            for (int i = 0; i < labels.size(); ++i)
+                values.push_back (i);
+        setTooltip (tip);
+        setRepaintsOnMouseActivity (true);
+        setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    }
+
+    void setColour (juce::Colour newColour)
+    {
+        colour = newColour;
+        repaint();
+    }
+
+    // Stacked (FILTER's SLOPE): the pills one over the other in a knob's cell, the caption under them
+    // where a knob's name sits.
+    void setStacked (const juce::String& captionText)
+    {
+        caption = captionText;
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto bounds = optionArea();
+        const auto stacked = caption.isNotEmpty();
+        const auto width = bounds.getWidth() / (float) (stacked ? 1 : labels.size());
+        const auto height = stacked ? bounds.getHeight() / (float) labels.size() : bounds.getHeight();
+        const auto mouse = getMouseXYRelative().toFloat();
+        if (stacked)
+        {
+            g.setColour (IlanaTheme::Ui::text3.withMultipliedAlpha (isEnabled() ? 1.0f : 0.5f));
+            g.setFont (stackCaptionFont());
+            g.drawText (caption, juce::Rectangle<float> (0.0f, bounds.getBottom() + 1.0f, (float) getWidth(), (float) getHeight() - bounds.getBottom() - 1.0f),
+                        juce::Justification::centredTop, false);
+        }
+        for (int option = 0; option < labels.size(); ++option)
+        {
+            const auto cellBounds = (stacked ? juce::Rectangle<float> (bounds.getX(), bounds.getY() + height * (float) option, width, height).reduced (0.0f, 1.0f)
+                                             : juce::Rectangle<float> (bounds.getX() + width * (float) option, bounds.getY(), width, bounds.getHeight()).reduced (1.5f, 1.0f));
+            const auto on = values[(size_t) option] == current;
+            const auto hovered = isMouseOver() && cellBounds.contains (mouse);
+            g.setColour (on ? colour : IlanaTheme::Ui::raised.interpolatedWith (colour, hovered ? 0.12f : 0.0f));
+            g.fillRoundedRectangle (cellBounds, 4.0f);
+            if (! on)
+            {
+                g.setColour (IlanaTheme::Ui::line);
+                g.drawRoundedRectangle (cellBounds.reduced (0.5f), 4.0f, 1.0f);
+            }
+            g.setColour (on ? IlanaTheme::Ui::header : IlanaTheme::Ui::text2);
+            g.setFont (IlanaTheme::font (IlanaTheme::TextSize::packedBody, true));
+            g.drawText (labels[option], cellBounds, juce::Justification::centred);
+        }
+    }
+
+    void mouseMove (const juce::MouseEvent&) override { repaint(); }
+
+    void mouseDown (const juce::MouseEvent& event) override
+    {
+        const auto area = optionArea();
+        const auto at = caption.isNotEmpty() ? (event.position.y - area.getY()) / area.getHeight() : (event.position.x - area.getX()) / area.getWidth();
+        setValue (values[(size_t) juce::jlimit (0, labels.size() - 1, (int) (at * (float) labels.size()))]);
+    }
+
+    // A stacked choice in a packed knob's bounds: the pills where its dial is, the caption where its name is.
+    static constexpr int stackPadX = 3, stackPadTop = 6, stackDial = 28;
+
+private:
+    juce::Rectangle<float> optionArea() const
+    {
+        if (caption.isEmpty())
+            return getLocalBounds().toFloat();
+        return juce::Rectangle<float> ((float) stackPadX + 1.0f, (float) stackPadTop, (float) getWidth() - 2.0f * (float) stackPadX - 2.0f, (float) stackDial);
+    }
+
+    static juce::Font stackCaptionFont() { return IlanaTheme::font (juce::jlimit (7.6f, 8.6f, 7.6f * (float) stackDial / 26.0f), true); }
+
+    juce::String caption;
+    juce::StringArray labels;
+    juce::Colour colour;
+    std::vector<int> values;
 };
