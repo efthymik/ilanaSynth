@@ -287,7 +287,7 @@ public:
             IlanaTheme::drawFitted (g, isFmType (selectedOperator) ? (ampGraph != nullptr ? "Drag the points to edit this envelope."
                                                                                           : "Edit the envelope on PLAY.")
                                                                     : "Ratio and OP ENV are for FM / DX7 oscillators.",
-                                    ampHint.withTrimmedRight (makeOperator.isVisible() ? makeOperator.getWidth() + 6 : 0),
+                                    ampHint,
                                     juce::Justification::centredLeft, 3);
         }
 
@@ -695,7 +695,11 @@ private:
         inner.removeFromBottom (8);
         // TUNING, SNAP, ENVELOPE and FB TYPE in one row of menus, the knobs in one row under them, the hint at the
         // foot; the envelope's graph fills the height at the right.
-        const auto gridWidth = juce::jmin (380, inner.getWidth() * 62 / 100);
+        // One even column grid for the knobs: a single row of five (a Semitones oscillator: SEMI, FINE, LEVEL, KEY SCALE,
+        // FEEDBACK), or three over three when RATIO / FIXED makes six. The width a row of five does not need goes to the
+        // envelope's graph.
+        const auto sixKnobs = juce::roundToInt (read (OscillatorIds::prefixes[(size_t) selectedOperator] + juce::String ("_tune"))) != OscTuning::Semitones;
+        const auto gridWidth = juce::jmin (sixKnobs ? 340 : 5 * 62 + 10, inner.getWidth() * 62 / 100);
         auto left = inner.removeFromLeft (gridWidth);
         inner.removeFromLeft (10);
         if (ampGraph != nullptr)
@@ -720,25 +724,24 @@ private:
         layoutRow (left.removeFromTop (menuHeight), menus);
         left.removeFromTop (gap);
         ampHint = left.removeFromBottom (footHeight).withTrimmedLeft (2);
-        // (UI review 31, 17: a one-row algorithm gives the card its room; with the height for it the knobs take two rows
-        // of three, bigger, rather than one row floating in the middle.)
-        const auto twoRows = left.getHeight() >= 140;
+        // (The make-operator button stands on its own line above the hint, so a narrow knob block never wraps the hint.)
+        const auto buttonRow = makeOperator.isVisible() ? left.removeFromBottom (26) : juce::Rectangle<int>();
         const auto count = (int) knobsInRow.size();
+        const auto twoRows = count > 5 && left.getHeight() >= 140;
         const auto columns = twoRows ? 3 : count;
         const auto rowsHere = twoRows ? (count + 2) / 3 : 1;
         const auto cellWidth = left.getWidth() / juce::jmax (1, columns);
-        const auto cellHeight = left.getHeight() / juce::jmax (1, rowsHere);
+        // (A single row stays under the menus a standard gap, not centred in the leftover height.)
+        const auto cellHeight = twoRows ? left.getHeight() / juce::jmax (1, rowsHere) : juce::jmin (left.getHeight(), 100);
         for (int i = 0; i < count; ++i)
             if (auto* knob = dynamic_cast<KnobControl*> (knobsInRow[(size_t) i]))
-                knob->placeAsRing (juce::Rectangle<int> (left.getX() + (i % columns) * cellWidth
-                                                             + (columns - juce::jmin (columns, count - (i / columns) * columns)) * cellWidth / 2, // (a short last row centred)
-                                                         left.getY() + (i / columns) * cellHeight, cellWidth, cellHeight)
-                                       .reduced (2, 0), twoRows ? 46 : 40);
+                knob->placeAsRing (juce::Rectangle<int> (left.getX() + (i % columns) * cellWidth, left.getY() + (i / columns) * cellHeight,
+                                                         cellWidth, cellHeight).reduced (2, 0), twoRows ? 46 : count <= 5 ? 50 : 40);
         // Another type's way to the operator's controls, at the hint's end.
         if (makeOperator.isVisible())
         {
             const auto width = juce::GlyphArrangement::getStringWidthInt (juce::Font (IlanaTheme::pillFont()), makeOperator.getButtonText()) + 26;
-            makeOperator.setBounds (ampHint.withLeft (ampHint.getRight() - width).withSizeKeepingCentre (width, 22));
+            makeOperator.setBounds (buttonRow.withWidth (width).withSizeKeepingCentre (width, 22).withX (buttonRow.getX() + 2));
         }
     }
 
