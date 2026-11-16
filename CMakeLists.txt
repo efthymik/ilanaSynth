@@ -155,6 +155,7 @@ list(TRANSFORM ILANA_ENGINE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 # anonymous namespace, and the pages moved to their own .cpp (ARCH-8).
 set(ILANA_GUI_SOURCES
     src/PluginEditor.cpp
+    src/gui/pages/MatrixPage.cpp
     src/gui/pages/SeqPage.cpp
 )
 
