@@ -175,7 +175,9 @@ void IlanaSynthAudioProcessor::processArpeggiator (juce::MidiBuffer& midiMessage
                 output.addEvent (juce::MidiMessage::controllerEvent (channel + 1, 64, down ? 127 : 0), 0);
     };
 
-    if (transportStopped)
+    // (Only while the arp plays: with it off the list is the keys really
+    // down, and switching it on must release those, or they stick.)
+    if (transportStopped && arpEnabled)
     {
         arpHeldNotes.clearQuick();
         arpSustainedKey.fill (false);

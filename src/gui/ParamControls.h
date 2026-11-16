@@ -1712,7 +1712,35 @@ public:
         editor.onReturnKey = [this]
         {
             if (valueEditor != nullptr)
-                slider.setValue (slider.getValueFromText (valueEditor->getText()), juce::sendNotificationSync);
+            {
+                // Nothing typed, or a word no value of this knob shows: no
+                // change (it used to set the knob to its minimum).
+                auto text = valueEditor->getText().trim();
+                // A decimal comma ("0,5", "1,5 kHz") reads as a point; a
+                // thousands comma ("1,000") is left alone.
+                if (! text.containsChar ('.') && text.indexOfChar (',') == text.lastIndexOfChar (','))
+                    if (const auto at = text.indexOfChar (','); at > 0 && juce::CharacterFunctions::isDigit (text[at - 1])
+                                                               && juce::CharacterFunctions::isDigit (text[at + 1]))
+                    {
+                        auto digits = 0;
+                        while (juce::CharacterFunctions::isDigit (text[at + 1 + digits]))
+                            ++digits;
+                        if (digits != 3)
+                            text = text.replaceCharacter (',', '.');
+                    }
+                const auto value = slider.getValueFromText (text);
+                const auto understood = text.containsAnyOf ("0123456789")
+                                        || slider.getTextFromValue (value).trim().equalsIgnoreCase (text);
+                if (text.isNotEmpty() && understood)
+                {
+                    // One gesture, as JUCE's own text box does, so the host records it.
+                    if (parameter != nullptr)
+                        parameter->beginChangeGesture();
+                    slider.setValue (value, juce::sendNotificationSync);
+                    if (parameter != nullptr)
+                        parameter->endChangeGesture();
+                }
+            }
             closeValueEditor();
         };
         editor.onEscapeKey = [this] { closeValueEditor(); };
@@ -3004,7 +3032,11 @@ private:
                                 else if (result == 3001)
                                 {
                                     const auto value = knobClipboard().getDoubleValue();
+                                    if (safeThis->parameter != nullptr)
+                                        safeThis->parameter->beginChangeGesture();
                                     safeThis->slider.setValue (value, juce::sendNotificationSync);
+                                    if (safeThis->parameter != nullptr)
+                                        safeThis->parameter->endChangeGesture();
                                 }
                                 else if (result == 4000)
                                 {

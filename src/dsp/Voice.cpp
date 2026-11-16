@@ -500,6 +500,9 @@ void Voice::startNote (int midiNoteNumber, float velocity, juce::SynthesiserSoun
         for (auto& env : extraEnvs)
             env.retrigger();
         envMseg.reset();
+        // The new key holds its note: a One Shot's hold on the last release
+        // must not release it when the sample ends.
+        oneShotHold = false;
         return;
     }
 
@@ -659,20 +662,23 @@ void Voice::startNote (int midiNoteNumber, float velocity, juce::SynthesiserSoun
     // The Operator EG: gains for the oscillators whose ENVELOPE picks it.
     dx7Playing = params.operatorEgUsed;
     if (dx7Playing)
-    {
-        // Scaling follows the key moved by KEY OFFSET (a DX7 voice's
-        // transpose; the oscillators get its pitch from their SEMI knobs).
-        const auto& eg = params.operatorEg;
-        const auto transposed = juce::jlimit (0, 127, midiNoteNumber + (int) eg[OperatorEg::keyOffsetByte] - 24);
-        std::array<bool, 6> carriers {};
-        for (int osc = 0; osc < VoiceParams::numOscillators; ++osc)
-            carriers[(size_t) osc] = params.oscOut[osc] && params.oscillators[osc].ampEnv == OperatorEg::envelopeChoice;
-        dx7Note.start (eg, transposed, lastVelocity, sampleRate, carriers);
-        dx7Settings = eg;
-        dx7Previous.fill (0.0f);
-        dx7Current = dx7Note.getGains();
-        dx7Count = 0;
-    }
+        startOperatorEg (midiNoteNumber);
+}
+
+void Voice::startOperatorEg (int midiNoteNumber)
+{
+    // Scaling follows the key moved by KEY OFFSET (a DX7 voice's
+    // transpose; the oscillators get its pitch from their SEMI knobs).
+    const auto& eg = params.operatorEg;
+    const auto transposed = juce::jlimit (0, 127, midiNoteNumber + (int) eg[OperatorEg::keyOffsetByte] - 24);
+    std::array<bool, 6> carriers {};
+    for (int osc = 0; osc < VoiceParams::numOscillators; ++osc)
+        carriers[(size_t) osc] = params.oscOut[osc] && params.oscillators[osc].ampEnv == OperatorEg::envelopeChoice;
+    dx7Note.start (eg, transposed, lastVelocity, sampleRate, carriers);
+    dx7Settings = eg;
+    dx7Previous.fill (0.0f);
+    dx7Current = dx7Note.getGains();
+    dx7Count = 0;
 }
 
 void Voice::resetForNewPatch()

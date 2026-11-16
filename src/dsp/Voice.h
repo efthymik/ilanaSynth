@@ -755,6 +755,7 @@ public:
     // block): stop it dead and clear every memory resetForNewPatch clears,
     // so it can't poison the mix again and plays cleanly when reused.
     void silenceAfterNonFinite();
+    void startOperatorEg (int midiNoteNumber); // (startNote's Operator EG start)
     // Tests: the voice adds a NaN to every render from now until it is silenced.
     void breakForTest() noexcept { brokenForTest = true; }
     void reseedRandom (juce::int64 salt);

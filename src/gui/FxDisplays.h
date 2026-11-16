@@ -39,6 +39,16 @@ public:
         startTimerHz (30);
     }
 
+    // (A card rebuilt mid-drag: the graph's gestures and undo step close.)
+    ~FxDisplay() override
+    {
+        if (dragging)
+        {
+            endGestures();
+            processorRef.endEdit();
+        }
+    }
+
     // Where the effect's settings are read: an instance's own (its card's
     // shadow parameters, FxInstanceControls.h), or null for the parameters.
     void setValueSource (juce::AudioProcessorValueTreeState* source)
