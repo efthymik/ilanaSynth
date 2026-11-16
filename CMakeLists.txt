@@ -150,6 +150,14 @@ set(ILANA_ENGINE_SOURCES
 # Absolute, so the engine libraries in cmake/engine can use the same list.
 list(TRANSFORM ILANA_ENGINE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 
+# The editor, for every target that builds it (the plugins, ilanaSnapshot,
+# ilanaFxTest): PluginEditor.cpp, which still holds most pages in its
+# anonymous namespace, and the pages moved to their own .cpp (ARCH-8).
+set(ILANA_GUI_SOURCES
+    src/PluginEditor.cpp
+    src/gui/pages/SeqPage.cpp
+)
+
 juce_add_binary_data(ilanaFonts SOURCES
     resources/fonts/Manrope-400-Regular.ttf
     resources/fonts/Manrope-500-Medium.ttf
@@ -170,7 +178,7 @@ juce_add_binary_data(ilanaWavetables
 
 target_sources(ilanaSynth PRIVATE
     ${ILANA_ENGINE_SOURCES}
-    src/PluginEditor.cpp
+    ${ILANA_GUI_SOURCES}
 )
 
 target_compile_definitions(ilanaSynth PUBLIC
@@ -213,7 +221,7 @@ juce_add_plugin(ilanaSynthFX
 
 target_sources(ilanaSynthFX PRIVATE
     ${ILANA_ENGINE_SOURCES}
-    src/PluginEditor.cpp
+    ${ILANA_GUI_SOURCES}
 )
 
 target_compile_definitions(ilanaSynthFX PUBLIC
@@ -303,7 +311,7 @@ juce_add_console_app(ilanaSnapshot PRODUCT_NAME "ilanaSnapshot")
 target_sources(ilanaSnapshot PRIVATE
     tools/Snapshot.cpp
     ${ILANA_ENGINE_SOURCES}
-    src/PluginEditor.cpp
+    ${ILANA_GUI_SOURCES}
 )
 
 target_include_directories(ilanaSnapshot PRIVATE src)
@@ -462,7 +470,7 @@ juce_add_console_app(ilanaFxTest PRODUCT_NAME "ilanaFxTest")
 target_sources(ilanaFxTest PRIVATE
     tests/FxTest.cpp
     ${ILANA_ENGINE_SOURCES}
-    src/PluginEditor.cpp
+    ${ILANA_GUI_SOURCES}
 )
 
 target_include_directories(ilanaFxTest PRIVATE src)

@@ -61,5 +61,6 @@
  "src/gui/pages/PatchLfo.h": 13,
  "src/gui/pages/PatchPage.h": 91,
  "src/gui/pages/PlayPage.h": 58,
- "src/gui/pages/SeqPage.h": 39
+ "src/gui/pages/SeqPage.cpp": 39,
+ "src/gui/pages/SeqPage.h": 0
 }

@@ -1,5 +1,6 @@
-// Included only from PluginEditor.cpp; the contents are in its anonymous
-// namespace. Includes what it uses (tools/check_headers.sh checks).
+// What the pages share: addAll, the section and box titles, the heading
+// constants and PillToggle. Global inline code, as the widget headers are,
+// so a page in its own .cpp and the pages still in PluginEditor.cpp share it.
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -7,8 +8,6 @@
 #include "../FilterWidgets.h"
 #include "../IlanaLookAndFeel.h"
 
-namespace
-{
 template <typename... Components>
 void addAll (juce::Component& parent, Components&... components)
 {
@@ -20,7 +19,7 @@ void addAll (juce::Component& parent, Components&... components)
 // reads as a power light, and on cards it means a module's colour beside a
 // real switch). The text starts where a card's tag does, so headings line
 // up with the cards under them.
-void paintSectionTitle (juce::Graphics& g, const juce::String& text, juce::Rectangle<int> area,
+inline void paintSectionTitle (juce::Graphics& g, const juce::String& text, juce::Rectangle<int> area,
                         const juce::String& subtitle = {})
 {
     // (A page's title, the cards' title style: UI review 31, item 39.)
@@ -44,7 +43,7 @@ void paintSectionTitle (juce::Graphics& g, const juce::String& text, juce::Recta
 // boxes, PHYSICAL's BODY and SOUNDBOARD; review 10, I10-7): the name in the
 // label font, a quiet state word after it, and the box's switch at the right
 // (reserveRight leaves its room).
-void paintSubBoxTitle (juce::Graphics& g, juce::Rectangle<int> header, const juce::String& title, const juce::String& state,
+inline void paintSubBoxTitle (juce::Graphics& g, juce::Rectangle<int> header, const juce::String& title, const juce::String& state,
                        bool on, int reserveRight = 0, juce::Colour tint = {})
 {
     header.removeFromRight (reserveRight);
@@ -66,7 +65,7 @@ void paintSubBoxTitle (juce::Graphics& g, juce::Rectangle<int> header, const juc
 
 // Page headings sit where a card's title does: 12 px in from the card edge
 // (cards start 12 px in from the page), 26 px tall like a card's header.
-constexpr int headingX = 24, headingHeight = 26;
+inline constexpr int headingX = 24, headingHeight = 26;
 
 // An on/off as one pill (the LFO's SYNC, RETRIG and KEY, on PLAY and in its pop-up): solid while on.
 class PillToggle : public ParamBoundComponent
@@ -117,5 +116,3 @@ private:
     juce::String label;
     juce::Colour colour;
 };
-
-} // namespace
