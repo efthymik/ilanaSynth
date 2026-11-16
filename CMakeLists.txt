@@ -157,6 +157,8 @@ set(ILANA_GUI_SOURCES
     src/PluginEditor.cpp
     src/gui/pages/FxPage.cpp
     src/gui/pages/MatrixPage.cpp
+    src/gui/pages/PatchLfo.cpp
+    src/gui/pages/PatchPage.cpp
     src/gui/pages/SeqPage.cpp
 )
 

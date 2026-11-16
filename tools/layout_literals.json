@@ -60,8 +60,10 @@
  "src/gui/pages/ModSourcePanel.h": 25,
  "src/gui/pages/OscPage.h": 45,
  "src/gui/pages/PageHelpers.h": 6,
- "src/gui/pages/PatchLfo.h": 13,
- "src/gui/pages/PatchPage.h": 91,
+ "src/gui/pages/PatchLfo.cpp": 13,
+ "src/gui/pages/PatchLfo.h": 0,
+ "src/gui/pages/PatchPage.cpp": 91,
+ "src/gui/pages/PatchPage.h": 0,
  "src/gui/pages/PlayPage.h": 54,
  "src/gui/pages/SeqPage.cpp": 39,
  "src/gui/pages/SeqPage.h": 0
