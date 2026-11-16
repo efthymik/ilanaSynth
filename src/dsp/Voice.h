@@ -751,6 +751,12 @@ public:
     // body memory, the vactrol, strings, glide origin, random sequences),
     // so its first notes don't carry the old patch's ringing.
     void resetForNewPatch();
+    // A voice whose output went NaN / Inf (IlanaSynth's check after a bad
+    // block): stop it dead and clear every memory resetForNewPatch clears,
+    // so it can't poison the mix again and plays cleanly when reused.
+    void silenceAfterNonFinite();
+    // Tests: the voice adds a NaN to every render from now until it is silenced.
+    void breakForTest() noexcept { brokenForTest = true; }
     void reseedRandom (juce::int64 salt);
     void pitchWheelMoved (int newValue) override;
     void controllerMoved (int controllerNumber, int newValue) override;
@@ -867,6 +873,8 @@ private:
     // as before M3b. Extra banks use explicit seeds and do not advance the
     // shared KarplusStrong counter used by existing presets.
     int renderStart = 0; // where this render call starts in the block (M7.5)
+    std::vector<float> stringScratch; // (KarplusStrong::setSharedScratch)
+    bool brokenForTest = false;
     KarplusStrong stringUnison[3][VoiceParams::maxBufferedUnison];
     struct ExtraStringBank
     {

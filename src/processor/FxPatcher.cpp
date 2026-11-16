@@ -146,7 +146,7 @@ void IlanaSynthAudioProcessor::applyFxPatchRuntime()
         if (slot.own && ownedEngines[(size_t) s] == nullptr)
         {
             auto engine = std::make_unique<FxEngine> (*this);
-            engine->prepare (currentSampleRate, fxEngineBlockSize, expectedBlockSize);
+            engine->prepare (baseSampleRate, fxEngineBlockSize, expectedBlockSize); // (currentSampleRate is the oversampled rate for a moment each oversampled block)
 
             // Its Airwindows algorithm made now, not on the audio thread.
             const auto valueOf = [&] (const juce::String& id)

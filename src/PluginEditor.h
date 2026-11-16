@@ -351,6 +351,33 @@ private:
     std::unique_ptr<juce::PropertiesFile> settings;
     std::unique_ptr<PresetPanel> presetPanel;
     ModHoverPopup modHoverPopup { processorRef };
+
+    // The process-wide hooks (go to a matrix row, open an FM operator, the
+    // sample browser, the filter's routing link...): each editor keeps its
+    // own copies and installs them while the mouse is in it, and clears them
+    // on close only if they are still its own, so with two plugin windows
+    // open one never calls into the other or into a closed one.
+    struct OwnHooks
+    {
+        std::function<void (int)> openMatrixRow;
+        std::function<juce::String (int)> fxSlotEffectName;
+        std::function<void()> openRouting;
+        std::function<void (int, std::function<bool (const juce::File&)>)> sampleBrowser;
+        std::function<void (int)> openOperator;
+        std::function<void()> openPitchAndLfo;
+        std::function<void()> armedChanged;
+        juce::PropertiesFile* tableSettings = nullptr;
+    } ownHooks;
+    static IlanaSynthAudioProcessorEditor*& hookOwner() { static IlanaSynthAudioProcessorEditor* owner = nullptr; return owner; }
+    void keepOwnHooks();
+    void claimGlobalHooks();
+    struct HookClaimer final : juce::MouseListener
+    {
+        explicit HookClaimer (IlanaSynthAudioProcessorEditor& e) : editor (e) {}
+        void mouseEnter (const juce::MouseEvent&) override { editor.claimGlobalHooks(); }
+        void mouseDown (const juce::MouseEvent&) override { editor.claimGlobalHooks(); }
+        IlanaSynthAudioProcessorEditor& editor;
+    } hookClaimer { *this };
     // The header's live waveform strip (click: the scope).
     OutputView headerScope { processorRef };
     // VOICES in the status line: a click opens the voice settings.

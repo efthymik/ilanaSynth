@@ -160,6 +160,20 @@ private:
     // nullptr: too large (copyBytes over maxCopyBytes), cancelled or failed.
     std::shared_ptr<const SampleData> renderCopy (const SampleData& source, juce::uint64 key)
     {
+        // Out of memory on this worker thread would end the host: no copy instead
+        // (a copy pitched far up works at several times its own size while it renders).
+        try
+        {
+            return renderCopyOrThrow (source, key);
+        }
+        catch (...)
+        {
+            return nullptr;
+        }
+    }
+
+    std::shared_ptr<const SampleData> renderCopyOrThrow (const SampleData& source, juce::uint64 key)
+    {
         if (copyBytes (source, key) > maxCopyBytes)
             return nullptr;
         OfflineStretch::Audio input;

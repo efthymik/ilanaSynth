@@ -38,6 +38,8 @@ public:
         const auto a = std::abs (x);
         if (a >= 1.0)
             return x > 0.0 ? 1.0 : -1.0;
+        if (! (a < 1.0)) // NaN ((size_t) NaN indexes far outside the table): passed on, for the voice's check to catch
+            return x;
 
         const auto position = a * (double) (size - 1);
         const auto index = (size_t) position;

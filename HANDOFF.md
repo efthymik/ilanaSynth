@@ -6,6 +6,7 @@ Updated 2026-11-14. The source tree is the source of truth. Work on `main` (clou
 
 ## State
 - Next milestone: RC 1.0 (tagline "El Sinte de Big Ilana Da GOAT"). Feature freeze since 2026-10-13 (UX only).
+- **Bug hunt** (2026-11-15, #275): details in the history file.
 - **OP LFO pop-up** (2026-11-14): details in the history file.
 - **Scopes at the display's refresh** (2026-11-14): details in the history file.
 - **Menus closing as they open under Vulkan** (2026-11-14): details in the history file.

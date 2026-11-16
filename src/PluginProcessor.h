@@ -345,6 +345,8 @@ public:
     // MASTER's value in a preset's values moves to output_trim (review 6).
     static void moveLevelToTrim (std::vector<std::pair<juce::String, float>>& values);
     bool savePresetToFile (const juce::File& file);
+    // Writes the patch to a file without making it the loaded preset (Export).
+    bool writePresetCopy (const juce::File& file);
     bool loadPresetFromFile (const juce::File& file);
 
     // The loaded preset's name lives in the state tree so it survives editor
@@ -1336,6 +1338,7 @@ private:
     bool liveGateOpen = false;
     int liveGateNote = -1;
     int liveInputSamples = 0;               // valid samples in liveDry this block
+    int fxChunkStart = 0;                   // where the rack's current chunk starts in the block (processEffects)
     // DRY is delayed by the reported latency so it lines up with the
     // oversampled wet path (a blend would comb-filter otherwise).
     void delayLiveDry (int numSamples);
@@ -1365,6 +1368,7 @@ private:
     int fxSilentSamples = 0;
     std::array<std::array<std::array<float, 2>, 2>, 2> dcBlock {}; // [before/after the effects][channel][x, y]
     void cutPatchTails();
+    void clearPostVoiceMemory();
     std::atomic<float> inputLevelDisplay { 0.0f }, inputEnvDisplay { 0.0f };
     struct OscCoreIds
     {
@@ -1797,6 +1801,7 @@ public:
 
     // Tests only: what the last block sent to the voices.
     const juce::MidiBuffer& getSynthMidiForTest() const { return midiForSynth; }
+    IlanaSynth& getSynthForTest() { return synth; }
     // Tests only: the message thread's pending work (the CCs it applies) now.
     void runAsyncUpdateForTest() { handleUpdateNowIfNeeded(); }
 
@@ -1996,6 +2001,18 @@ private:
         std::array<juce::IIRFilter, 2> allLow, allHigh;
         int lastBand = 0;
         float lastLow = 0.0f, lastHigh = 0.0f;
+
+        void reset()
+        {
+            for (auto* stages : { &lowA, &lowB })
+                for (auto& stage : *stages)
+                    for (auto& filter : stage)
+                        filter.reset();
+            for (auto& filter : allLow)
+                filter.reset();
+            for (auto& filter : allHigh)
+                filter.reset();
+        }
     };
     std::array<SplitFilter, (size_t) numFxSlots> fxSplit;
     juce::AudioBuffer<float> fxBand;
