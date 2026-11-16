@@ -630,8 +630,8 @@ void FmPage::layoutPlainOperator (OperatorControls& controls)
         auto stack = belowMenus;
         left = stack.removeFromTop (juce::jmin (88, juce::jmax (0, stack.getHeight() - footHeight - (makeOperator.isVisible() ? 26 : 0))));
         if (makeOperator.isVisible())
-            buttonRow = stack.removeFromTop (26);
-        ampHint = stack.removeFromTop (footHeight).withTrimmedLeft (2);
+            buttonRow = stack.removeFromTop (Space::s24 + Space::s2);
+        ampHint = stack.removeFromTop (footHeight).withTrimmedLeft (Space::s2);
     }
     const auto columns = twoRows ? 3 : count;
     const auto rowsHere = twoRows ? (count + 2) / 3 : 1;

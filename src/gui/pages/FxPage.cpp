@@ -2353,7 +2353,7 @@ void FxPage::paintRailChip (juce::Graphics& g, const StackPanel& panel, float x)
         const auto font = IlanaTheme::font (IlanaTheme::TextSize::tiny, true);
         const auto textWidth = (float) juce::GlyphArrangement::getStringWidthInt (juce::Font (font), text);
         const auto chipWidth = (off ? 0.0f : 21.0f) + textWidth + 12.0f;
-        auto chip = juce::Rectangle<float> (chipWidth, 16.0f).withCentre (chipCentre.translated (0.0f, -2.0f));
+        auto chip = juce::Rectangle<float> (chipWidth, 16.0f).withCentre (chipCentre.translated (0.0f, (float) -Space::s2));
         // Keep the whole pill inside the rail column (it was cut by the window edge).
         chip.setX (juce::jlimit (1.0f, juce::jmax (1.0f, (float) railWidth + (float) railGap * 0.5f - chip.getWidth()), chip.getX()));
         g.setColour (IlanaTheme::Ui::well);

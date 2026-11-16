@@ -1323,7 +1323,7 @@ private:
         // No room even for the shortest: say nothing rather than cut it (the tooltip and the right-click menu say it).
         // Nor over the curve's own points: they are what the hint is about.
         for (const auto& point : curve.points)
-            if (hintBox.toFloat().expanded (6.0f).contains (pointToScreen (point)))
+            if (hintBox.toFloat().expanded ((float) Space::s6).contains (pointToScreen (point)))
                 hintFits = false;
         if (hintFits)
             IlanaTheme::drawFitted (g, hint, hintBox, juce::Justification::centredLeft, 1);
