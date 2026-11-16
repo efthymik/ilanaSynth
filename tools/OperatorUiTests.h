@@ -152,7 +152,7 @@ void runOperatorReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAud
         settle (400);
         const auto fmOutput = textOf (knobFor ("osc1_eg_out", "OUTPUT"));
         const auto fmLevel = knobFor ("osc1_level") != nullptr;
-        editor.showPage ("OSC");
+        editor.showPage ("MAIN");
         settle (400);
         const auto oscOutput = textOf (knobFor ("osc1_eg_out", "OUTPUT"));
         const auto voiceLevel = textOf (knobFor ("osc1_level", "VOICE LEVEL"));
@@ -165,12 +165,14 @@ void runOperatorReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAud
     // I12-6: the OSC drawer on an operator voice has no STRINGS or SOUNDBOARD
     // tab; I12-3: a modulator says what it modulates and its level is still OUTPUT (I15-1).
     {
-        editor.showPage ("OSC");
+        editor.showPage ("MAIN");
         settle (400);
         // The approved OSC design has no tabs: the bottom strip is one card whose
         // STRINGS and SOUNDBOARD dim in place while off, on an operator voice too
         // (their keys-only tabs are gone, so the old "no such tab" check is now
         // "no tabs at all, and both groups dimmed, not drawn live").
+        editor.showPlayViews (-1, 0, 1); // (PLAY's STRINGS and SOUNDBOARD (BOARD) views)
+        settle (200);
         std::vector<StateTabs*> rows;
         findAll<StateTabs> (editor, rows);
         auto tabs = 0;
@@ -181,6 +183,7 @@ void runOperatorReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAud
         expect (tabs == 0 && knobFor ("noise_level") != nullptr && amount != nullptr && amount->getAlpha() < 0.99f
                     && board != nullptr && board->getAlpha() < 0.99f,
                 "OSC: the strip has no tabs, and STRINGS and SOUNDBOARD sit dimmed on an operator voice (I12-6)");
+        editor.showPlayViews (-1, -1, 0);
         editor.showPage ("MAIN");
         settle (300);
         expect (knobFor ("osc2_eg_out", "OUTPUT") != nullptr && knobFor ("osc2_eg_out", "DEPTH") == nullptr && knobFor ("osc1_eg_out", "OUTPUT") != nullptr,
@@ -301,7 +304,7 @@ void runOperatorReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAud
 
     // OSC: the picture opens FM; no table tools; SEMI and OUTPUT / LEVEL in
     // FM's order; the caption names OP ENV (I8-15, I8-30, S8-9, V8-16).
-    editor.showPage ("OSC");
+    editor.showPage ("MAIN");
     settle (400);
     {
         std::vector<OperatorEnvDisplay*> graphs;
@@ -350,63 +353,11 @@ void runOperatorReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAud
         expect (! modeShown, "PLAY: a DX7 operator strip has no \"Wavetable\" MODE menu (S8-9, V8-16)");
     }
 
-    // MOD: OP PITCH's TRANSPOSE is a knob beside SCALE SHIFT (S8-19); the
-    // OP ENV card's badge is short (S8-10).
-    editor.showPage ("ENV/LFO");
-    settle (500);
-    if (auto* modPage = editor.getCurrentPage())
-        if (auto* envCards = findChild<EnvThumbBar> (*modPage))
-        {
-            envCards->onSelect (17);
-            settle (300);
-            if (auto* pitch = shownEditor(); pitch != nullptr && pitch->isPitch())
-            {
-                pitch->getTabs().setSelected (1, true);
-                settle (300);
-                auto* slider = findChild<juce::Slider> (pitch->getTranspose());
-                const auto knob = slider != nullptr && slider->isRotary() && visibleInTree (slider);
-                const auto besideShift = visibleInTree (&pitch->getScaleShift())
-                                         && std::abs (area (&pitch->getTranspose()).getCentreY() - area (&pitch->getScaleShift()).getCentreY()) < 12;
-                const auto before = read ("osc2_semi");
-                if (slider != nullptr)
-                    slider->setValue (slider->getValue() + 2.0);
-                settle (100);
-                const auto moved = std::abs (read ("osc2_semi") - before - 2.0f) < 0.01f;
-                if (slider != nullptr)
-                    slider->setValue (slider->getValue() - 2.0);
-                settle (100);
-                expect (knob && besideShift && moved, "OP PITCH: TRANSPOSE is a knob in semitones beside SCALE SHIFT, moving every SEMI (S8-19)");
-
-                // I8-28: the pitch graph has the ruler too, its handles inside.
-                auto& graph = pitch->getGraph();
-                auto inside = graph.isPitch();
-                for (const auto point : graph.getHandlePositions())
-                    inside = inside && graph.getFrameBounds().contains (point);
-                expect (inside && graph.getFrameBounds().getBottom() < (float) graph.getHeight() - 10.0f,
-                        "the OP PITCH graph has the ruler under its frame (I8-28)");
-                pitch->getTabs().setSelected (0, true);
-            }
-            envCards->onSelect (16);
-            settle (300);
-            auto* pool = shownEditor();
-            expect (pool != nullptr && shownPicker() != nullptr && shownPicker()->getOscillators().size() == 6 && oscPillButtons() == 0,
-                    "MOD: OP ENV picks its oscillator on the one picker (I8-10)");
-            const auto badge = juce::String ("6 ops");
-            const auto fits = juce::GlyphArrangement::getStringWidth (juce::Font (IlanaTheme::font (IlanaTheme::TextSize::tiny, true)), badge) < 40.0f;
-            expect (fits, "the OP ENV card's badge is short enough for the narrowest card (S8-10)");
-            envCards->onSelect (0);
-            settle (200);
-        }
-
-    // On a patch without operators the OP ENV card is not in the pool (R3,
-    // I8-5: the Operator Env's parts only where used). I8-39: the editor
-    // itself, opened there anyway, greys its knobs and offers USE ON OSC.
+    // I8-39: on a patch without operators the OP ENV editor, opened there
+    // anyway, greys its knobs and offers USE ON OSC.
     loadNamed ("Neuro Wobble");
-    editor.showPage ("ENV/LFO");
+    editor.showPage ("MAIN");
     settle (400);
-    if (auto* modPage = editor.getCurrentPage())
-        if (auto* envCards = findChild<EnvThumbBar> (*modPage))
-            expect (! envCards->isCardInPool (16), "OP ENV has no MOD pool card on a patch without operators (I8-5)");
     {
         OperatorEnvEditor unusedEditor (processor, OperatorEnvEditor::Place::pool);
         unusedEditor.setBounds (0, 0, 600, 240);

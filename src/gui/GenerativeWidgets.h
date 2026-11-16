@@ -169,7 +169,7 @@ inline void showLaneMenu (IlanaSynthAudioProcessor& processor, juce::Component& 
     menu.addItem ((int) LaneTool::copy, "Copy");
     menu.addItem ((int) LaneTool::paste, "Paste", laneClipboard().full);
     juce::Component::SafePointer<juce::Component> safe (&lanes);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&lanes).withMousePosition(),
+    menu.showMenuAsync (IlanaTheme::menuOptions (&lanes).withMousePosition(),
                         [&processor, safe, idFor, loopLength, laneName] (int result)
                         {
                             if (result <= 0 || safe == nullptr)

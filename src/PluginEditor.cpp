@@ -24,7 +24,6 @@
 #include "gui/FilterDisplay.h"
 #include "gui/LfoDisplay.h"
 #include "gui/CardTabs.h"
-#include "gui/EnvThumbs.h"
 #include "gui/FilterWidgets.h"
 #include "gui/VectorPad.h"
 #include "gui/PhysicalView.h"
@@ -40,7 +39,7 @@
 #include "gui/ZoneMapEditor.h"
 #include "gui/SampleBrowser.h"
 #include "gui/LfoShapeMenu.h"
-#include "gui/LfoThumbs.h"
+#include "gui/ModRoutes.h"
 #include "gui/ModuleMenu.h"
 #include "gui/ModulationCardView.h"
 #include "gui/MatrixWidgets.h"
@@ -57,7 +56,9 @@
 #include "gui/WaveDisplay.h"
 #include "gui/SampleNameBox.h"
 
-// Page classes (anonymous namespace), in dependency order.
+// The pages. Each header declares its page (its member functions are in the
+// .cpp of the same name) and includes what it uses (tools/check_headers.sh),
+// so the order here does not matter.
 #include "gui/StateTabs.h"
 #include "gui/pages/PageHelpers.h"
 #include "gui/PhysicalApplies.h"
@@ -74,6 +75,83 @@
 #include "gui/pages/FxPage.h"
 #include "gui/pages/PatchLfo.h"
 #include "gui/pages/PatchPage.h"
+
+namespace
+{
+#if defined (_WIN32)
+// GetDpiForMonitor ignores the caller's DPI awareness (unlike the DPI APIs
+// JUCE's peer uses), so it still reports the real monitor scale inside hosts
+// that virtualise plugin windows.  Loaded dynamically to avoid extra link
+// dependencies.
+float queryMonitorScale (void* nativeHandle)
+{
+    if (nativeHandle == nullptr)
+        return 1.0f;
+
+    using MonitorFromWindowFn = void* (*) (void*, unsigned long);
+    using GetDpiForMonitorFn = long (*) (void*, int, unsigned int*, unsigned int*);
+
+    auto* user32 = GetModuleHandleW (L"user32.dll");
+    auto* shcore = LoadLibraryW (L"shcore.dll");
+
+    if (user32 == nullptr || shcore == nullptr)
+        return 1.0f;
+
+    auto* monitorFromWindow = (MonitorFromWindowFn) (void*) GetProcAddress (user32, "MonitorFromWindow");
+    auto* getDpiForMonitor = (GetDpiForMonitorFn) (void*) GetProcAddress (shcore, "GetDpiForMonitor");
+
+    if (monitorFromWindow == nullptr || getDpiForMonitor == nullptr)
+        return 1.0f;
+
+    auto* monitor = monitorFromWindow (nativeHandle, 2 /*MONITOR_DEFAULTTONEAREST*/);
+    unsigned int dpiX = 96;
+    unsigned int dpiY = 96;
+
+    if (monitor == nullptr || getDpiForMonitor (monitor, 0 /*MDT_EFFECTIVE_DPI*/, &dpiX, &dpiY) != 0 /*S_OK*/)
+        return 1.0f;
+
+    return juce::jlimit (1.0f, 3.0f, (float) dpiX / 96.0f);
+}
+
+void* setThreadDpiContext (void* context)
+{
+    using SetThreadDpiAwarenessContextFn = void* (*) (void*);
+
+    static auto fn = (SetThreadDpiAwarenessContextFn) (void*)
+        GetProcAddress (GetModuleHandleW (L"user32.dll"), "SetThreadDpiAwarenessContext");
+
+    return fn != nullptr ? fn (context) : nullptr;
+}
+
+void* perMonitorAwareV2Context() { return (void*) (juce::pointer_sized_int) -4; }
+
+int processDpiAwareness()
+{
+    using GetProcessDpiAwarenessFn = long (*) (void*, int*);
+
+    static auto* shcore = LoadLibraryW (L"shcore.dll");
+    static auto getProcessAwareness = shcore != nullptr
+                                          ? (GetProcessDpiAwarenessFn) (void*) GetProcAddress (shcore, "GetProcessDpiAwareness")
+                                          : nullptr;
+
+    if (getProcessAwareness == nullptr)
+        return -1;
+
+    auto* process = OpenProcess (0x1000 /*PROCESS_QUERY_LIMITED_INFORMATION*/, 0, GetCurrentProcessId());
+    int awareness = -1;
+
+    if (process != nullptr)
+    {
+        if (getProcessAwareness (process, &awareness) != 0)
+            awareness = -1;
+
+        CloseHandle (process);
+    }
+
+    return awareness;
+}
+#endif
+} // namespace
 
 
 // The scope over the current page. Docked (the default, review 7) it fills
@@ -295,6 +373,7 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
 
     setLookAndFeel (&lookAndFeel);
     tooltipWindow.setOpaque (false);
+    registerPopups();
 
     {
         juce::PropertiesFile::Options options;
@@ -356,7 +435,6 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
         settings->setValue ("playBandsFolded", folded);
         settings->saveIfNeeded();
     };
-    auto* envLfoPage = new EnvLfoPage (p, *settings);
 
     // Eight tabs; the ones holding several pages switch them from the tab
     // row (PLAY: overview and vector, MOD: envelopes, LFOs and the MSEG).
@@ -467,20 +545,10 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
     if (IlanaSynthAudioProcessor::isEffectBuild)
         addSection ("INPUT", { { "INPUT", "INPUT", new InputPage (p) } });
 
-    // One-tab PLAY (ilana's mockup v3, 2026-10-25): the OSC, FILTER and MOD tabs are gone from the row, PLAY
-    // holds what they did. Their pages stay behind the row (no tab button, last so the shortcuts stay):
-    // the UI tests reach them (a pop-up editor holds every setting MOD's ENV / LFO page had).
+    // One-tab PLAY (ilana's mockup v3, 2026-10-25): the OSC, FILTER and MOD tabs are gone, PLAY holds what
+    // they did (its oscillator cards, its filter card, its envelope and LFO carousels; a source's pop-up
+    // editor holds every setting MOD's ENV / LFO page had).
     visibleTabCount = tabs.getNumTabs();
-    auto* oscViewport = new OscPageViewport (p);
-    addSection ("OSC", { { "OSC", "OSCILLATORS", oscViewport } });
-    addSection ("FILTER", { { "FILTER", "FILTER", new FilterPage (p) } });
-    addSection ("MOD", { { "ENV/LFO", "ENV / LFO", envLfoPage } });
-    for (int index = visibleTabCount; index < tabs.getNumTabs(); ++index)
-        if (auto* button = tabs.getTabbedButtonBar().getTabButton (index))
-        {
-            button->getProperties().set ("hiddenTab", true);
-            button->setInterceptsMouseClicks (false, false);
-        }
 
     // EDIT (or the title) on PLAY's ENVELOPE and LFO: the source's pop-up editor, as a dock chip opens it.
     playPage->onEditSource = [this] (int source, juce::Component& anchor) { toggleSourcePopover (source, anchor); };
@@ -503,9 +571,9 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
         if (voiceModeMenu != nullptr)
             voiceModeMenu->getComboBox().showPopup();
     };
-    getOscCardBounds = [this, oscViewport] (int osc) -> juce::Rectangle<int>
+    getOscCardBounds = [this, playPage] (int osc) -> juce::Rectangle<int>
     {
-        if (auto* page = oscViewport->getPage())
+        if (auto* page = playPage->getOscView().getPage())
             return getLocalArea (page, page->getCardBounds (osc));
         return {};
     };
@@ -793,7 +861,7 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
         juce::PopupMenu menu;
         menu.addItem (1, "Copy A to B");
         menu.addItem (2, "Copy B to A", ! showingA || slotB.isValid()); // (B is empty until the first flip)
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&abButton),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&abButton),
                             [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)] (int result)
                             {
                                 if (safeThis != nullptr && result > 0)
@@ -1544,7 +1612,7 @@ void IlanaSynthAudioProcessorEditor::showSourceMenu (juce::Component& target, in
         menu.addSubMenu ("Show in the matrix", matrixRows);
     }
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target),
+    menu.showMenuAsync (IlanaTheme::menuOptions (&target),
                         [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this), source] (int result)
                         {
                             if (safeThis == nullptr || result <= 0)
@@ -1783,7 +1851,7 @@ void IlanaSynthAudioProcessorEditor::showChipPicker()
     if (envelopes.getNumItems() > 0)
         menu.addSubMenu ("Envelopes", envelopes);
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&moreChipsButton),
+    menu.showMenuAsync (IlanaTheme::menuOptions (&moreChipsButton),
                         [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)] (int result)
                         {
                             if (safeThis != nullptr && result > 0)
@@ -2373,17 +2441,10 @@ void IlanaSynthAudioProcessorEditor::showPage (const juce::String& id)
 
     closeWavetableEditor(); // it belongs to the page it was opened from
 
-    // STEPS & MSEG went into ENV / LFO (UI review 6, V5-7): its old id
-    // opens there.
-    if (id == "STEPS")
-    {
-        showPage ("ENV/LFO");
-        return;
-    }
-
     // The PHYSICAL tab folded into the oscillator cards (2026-10-10), and
-    // the cards onto PLAY (2026-10-25): its old id opens PLAY.
-    if (id == "PHYSICAL")
+    // the cards onto PLAY (2026-10-25): its old id opens PLAY. So do the old OSC, FILTER and
+    // ENV / LFO ids (their pages are gone; PLAY and the source pop-ups hold what they had).
+    if (id == "PHYSICAL" || id == "OSC" || id == "FILTER" || id == "ENV/LFO" || id == "STEPS")
     {
         showPage ("MAIN");
         return;
@@ -3036,7 +3097,7 @@ void IlanaSynthAudioProcessorEditor::updateAbMarks()
             const auto n = it != counts.end() ? it->second : 0;
             button->getProperties().set ("abCount", n);
             button->repaint();
-            if (n > 0 && ! (bool) button->getProperties()["hiddenTab"])
+            if (n > 0)
                 where.add (tabs.getTabNames()[t]);
         }
 
@@ -3531,7 +3592,7 @@ void IlanaSynthAudioProcessorEditor::showHistoryMenu()
         }
     }
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&historyButton),
+    menu.showMenuAsync (IlanaTheme::menuOptions (&historyButton),
                         [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)] (int result)
                         {
                             if (safeThis == nullptr || result < 1000)
@@ -3735,7 +3796,7 @@ void IlanaSynthAudioProcessorEditor::showPresetMenu()
     menu.addSeparator();
     menu.addItem (6, "Import DX7 / Dexed bank (.syx)...");
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&moreButton),
+    menu.showMenuAsync (IlanaTheme::menuOptions (&moreButton),
                         [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)] (int result)
                         {
                             if (safeThis == nullptr)
@@ -3788,7 +3849,7 @@ void IlanaSynthAudioProcessorEditor::showDiceMenu()
     menu.addItem (10, "Nudge  (small changes)");
     menu.addItem (11, "Shake  (bigger changes)");
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&diceButton),
+    menu.showMenuAsync (IlanaTheme::menuOptions (&diceButton),
                         [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)] (int result)
                         {
                             if (safeThis == nullptr || result == 0)
@@ -3931,7 +3992,7 @@ void IlanaSynthAudioProcessorEditor::showSettingsMenu (bool tuningOnly)
     }
 
     auto* target = tuningOnly ? static_cast<juce::Component*> (&presetDisplay) : &settingsButton;
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target),
+    menu.showMenuAsync (IlanaTheme::menuOptions (target),
                         [safeThis = juce::Component::SafePointer<IlanaSynthAudioProcessorEditor> (this)] (int result)
                         {
                             if (safeThis == nullptr || result == 0)
@@ -4435,56 +4496,90 @@ void IlanaSynthAudioProcessorEditor::mutate (float amount)
 // the scope. False when nothing was open.
 bool IlanaSynthAudioProcessorEditor::closeTopPopup()
 {
-    if (saveOverlay.isShowing())
+    return popups.closeTop();
+}
+
+// Registers every overlay with the pop-up stack, top first. This order is the Esc order
+// (it is the order of the old hand-written chain, kept exactly): where two are open at
+// once the earlier one closes first, whichever was opened first.
+void IlanaSynthAudioProcessorEditor::registerPopups()
+{
+    popups.add ("save", [this]
     {
+        if (! saveOverlay.isShowing())
+            return false;
+
         saveOverlay.cancel();
         return true;
-    }
+    });
 
     // Esc closes the wavetable editor wherever the focus is in the window
     // (a text field there would otherwise keep the key).
-    if (wavetableEditor != nullptr)
+    popups.add ("wavetable", [this]
     {
+        if (wavetableEditor == nullptr)
+            return false;
+
         closeWavetableEditor();
         return true;
-    }
+    });
 
-    if (zoneEditor != nullptr)
+    popups.add ("zones", [this]
     {
+        if (zoneEditor == nullptr)
+            return false;
+
         closeZoneEditor();
         return true;
-    }
+    });
 
-    if (sampleBrowser != nullptr)
+    popups.add ("samples", [this]
     {
+        if (sampleBrowser == nullptr)
+            return false;
+
         closeSampleBrowser();
         return true;
-    }
+    });
 
-    if (tutorial.isVisible())
+    popups.add ("tutorial", [this]
     {
+        if (! tutorial.isVisible())
+            return false;
+
         tutorial.dismiss();
         return true;
-    }
+    });
 
-    if (presetPanel != nullptr && presetPanel->isOpen() && ! presetPanel->isDocked())
+    popups.add ("presets", [this]
     {
+        if (presetPanel == nullptr || ! presetPanel->isOpen() || presetPanel->isDocked())
+            return false;
+
         presetPanel->close();
         return true;
-    }
+    });
 
-    if (getSourcePopoverSource() != 0)
+    popups.add ("source", [this]
     {
+        if (getSourcePopoverSource() == 0)
+            return false;
+
         closeSourcePopover();
         return true;
-    }
+    });
 
-    if (presetDockShown)
+    popups.add ("dock", [this]
     {
+        if (! presetDockShown)
+            return false;
+
         setPresetDockShown (false);
         return true;
-    }
+    });
 
+    // Held mod cards (every knob that has one open closes together), then the remap editor.
+    popups.add ("modcard", [this]
     {
         std::vector<KnobControl*> knobs;
         std::function<void (juce::Component&)> collect = [&] (juce::Component& parent)
@@ -4509,9 +4604,11 @@ bool IlanaSynthAudioProcessorEditor::closeTopPopup()
             }
         }
 
-        if (closed)
-            return true;
+        return closed;
+    });
 
+    popups.add ("remap", [this]
+    {
         std::function<RemapEditor* (juce::Component&)> findRemap = [&] (juce::Component& parent) -> RemapEditor*
         {
             for (auto* child : parent.getChildren())
@@ -4526,17 +4623,21 @@ bool IlanaSynthAudioProcessorEditor::closeTopPopup()
             return nullptr;
         };
 
-        if (auto* remap = findRemap (content); remap != nullptr && remap->close())
-            return true;
-    }
+        auto* remap = findRemap (content);
+        return remap != nullptr && remap->close();
+    });
 
-    if (stereoPopover != nullptr && stereoPopover->isVisible() && ! stereoGrow->isClosing())
+    popups.add ("stereo", [this]
     {
+        if (stereoPopover == nullptr || ! stereoPopover->isVisible() || stereoGrow->isClosing())
+            return false;
+
         setStereoOpen (false);
         return true;
-    }
+    });
 
     // The tuning pop-over of PLAY (or of the OSC page behind it).
+    popups.add ("tuning", [this]
     {
         std::function<bool (juce::Component&)> closeTuning = [&] (juce::Component& parent)
         {
@@ -4555,17 +4656,17 @@ bool IlanaSynthAudioProcessorEditor::closeTopPopup()
             return false;
         };
 
-        if (closeTuning (content))
-            return true;
-    }
+        return closeTuning (content);
+    });
 
-    if (isScopeOpen())
+    popups.add ("scope", [this]
     {
+        if (! isScopeOpen())
+            return false;
+
         setScopeOpen (false);
         return true;
-    }
-
-    return false;
+    });
 }
 
 bool IlanaSynthAudioProcessorEditor::keyPressed (const juce::KeyPress& key)

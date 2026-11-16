@@ -127,11 +127,45 @@ set(ILANA_PROCESSOR_SOURCES
     src/processor/Sequencers.cpp
     src/processor/Presets.cpp
     src/processor/State.cpp
+    src/processor/Migrations.cpp
     src/processor/Bounce.cpp
     src/processor/SamplePortability.cpp
     src/processor/Dx7.cpp
     src/dsp/BuiltInTables.cpp
     src/dsp/ModalPianoTable.cpp
+)
+
+# The whole engine (processor, voices, tables, FX), one list for every target
+# that compiles it itself (the plugins, ilanaSnapshot, ilanaFxTest).
+set(ILANA_ENGINE_SOURCES
+    src/PluginProcessor.cpp
+    ${ILANA_PROCESSOR_SOURCES}
+    src/MtsEsp.cpp
+    src/dsp/Wavetable.cpp
+    src/dsp/WavetableDoc.cpp
+    src/dsp/TableFactory.cpp
+    src/dsp/Voice.cpp
+    src/dsp/airwindows/Registry.cpp
+)
+# Absolute, so the engine libraries in cmake/engine can use the same list.
+list(TRANSFORM ILANA_ENGINE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
+
+# The editor, for every target that builds it (the plugins, ilanaSnapshot,
+# ilanaFxTest): PluginEditor.cpp (the shell) and the pages, each in its own
+# .cpp (ARCH-8).
+set(ILANA_GUI_SOURCES
+    src/PluginEditor.cpp
+    src/gui/pages/EnvLfoPages.cpp
+    src/gui/pages/FilterVectorPhysicalPages.cpp
+    src/gui/pages/FmInputPages.cpp
+    src/gui/pages/FxPage.cpp
+    src/gui/pages/MatrixPage.cpp
+    src/gui/pages/ModSourcePanel.cpp
+    src/gui/pages/OscPage.cpp
+    src/gui/pages/PatchLfo.cpp
+    src/gui/pages/PatchPage.cpp
+    src/gui/pages/PlayPage.cpp
+    src/gui/pages/SeqPage.cpp
 )
 
 juce_add_binary_data(ilanaFonts SOURCES
@@ -153,15 +187,8 @@ juce_add_binary_data(ilanaWavetables
 )
 
 target_sources(ilanaSynth PRIVATE
-    src/PluginProcessor.cpp
-    ${ILANA_PROCESSOR_SOURCES}
-    src/MtsEsp.cpp
-    src/PluginEditor.cpp
-    src/dsp/Wavetable.cpp
-    src/dsp/WavetableDoc.cpp
-    src/dsp/TableFactory.cpp
-    src/dsp/Voice.cpp
-    src/dsp/airwindows/Registry.cpp
+    ${ILANA_ENGINE_SOURCES}
+    ${ILANA_GUI_SOURCES}
 )
 
 target_compile_definitions(ilanaSynth PUBLIC
@@ -203,15 +230,8 @@ juce_add_plugin(ilanaSynthFX
 )
 
 target_sources(ilanaSynthFX PRIVATE
-    src/PluginProcessor.cpp
-    ${ILANA_PROCESSOR_SOURCES}
-    src/MtsEsp.cpp
-    src/PluginEditor.cpp
-    src/dsp/Wavetable.cpp
-    src/dsp/WavetableDoc.cpp
-    src/dsp/TableFactory.cpp
-    src/dsp/Voice.cpp
-    src/dsp/airwindows/Registry.cpp
+    ${ILANA_ENGINE_SOURCES}
+    ${ILANA_GUI_SOURCES}
 )
 
 target_compile_definitions(ilanaSynthFX PUBLIC
@@ -232,6 +252,29 @@ target_link_libraries(ilanaSynthFX
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags
 )
+
+# The same stack for the dev tools below, which also build processors on the stack.
+function (ilana_big_stack target)
+    if (MSVC)
+        target_link_options(${target} PRIVATE /STACK:16777216)
+    endif()
+endfunction()
+
+
+# The engine as static libraries, one per define flavour (cmake/engine), so a
+# flavour is compiled once however many tools use it. The plugins, ilanaSnapshot
+# and ilanaFxTest need the editor and keep their own compile.
+add_subdirectory(cmake/engine)
+
+# A dev tool: its own source file on top of an engine library. EXCLUDE_FROM_ALL
+# keeps it out of the default build (tools/verify.sh --all builds everything).
+function (ilana_engine_tool name engine source)
+    juce_add_console_app(${name} PRODUCT_NAME "${name}")
+    target_sources(${name} PRIVATE ${source})
+    target_link_libraries(${name} PRIVATE ${engine})
+    ilana_big_stack (${name})
+    set_target_properties(${name} PROPERTIES EXCLUDE_FROM_ALL TRUE)
+endfunction()
 
 if (ILANA_CLAP)
     FetchContent_Declare(clap-juce-extensions
@@ -255,34 +298,11 @@ juce_add_console_app(ilanaTableTest PRODUCT_NAME "ilanaTableTest")
 target_sources(ilanaTableTest PRIVATE
     tests/TableTest.cpp
     tests/SamplingProfiler.cpp
-    src/PluginProcessor.cpp
-    ${ILANA_PROCESSOR_SOURCES}
-    src/MtsEsp.cpp
-    src/dsp/Wavetable.cpp
-    src/dsp/WavetableDoc.cpp
-    src/dsp/TableFactory.cpp
-    src/dsp/Voice.cpp
-    src/dsp/airwindows/Registry.cpp
 )
 
-target_include_directories(ilanaTableTest PRIVATE src)
-
-target_compile_definitions(ilanaTableTest PRIVATE
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    ILANA_TEST_BUILD=1
-    JucePlugin_Name="ilanaSynth"
-)
-
-target_link_libraries(ilanaTableTest
-    PRIVATE
-        juce::juce_dsp
-        juce::juce_audio_formats
-        juce::juce_audio_processors
-        juce::juce_audio_utils
-    PUBLIC
-        juce::juce_recommended_config_flags
-)
+target_link_libraries(ilanaTableTest PRIVATE ilanaEngineTest)
+# Where the old-state corpus is (tests/old-states; ILANA_OLDSTATE_DIR overrides it).
+target_compile_definitions(ilanaTableTest PRIVATE ILANA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
 # Symbols for the optimised test build, so ILANA_PROFILE can name lines.
 if (MSVC)
@@ -295,27 +315,13 @@ endif()
 
 add_test(NAME table_tests COMMAND ilanaTableTest)
 
-# The same stack for the dev tools below, which also build processors on the stack.
-function (ilana_big_stack target)
-    if (MSVC)
-        target_link_options(${target} PRIVATE /STACK:16777216)
-    endif()
-endfunction()
-
 # Dev tool: offscreen PNG snapshots of every editor tab (not shipped).
 juce_add_console_app(ilanaSnapshot PRODUCT_NAME "ilanaSnapshot")
 
 target_sources(ilanaSnapshot PRIVATE
     tools/Snapshot.cpp
-    src/PluginProcessor.cpp
-    ${ILANA_PROCESSOR_SOURCES}
-    src/MtsEsp.cpp
-    src/PluginEditor.cpp
-    src/dsp/Wavetable.cpp
-    src/dsp/WavetableDoc.cpp
-    src/dsp/TableFactory.cpp
-    src/dsp/Voice.cpp
-    src/dsp/airwindows/Registry.cpp
+    ${ILANA_ENGINE_SOURCES}
+    ${ILANA_GUI_SOURCES}
 )
 
 target_include_directories(ilanaSnapshot PRIVATE src)
@@ -432,220 +438,26 @@ endif()
 
 # Dev tool: per-preset render fingerprints for regression checks (not shipped).
 juce_add_console_app(ilanaFingerprint PRODUCT_NAME "ilanaFingerprint")
+target_sources(ilanaFingerprint PRIVATE tools/PresetFingerprint.cpp)
+target_link_libraries(ilanaFingerprint PRIVATE ilanaEngineFp)
 
-target_sources(ilanaFingerprint PRIVATE
-    tools/PresetFingerprint.cpp
-    src/PluginProcessor.cpp
-    ${ILANA_PROCESSOR_SOURCES}
-    src/MtsEsp.cpp
-    src/dsp/Wavetable.cpp
-    src/dsp/WavetableDoc.cpp
-    src/dsp/TableFactory.cpp
-    src/dsp/Voice.cpp
-    src/dsp/airwindows/Registry.cpp
-)
-
-target_include_directories(ilanaFingerprint PRIVATE src)
-
-target_compile_definitions(ilanaFingerprint PRIVATE
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    ILANA_TEST_BUILD=1
-    ILANA_FINGERPRINT_BUILD=1
-    JucePlugin_Name="ilanaSynth"
-)
-
-target_link_libraries(ilanaFingerprint
-    PRIVATE
-        juce::juce_dsp
-        juce::juce_audio_formats
-        juce::juce_audio_processors
-        juce::juce_audio_utils
-    PUBLIC
-        juce::juce_recommended_config_flags
-)
-
-# Dev tool: the stress phrase (pedal, retrigger, stealing, preset change,
-# random block lengths, sample-rate change) through every preset, multi-core
-# on vs off (tools/StressTest.cpp; not shipped).
-juce_add_console_app(ilanaStress PRODUCT_NAME "ilanaStress")
-
-target_sources(ilanaStress PRIVATE
-    tools/StressTest.cpp
-    src/PluginProcessor.cpp
-    ${ILANA_PROCESSOR_SOURCES}
-    src/MtsEsp.cpp
-    src/dsp/Wavetable.cpp
-    src/dsp/WavetableDoc.cpp
-    src/dsp/TableFactory.cpp
-    src/dsp/Voice.cpp
-    src/dsp/airwindows/Registry.cpp
-)
-
-target_include_directories(ilanaStress PRIVATE src)
-
-target_compile_definitions(ilanaStress PRIVATE
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    ILANA_TEST_BUILD=1
-    ILANA_FINGERPRINT_BUILD=1
-    JucePlugin_Name="ilanaSynth"
-)
-
-target_link_libraries(ilanaStress
-    PRIVATE
-        juce::juce_dsp
-        juce::juce_audio_formats
-        juce::juce_audio_processors
-        juce::juce_audio_utils
-    PUBLIC
-        juce::juce_recommended_config_flags
-)
-
-juce_add_console_app(ilanaPolishRepro PRODUCT_NAME "ilanaPolishRepro")
-
-target_sources(ilanaPolishRepro PRIVATE
-    tools/PolishRepro.cpp
-    src/PluginProcessor.cpp
-    ${ILANA_PROCESSOR_SOURCES}
-    src/MtsEsp.cpp
-    src/dsp/Wavetable.cpp
-    src/dsp/WavetableDoc.cpp
-    src/dsp/TableFactory.cpp
-    src/dsp/Voice.cpp
-    src/dsp/airwindows/Registry.cpp
-)
-
-target_include_directories(ilanaPolishRepro PRIVATE src)
-
-target_compile_definitions(ilanaPolishRepro PRIVATE
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    ILANA_TEST_BUILD=1
-    ILANA_FINGERPRINT_BUILD=1
-    JucePlugin_Name="ilanaSynth"
-)
-
-target_link_libraries(ilanaPolishRepro
-    PRIVATE
-        ilanaStretch
-        juce::juce_dsp
-        juce::juce_audio_formats
-        juce::juce_audio_processors
-        juce::juce_audio_utils
-    PUBLIC
-        juce::juce_recommended_config_flags
-)
-
-# Dev tool: renders every factory preset's test phrases for the preset critic
-# (tools/preset_critic.py; not shipped).
-juce_add_console_app(ilanaPresetRender PRODUCT_NAME "ilanaPresetRender")
-
-target_sources(ilanaPresetRender PRIVATE
-    tools/PresetRender.cpp
-    src/PluginProcessor.cpp
-    ${ILANA_PROCESSOR_SOURCES}
-    src/MtsEsp.cpp
-    src/dsp/Wavetable.cpp
-    src/dsp/WavetableDoc.cpp
-    src/dsp/TableFactory.cpp
-    src/dsp/Voice.cpp
-    src/dsp/airwindows/Registry.cpp
-)
-
-target_include_directories(ilanaPresetRender PRIVATE src)
-
-target_compile_definitions(ilanaPresetRender PRIVATE
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    ILANA_TEST_BUILD=1
-    ILANA_FINGERPRINT_BUILD=1
-    JucePlugin_Name="ilanaSynth"
-)
-
-target_link_libraries(ilanaPresetRender
-    PRIVATE
-        juce::juce_dsp
-        juce::juce_audio_formats
-        juce::juce_audio_processors
-        juce::juce_audio_utils
-    PUBLIC
-        juce::juce_recommended_config_flags
-)
-
-juce_add_console_app(ilanaMidiRender PRODUCT_NAME "ilanaMidiRender")
-
-target_sources(ilanaMidiRender PRIVATE
-    tools/MidiRender.cpp
-    src/PluginProcessor.cpp
-    ${ILANA_PROCESSOR_SOURCES}
-    src/MtsEsp.cpp
-    src/dsp/Wavetable.cpp
-    src/dsp/WavetableDoc.cpp
-    src/dsp/TableFactory.cpp
-    src/dsp/Voice.cpp
-    src/dsp/airwindows/Registry.cpp
-)
-
-target_include_directories(ilanaMidiRender PRIVATE src)
-
-target_compile_definitions(ilanaMidiRender PRIVATE
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    ILANA_TEST_BUILD=1
-    ILANA_FINGERPRINT_BUILD=1
-    JucePlugin_Name="ilanaSynth"
-)
-
-target_link_libraries(ilanaMidiRender
-    PRIVATE
-        juce::juce_dsp
-        juce::juce_audio_formats
-        juce::juce_audio_processors
-        juce::juce_audio_utils
-    PUBLIC
-        juce::juce_recommended_config_flags
-)
-
-juce_add_console_app(ilanaKnobAudit PRODUCT_NAME "ilanaKnobAudit")
-
-target_sources(ilanaKnobAudit PRIVATE
-    tools/KnobAudit.cpp
-    src/PluginProcessor.cpp
-    ${ILANA_PROCESSOR_SOURCES}
-    src/MtsEsp.cpp
-    src/dsp/Wavetable.cpp
-    src/dsp/WavetableDoc.cpp
-    src/dsp/TableFactory.cpp
-    src/dsp/Voice.cpp
-    src/dsp/airwindows/Registry.cpp
-)
-
-target_include_directories(ilanaKnobAudit PRIVATE src)
-
-target_compile_definitions(ilanaKnobAudit PRIVATE
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    ILANA_TEST_BUILD=1
-    ILANA_FINGERPRINT_BUILD=1
-    JucePlugin_Name="ilanaSynth"
-)
-
-target_link_libraries(ilanaKnobAudit
-    PRIVATE
-        juce::juce_dsp
-        juce::juce_audio_formats
-        juce::juce_audio_processors
-        juce::juce_audio_utils
-    PUBLIC
-        juce::juce_recommended_config_flags
-)
+# Dev tools on the same flavour, built only on request (verify.sh --all):
+# the stress phrase (pedal, retrigger, stealing, preset change, random block
+# lengths, sample-rate change) through every preset, multi-core on vs off
+# (tools/StressTest.cpp); the polish repro; the preset critic's renders
+# (tools/preset_critic.py); the MIDI-file renderer; the knob audit.
+ilana_engine_tool(ilanaStress      ilanaEngineFp tools/StressTest.cpp)
+ilana_engine_tool(ilanaPolishRepro ilanaEngineFp tools/PolishRepro.cpp)
+ilana_engine_tool(ilanaPresetRender ilanaEngineFp tools/PresetRender.cpp)
+ilana_engine_tool(ilanaMidiRender  ilanaEngineFp tools/MidiRender.cpp)
+ilana_engine_tool(ilanaKnobAudit   ilanaEngineFp tools/KnobAudit.cpp)
 
 # Dev tool: renders reference notes from an installed VST3's default sound,
 # for fitting modelled sounds (not shipped).
 juce_add_console_app(ilanaRefHost PRODUCT_NAME "ilanaRefHost")
 
 target_sources(ilanaRefHost PRIVATE tools/RefHost.cpp)
+set_target_properties(ilanaRefHost PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
 target_compile_definitions(ilanaRefHost PRIVATE
     JUCE_WEB_BROWSER=0
@@ -667,15 +479,8 @@ juce_add_console_app(ilanaFxTest PRODUCT_NAME "ilanaFxTest")
 
 target_sources(ilanaFxTest PRIVATE
     tests/FxTest.cpp
-    src/PluginProcessor.cpp
-    ${ILANA_PROCESSOR_SOURCES}
-    src/MtsEsp.cpp
-    src/PluginEditor.cpp
-    src/dsp/Wavetable.cpp
-    src/dsp/WavetableDoc.cpp
-    src/dsp/TableFactory.cpp
-    src/dsp/Voice.cpp
-    src/dsp/airwindows/Registry.cpp
+    ${ILANA_ENGINE_SOURCES}
+    ${ILANA_GUI_SOURCES}
 )
 
 target_include_directories(ilanaFxTest PRIVATE src)
@@ -707,40 +512,9 @@ endif()
 
 # Dev tool: what the FX rack costs, per effect and per routing (tools/FxCpuBench.cpp; not shipped).
 juce_add_console_app(ilanaFxCpuBench PRODUCT_NAME "ilanaFxCpuBench")
-
-target_sources(ilanaFxCpuBench PRIVATE
-    tools/FxCpuBench.cpp
-    src/PluginProcessor.cpp
-    ${ILANA_PROCESSOR_SOURCES}
-    src/MtsEsp.cpp
-    src/PluginEditor.cpp
-    src/dsp/Wavetable.cpp
-    src/dsp/WavetableDoc.cpp
-    src/dsp/TableFactory.cpp
-    src/dsp/Voice.cpp
-    src/dsp/airwindows/Registry.cpp
-)
-
-target_include_directories(ilanaFxCpuBench PRIVATE src)
-
-target_compile_definitions(ilanaFxCpuBench PRIVATE
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    ILANA_FX=1
-    JUCE_MODAL_LOOPS_PERMITTED=1
-    JucePlugin_Name="ilanaSynth FX"
-)
-
-target_link_libraries(ilanaFxCpuBench
-    PRIVATE
-        ilanaFonts
-        juce::juce_dsp
-        juce::juce_audio_formats
-        juce::juce_audio_processors
-        juce::juce_audio_utils
-    PUBLIC
-        juce::juce_recommended_config_flags
-)
+target_sources(ilanaFxCpuBench PRIVATE tools/FxCpuBench.cpp)
+target_link_libraries(ilanaFxCpuBench PRIVATE ilanaEngineFxBench)
+set_target_properties(ilanaFxCpuBench PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
 if (MSVC)
     target_compile_options(ilanaFxCpuBench PRIVATE /Zi)
@@ -750,53 +524,25 @@ endif()
 
 add_test(NAME fx_tests COMMAND ilanaFxTest)
 
-foreach (tool ilanaSnapshot ilanaFingerprint ilanaStress ilanaPresetRender ilanaFxTest)
+foreach (tool ilanaSnapshot ilanaFingerprint ilanaFxTest)
     ilana_big_stack (${tool})
 endforeach()
 
-# TIME's high-quality stretchers, in everything built from the processor.
-foreach(target ilanaSynth ilanaSynthFX ilanaTableTest ilanaSnapshot ilanaFingerprint ilanaStress
-               ilanaPresetRender ilanaKnobAudit ilanaFxTest ilanaFxCpuBench)
-    if (TARGET ${target})
-        target_link_libraries(${target} PRIVATE ilanaStretch)
-    endif()
+# TIME's high-quality stretchers and the built-in wavetables (factory tables),
+# in the targets that compile the engine themselves; the engine libraries carry
+# them for the rest.
+foreach(target ilanaSynth ilanaSynthFX ilanaSnapshot ilanaFxTest)
+    target_link_libraries(${target} PRIVATE ilanaStretch ilanaWavetables)
 endforeach()
-
-target_link_libraries(ilanaSynth PRIVATE ilanaWavetables)
-
-target_link_libraries(ilanaSynthFX PRIVATE ilanaWavetables)
-
-target_link_libraries(ilanaTableTest PRIVATE ilanaWavetables)
-
-target_link_libraries(ilanaSnapshot PRIVATE ilanaWavetables)
-
-target_link_libraries(ilanaFingerprint PRIVATE ilanaWavetables)
-
-target_link_libraries(ilanaStress PRIVATE ilanaWavetables)
-
-target_link_libraries(ilanaPolishRepro PRIVATE ilanaWavetables)
-
-target_link_libraries(ilanaPresetRender PRIVATE ilanaWavetables)
-
-target_link_libraries(ilanaKnobAudit PRIVATE ilanaWavetables)
-
-target_link_libraries(ilanaFxTest PRIVATE ilanaWavetables)
-
-# The built-in wavetables are factory tables, so the processor needs them too.
-foreach(target ilanaSynth ilanaSynthFX ilanaTableTest ilanaSnapshot ilanaFingerprint ilanaStress ilanaPolishRepro
-               ilanaPresetRender ilanaKnobAudit ilanaFxTest ilanaFxCpuBench)
-    if (TARGET ${target})
-        target_link_libraries(${target} PRIVATE ilanaWavetables)
-    endif()
-endforeach()
-
-ilana_big_stack (ilanaMidiRender)
-target_link_libraries(ilanaMidiRender PRIVATE ilanaStretch ilanaWavetables)
 
 # src/BuildInfo.h reads the hash and date that cmake/BuildInfo.cmake generated.
-foreach(target ilanaSynth ilanaSynthFX ilanaTableTest ilanaSnapshot ilanaFingerprint ilanaStress ilanaPolishRepro
-               ilanaPresetRender ilanaMidiRender ilanaKnobAudit ilanaFxTest ilanaFxCpuBench ilanaRefHost)
-    if (TARGET ${target})
-        target_include_directories(${target} PRIVATE "${ILANA_GENERATED_DIR}")
-    endif()
+foreach(target ilanaSynth ilanaSynthFX ilanaTableTest ilanaSnapshot ilanaFxTest ilanaRefHost)
+    target_include_directories(${target} PRIVATE "${ILANA_GENERATED_DIR}")
 endforeach()
+
+# The dev tools kept out of the default build (EXCLUDE_FROM_ALL), so they
+# cannot rot unseen: `cmake --build build --target ilanaTools`, which
+# `tools/verify.sh --all` runs after the default build.
+add_custom_target(ilanaTools DEPENDS
+    ilanaStress ilanaPolishRepro ilanaKnobAudit ilanaMidiRender ilanaPresetRender
+    ilanaRefHost ilanaFxCpuBench)

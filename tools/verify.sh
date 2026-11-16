@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# The CI gate, run locally (GitHub Actions is manual-only now): build every
-# target, then the unit tests, the FX plugin tests, the UI test, the preset
+# The CI gate, run locally (GitHub Actions is manual-only now): build the
+# targets it runs, then the unit tests, the FX plugin tests, the UI test, the preset
 # fingerprints against the Linux baseline and pluginval at strictness 10 on
 # both plugins. Stops at the first failure.
 #
 #   tools/verify.sh              everything
 #   tools/verify.sh --quick      skip pluginval
+#   tools/verify.sh --all        also build the dev tools the gate does not run
+#                                (ilanaStress, ilanaKnobAudit, ilanaMidiRender, ...)
+#   (tools/compare_pictures.sh BASE_SNAPSHOT is the optional picture compare for
+#   a change that must not move a pixel; it is not part of this gate.)
 #   ILANA_JOBS=2 tools/verify.sh build parallelism (default: every core)
 #
 # Needs: cmake, ninja, python3; on a headless Linux box xvfb-run; pluginval
@@ -15,7 +19,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 quick=0
-[ "${1:-}" = "--quick" ] && quick=1
+all=0
+for arg in "$@"; do
+    case "$arg" in
+        --quick) quick=1 ;;
+        --all) all=1 ;;
+        *) echo "usage: tools/verify.sh [--quick] [--all]" >&2; exit 2 ;;
+    esac
+done
 
 run_gui() { if command -v xvfb-run > /dev/null && [ -z "${DISPLAY:-}" ]; then xvfb-run -a "$@"; else "$@"; fi; }
 step() { printf '\n=== %s\n' "$*"; }
@@ -24,7 +35,23 @@ step "Build"
 if [ ! -f build/CMakeCache.txt ]; then
     cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 fi
-cmake --build build --parallel "${ILANA_JOBS:-$(nproc 2> /dev/null || sysctl -n hw.ncpu 2> /dev/null || echo 4)}"
+jobs="${ILANA_JOBS:-$(nproc 2> /dev/null || sysctl -n hw.ncpu 2> /dev/null || echo 4)}"
+# Only what the steps below run; the other dev tools are EXCLUDE_FROM_ALL.
+cmake --build build --parallel "$jobs" --target ilanaSynth_VST3 ilanaSynthFX_VST3 ilanaTableTest ilanaFxTest ilanaSnapshot ilanaFingerprint
+if [ "$all" = 1 ]; then
+    step "Build the other dev tools"
+    cmake --build build --parallel "$jobs"
+    cmake --build build --parallel "$jobs" --target ilanaTools
+fi
+
+step "Doc paths"
+python3 tools/check_doc_paths.py
+
+step "Layout literal ratchet"
+python3 tools/layout_literal_ratchet.py
+
+step "GUI headers compile on their own"
+JOBS="$jobs" tools/check_headers.sh | tail -1
 
 step "Unit tests"
 ILANA_CI=1 build/ilanaTableTest_artefacts/Release/ilanaTableTest | tee build/table-test.txt | grep -E "^FAIL|TESTS" || true

@@ -458,12 +458,12 @@ public:
 
         IlanaTheme::paintCard (g, bounds, 9.0f, IlanaTheme::accent().withAlpha (docked ? 0.3f : 0.45f));
 
-        auto header = getLocalBounds().reduced (14, 0).removeFromTop (34);
+        auto header = getLocalBounds().reduced (14, 0).removeFromTop (34); // off-grid
         g.setColour (IlanaTheme::accent());
         g.fillEllipse ((float) header.getX(), (float) header.getCentreY() - 3.0f, 6.0f, 6.0f);
         g.setColour (IlanaTheme::Ui::text);
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::body, true));
-        g.drawText ("PRESETS", header.withTrimmedLeft (14), juce::Justification::centredLeft);
+        g.drawText ("PRESETS", header.withTrimmedLeft (14), juce::Justification::centredLeft); // off-grid
 
         g.setColour (IlanaTheme::Ui::text3);
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
@@ -473,7 +473,7 @@ public:
 
         // One layout floating and docked: the count after the title, the keys
         // centred (review 11, S11-15).
-        g.drawText (count, header.withTrimmedLeft (84), juce::Justification::centredLeft);
+        g.drawText (count, header.withTrimmedLeft (84), juce::Justification::centredLeft); // off-grid
         g.drawText (keys, header.withTrimmedRight (dockButton.getWidth() + (docked ? closeDockButton.getWidth() + 20 : 40)), juce::Justification::centred);
 
         IlanaTheme::paintRecessedPanel (g, search.getBounds().toFloat().expanded (1.0f), 6.0f);
@@ -499,7 +499,7 @@ public:
                                   : filterKey == recentKey && search.isEmpty() && selectedTags.isEmpty()
                                   ? juce::String ("Nothing loaded from this browser yet.")
                                   : juce::String ("No presets match. Clear the search or a chip to see more."),
-                              list.getBounds().reduced (16, 0), juce::Justification::centred, 2);
+                              list.getBounds().reduced (Space::s16, 0), juce::Justification::centred, 2);
         }
 
         if (docked || ! detailsArea.isEmpty())
@@ -517,15 +517,15 @@ public:
     {
         {
             // The same 28 px as the buttons along the bottom (S15-10).
-            auto header = getLocalBounds().reduced (12, 0).removeFromTop (34).withSizeKeepingCentre (getWidth() - 24, 28);
+            auto header = getLocalBounds().reduced (Space::s12, 0).removeFromTop (34).withSizeKeepingCentre (getWidth() - 24, 28); // off-grid
 
             if (docked)
             {
-                closeDockButton.setBounds (header.removeFromRight (28));
-                header.removeFromRight (4);
+                closeDockButton.setBounds (header.removeFromRight (28)); // off-grid
+                header.removeFromRight (Space::s4);
             }
 
-            dockButton.setBounds (header.removeFromRight (64));
+            dockButton.setBounds (header.removeFromRight (64)); // off-grid
         }
 
         if (docked)
@@ -534,14 +534,14 @@ public:
             return;
         }
 
-        auto area = getLocalBounds().reduced (12);
-        area.removeFromTop (24);
+        auto area = getLocalBounds().reduced (Space::s12);
+        area.removeFromTop (Space::s24);
 
-        auto footer = area.removeFromBottom (28);
-        area.removeFromBottom (8);
+        auto footer = area.removeFromBottom (28); // off-grid
+        area.removeFromBottom (Space::s8);
 
-        auto left = area.removeFromLeft (150);
-        area.removeFromLeft (10);
+        auto left = area.removeFromLeft (150); // off-grid
+        area.removeFromLeft (10); // off-grid
         sidebar.setBounds (left.reduced (1));
 
         // On a wide drop-down the preset's details sit beside the list, as
@@ -549,21 +549,21 @@ public:
         detailsArea = {};
         if (getWidth() >= wideWidth)
         {
-            detailsArea = area.removeFromRight (250);
-            area.removeFromRight (10);
+            detailsArea = area.removeFromRight (250); // off-grid
+            area.removeFromRight (10); // off-grid
         }
         layoutAudition();
 
-        auto searchRow = area.removeFromTop (30);
-        sortButton.setBounds (searchRow.removeFromRight (128).reduced (1, 2));
-        searchRow.removeFromRight (8);
+        auto searchRow = area.removeFromTop (30); // off-grid
+        sortButton.setBounds (searchRow.removeFromRight (128).reduced (1, Space::s2)); // off-grid
+        searchRow.removeFromRight (Space::s8);
         search.setBounds (searchRow.reduced (1));
-        area.removeFromTop (8);
+        area.removeFromTop (Space::s8);
         layoutChips (area);
         layoutList (area);
 
-        surpriseButton.setBounds (footer.removeFromLeft (150).reduced (1, 0));
-        footer.removeFromLeft (10);
+        surpriseButton.setBounds (footer.removeFromLeft (150).reduced (1, 0)); // off-grid
+        footer.removeFromLeft (10); // off-grid
         layoutFooter (footer, { &saveAsButton, &deleteButton, &folderButton, &importButton });
     }
 
@@ -707,35 +707,35 @@ private:
         const auto width = footer.getWidth() / (int) buttons.size();
 
         for (auto* button : buttons)
-            button->setBounds (footer.removeFromLeft (width).reduced (2, 0));
+            button->setBounds (footer.removeFromLeft (width).reduced (Space::s2, 0));
     }
 
     void layoutDocked()
     {
-        auto area = getLocalBounds().reduced (12);
-        area.removeFromTop (26);
+        auto area = getLocalBounds().reduced (Space::s12);
+        area.removeFromTop (26); // off-grid
 
-        auto footer = area.removeFromBottom (28);
-        area.removeFromBottom (8);
+        auto footer = area.removeFromBottom (28); // off-grid
+        area.removeFromBottom (Space::s8);
 
-        auto left = area.removeFromLeft (170);
-        area.removeFromLeft (10);
+        auto left = area.removeFromLeft (170); // off-grid
+        area.removeFromLeft (10); // off-grid
         sidebar.setBounds (left.reduced (1));
 
-        detailsArea = area.removeFromRight (250);
-        area.removeFromRight (10);
+        detailsArea = area.removeFromRight (250); // off-grid
+        area.removeFromRight (10); // off-grid
         layoutAudition();
 
-        auto searchRow = area.removeFromTop (30);
-        sortButton.setBounds (searchRow.removeFromRight (140).reduced (1, 2));
-        searchRow.removeFromRight (8);
+        auto searchRow = area.removeFromTop (30); // off-grid
+        sortButton.setBounds (searchRow.removeFromRight (140).reduced (1, Space::s2)); // off-grid
+        searchRow.removeFromRight (Space::s8);
         search.setBounds (searchRow.reduced (1));
-        area.removeFromTop (8);
+        area.removeFromTop (Space::s8);
         layoutChips (area);
         layoutList (area);
 
-        surpriseButton.setBounds (footer.removeFromLeft (170).reduced (1, 0));
-        footer.removeFromLeft (10);
+        surpriseButton.setBounds (footer.removeFromLeft (170).reduced (1, 0)); // off-grid
+        footer.removeFromLeft (10); // off-grid
         layoutFooter (footer, { &saveAsButton, &deleteButton, &folderButton, &importButton });
     }
 
@@ -746,7 +746,7 @@ private:
         const auto index = juce::isPositiveAndBelow (selectedPreset, names.size()) ? selectedPreset
                                                                                   : names.indexOf (processorRef.getCurrentPresetName());
 
-        auto area = detailsArea.reduced (14, 12);
+        auto area = detailsArea.reduced (14, Space::s12); // off-grid
 
         // The foot: PLAY, with the reason DELETE is off above it.
         area.removeFromBottom (28 + 8);
@@ -755,8 +755,8 @@ private:
 
             if (reason.isNotEmpty())
             {
-                const auto caption = area.removeFromBottom (32);
-                area.removeFromBottom (4);
+                const auto caption = area.removeFromBottom (32); // off-grid
+                area.removeFromBottom (Space::s4);
                 g.setColour (IlanaTheme::Ui::text3);
                 g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
                 IlanaTheme::drawFitted (g, reason, caption, juce::Justification::bottomLeft, 2);
@@ -782,7 +782,7 @@ private:
         }
 
         {
-            auto line = area.removeFromTop (20);
+            auto line = area.removeFromTop (20); // off-grid
             // (A preset named for its own category, like Init, doesn't say it twice.)
             const auto category = categories[index].equalsIgnoreCase (shownNames[index]) ? juce::String() : categories[index].toUpperCase();
             const auto text = isUserPreset (index) ? juce::String (juce::CharPointer_UTF8 ("USER")) + (category.isNotEmpty() ? juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  ")) + category : juce::String())
@@ -802,34 +802,34 @@ private:
         {
             g.setColour (IlanaTheme::Ui::text3);
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
-            IlanaTheme::drawFitted (g, "Also in " + alsoIn[(size_t) index].joinIntoString (", "), area.removeFromTop (18),
+            IlanaTheme::drawFitted (g, "Also in " + alsoIn[(size_t) index].joinIntoString (", "), area.removeFromTop (18), // off-grid
                               juce::Justification::centredLeft, 1);
         }
 
         const auto& info = infoFor (index);
-        area.removeFromTop (6);
+        area.removeFromTop (Space::s6);
 
         if (info.author.isNotEmpty())
         {
             g.setColour (IlanaTheme::Ui::text2);
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::body));
-            g.drawText ("by " + info.author, area.removeFromTop (18), juce::Justification::centredLeft, true);
+            g.drawText ("by " + info.author, area.removeFromTop (18), juce::Justification::centredLeft, true); // off-grid
         }
 
         if (info.comment.isNotEmpty())
         {
-            area.removeFromTop (4);
+            area.removeFromTop (Space::s4);
             g.setColour (IlanaTheme::Ui::text2);
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
-            IlanaTheme::drawFitted (g, info.comment, area.removeFromTop (64), juce::Justification::topLeft, 4);
+            IlanaTheme::drawFitted (g, info.comment, area.removeFromTop (64), juce::Justification::topLeft, 4); // off-grid
         }
 
         const auto heading = [&g, &area] (const juce::String& text)
         {
-            area.removeFromTop (10);
+            area.removeFromTop (10); // off-grid
             g.setColour (IlanaTheme::Ui::text3);
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
-            g.drawText (text, area.removeFromTop (16), juce::Justification::centredLeft);
+            g.drawText (text, area.removeFromTop (Space::s16), juce::Justification::centredLeft);
         };
 
         if (! tagLists[(size_t) index].isEmpty())
@@ -892,9 +892,9 @@ private:
                     if (area.getHeight() < 18 + 18)
                         break;
 
-                    auto line = area.removeFromTop (18);
+                    auto line = area.removeFromTop (18); // off-grid
                     g.setColour (IlanaTheme::Ui::text3);
-                    g.drawText (entry.upToFirstOccurrenceOf ("|", false, false), line.removeFromLeft (46), juce::Justification::centredLeft);
+                    g.drawText (entry.upToFirstOccurrenceOf ("|", false, false), line.removeFromLeft (46), juce::Justification::centredLeft); // off-grid
                     g.setColour (IlanaTheme::Ui::text2);
                     IlanaTheme::drawFitted (g, entry.fromFirstOccurrenceOf ("|", false, false), line, juce::Justification::centredLeft, 1);
                 }
@@ -914,9 +914,9 @@ private:
                 if (area.getHeight() < 18)
                     break;
 
-                auto line = area.removeFromTop (18);
+                auto line = area.removeFromTop (18); // off-grid
                 g.setColour (IlanaTheme::Ui::text3);
-                g.drawText (juce::String (m + 1), line.removeFromLeft (16), juce::Justification::centredLeft);
+                g.drawText (juce::String (m + 1), line.removeFromLeft (Space::s16), juce::Justification::centredLeft);
                 g.setColour (IlanaTheme::Ui::text2);
                 IlanaTheme::drawFitted (g, macros[m], line, juce::Justification::centredLeft, 1);
             }
@@ -946,9 +946,9 @@ private:
                 {
                     if (area.getHeight() < 18 + 18)
                         break;
-                    auto line = area.removeFromTop (18);
+                    auto line = area.removeFromTop (18); // off-grid
                     g.setColour (IlanaTheme::Ui::text3);
-                    g.drawText (entry.upToFirstOccurrenceOf ("|", false, false), line.removeFromLeft (46), juce::Justification::centredLeft);
+                    g.drawText (entry.upToFirstOccurrenceOf ("|", false, false), line.removeFromLeft (46), juce::Justification::centredLeft); // off-grid
                     g.setColour (IlanaTheme::Ui::text2);
                     IlanaTheme::drawFitted (g, entry.fromFirstOccurrenceOf ("|", false, false), line, juce::Justification::centredLeft, 1);
                 }
@@ -980,9 +980,9 @@ private:
         if (! show)
             return;
 
-        auto foot = detailsArea.reduced (14, 12).removeFromBottom (28);
+        auto foot = detailsArea.reduced (14, Space::s12).removeFromBottom (28); // off-grid
         autoPlayButton.setBounds (foot.removeFromRight (juce::jmin (112, foot.getWidth() / 2)));
-        foot.removeFromRight (6);
+        foot.removeFromRight (Space::s6);
         playButton.setBounds (foot);
     }
 
@@ -1083,7 +1083,7 @@ private:
 
     private:
         static constexpr int rowHeight = 24;
-        static constexpr int gap = 9;
+        static constexpr int gap = 9; // off-grid
 
         juce::Rectangle<int> rowBounds (int index) const
         {
@@ -2053,7 +2053,7 @@ private:
 
         juce::Component::SafePointer<PresetPanel> safeThis (this);
 
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&list),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&list),
                             [safeThis, presetIndex] (int result)
                             {
                                 if (safeThis == nullptr || result == 0)
@@ -2304,7 +2304,7 @@ private:
                 menu.addItem (1 + keys.size(), entry.label, true, entry.selected);
             }
 
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&chips),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&chips),
                             [safeThis = juce::Component::SafePointer<PresetPanel> (this), keys] (int result)
                             {
                                 if (safeThis == nullptr || result <= 0)
@@ -2328,7 +2328,7 @@ private:
 
         const auto height = chips.getPreferredHeight (area.getWidth());
         chips.setBounds (area.removeFromTop (height));
-        area.removeFromTop (6);
+        area.removeFromTop (Space::s6);
     }
 
     void sortFiltered()
@@ -2393,7 +2393,7 @@ private:
         menu.addItem (3, "Favourites first", true, sortMode == sortFavouritesFirst);
         menu.addItem (4, "Recently loaded first", true, sortMode == sortRecentFirst);
 
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&sortButton),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&sortButton),
                             [safeThis = juce::Component::SafePointer<PresetPanel> (this)] (int result)
                             {
                                 if (safeThis != nullptr && result > 0)

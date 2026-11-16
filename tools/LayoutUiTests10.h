@@ -272,42 +272,6 @@ void runLayoutReview10Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudi
         expect (tooBig.isEmpty(), "no card holds a large empty interior at 100 % or 75 %" + (tooBig.isEmpty() ? juce::String() : ": " + tooBig.joinIntoString ("; ")));
     }
 
-    // V11-1, as redesigned (ilana, 2026-10-05): the strips fill PLAY's column
-    // first, and the PATCH tile (the signal flow) only takes real spare room.
-    // Where it shows it is one whole tile, never a squashed sliver, at 100 %
-    // and 75 %. (The dead-area checks cover the column's foot.)
-    {
-        auto* top = editor.getTopLevelComponent();
-        const auto before = top->getBounds();
-        juce::StringArray missing, shownOn;
-        for (const auto* preset : { "Init", "Neuro Wobble", "E.PIANO 1 (ROM1A)", "Felt Hammer Board" })
-        {
-            loadNamed (preset);
-            for (const auto small : { false, true })
-            {
-                if (small)
-                    top->setSize (795, 540);
-                else
-                    top->setBounds (before);
-                editor.showPage ("MAIN");
-                settle (300);
-                std::vector<SignalFlow*> flows;
-                findAll<SignalFlow> (*editor.getCurrentPage(), flows);
-                const auto shownFlow = std::count_if (flows.begin(), flows.end(), [] (SignalFlow* f) { return f->isVisible(); });
-                const auto squashed = std::count_if (flows.begin(), flows.end(), [] (SignalFlow* f) { return f->isVisible() && f->getHeight() < 60; });
-                if (shownFlow > 1 || squashed > 0)
-                    missing.add (juce::String (preset) + (small ? " 75%" : ""));
-                if (shownFlow == 1)
-                    shownOn.add (juce::String (preset) + (small ? " 75%" : ""));
-            }
-        }
-        top->setBounds (before);
-        editor.showPage ("MAIN");
-        settle (300);
-        std::cout << "  (PATCH tile on PLAY: " << (shownOn.isEmpty() ? juce::String ("none") : shownOn.joinIntoString (", ")) << ")" << std::endl;
-        expect (missing.isEmpty(), "PLAY's PATCH tile, where it shows, is one whole tile" + (missing.isEmpty() ? juce::String() : ": squashed or doubled on " + missing.joinIntoString (", ")));
-    }
-
     // V10-11: SAVE AS's tag chips clear the tags field above them, with the
     // field open (tags the chips don't offer) and closed.
     {
@@ -588,7 +552,7 @@ void runLayoutReview10Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudi
         setParam ("res_on", 0.0f);
         setParam ("sb_on", 0.0f);
         setParam ("body_coupling_mode", 0.0f);
-        editor.showPage ("OSC");
+        editor.showPage ("MAIN");
         settle (300);
         // (The approved OSC design never folds the sub away: its controls stay
         // drawn, dimmed in place while the switch is off, and light when it is on.)
@@ -609,7 +573,7 @@ void runLayoutReview10Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudi
         const auto subOn = subAlpha() > 0.99f;
         setParam ("subosc_on", 0.0f);
         settle (300);
-        editor.showPage ("FILTER");
+        editor.showPage ("MAIN");
         settle (500);
         // (BODY stays drawn, dimmed, while off: V13-9.)
         const auto bodyKnob = [&editor] (const juce::String& id) -> KnobControl*

@@ -69,133 +69,8 @@ void runFilterFxTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProce
         expect (checked >= 10 && small.isEmpty(), "PLAY's stacked knobs are drawn at their cell's dial size: " + small);
     }
 
-    // I7-1, S7-1, I7-32, V7-35: SIGNAL FLOW keeps F1 and F2 at a usable
-    // width with a soundboard, strings, WEST and BODY on, serial or
-    // parallel, with a bypass, and with WEST in Filter 2's place; no two
-    // blocks overlap and none leaves the view or runs under BALANCE.
-    {
-        loadNamed ("Felt Hammer Board");
-        editor.showPage ("FILTER");
-        settle (400);
-        SignalFlow* flow = nullptr;
-        std::vector<SignalFlow*> flows;
-        findAll<SignalFlow> (editor, flows);
-        for (auto* candidate : flows)
-            if (visibleInTree (candidate))
-                flow = candidate;
-        // (BALANCE is in the strip too: the one inside the enlarged flow card is the one checked here.)
-        KnobControl* balance = nullptr;
-        {
-            std::vector<KnobControl*> knobs;
-            findAll<KnobControl> (editor, knobs);
-            for (auto* knob : knobs)
-                if (knob->getParameterId() == "filter_balance" && visibleInTree (knob) && flow != nullptr && flow->getParentComponent() != nullptr
-                    && flow->getParentComponent()->isParentOf (knob))
-                    balance = knob;
-        }
-        expect (flow != nullptr && balance != nullptr, "FILTER shows SIGNAL FLOW and BALANCE");
-
-        const auto check = [&] (const juce::String& what)
-        {
-            if (flow == nullptr || balance == nullptr)
-                return;
-            const auto bounds = flow->getLocalBounds().toFloat();
-            const auto filters = flow->getFilterBlocks();
-            const auto blocks = flow->getBlocks();
-            const auto corner = flow->getLocalArea (balance->getParentComponent(), balance->getBounds()).toFloat();
-            juce::String problems;
-            for (const auto& filter : filters)
-                if (filter.getWidth() < 30.0f || ! bounds.contains (filter))
-                    problems << "filter " << filter.toString() << "; ";
-            for (size_t i = 0; i < blocks.size(); ++i)
-            {
-                if (! bounds.contains (blocks[i].second) || blocks[i].second.intersects (corner))
-                    problems << blocks[i].first << " out of place; ";
-                for (size_t j = i + 1; j < blocks.size(); ++j)
-                    if (blocks[i].second.intersects (blocks[j].second))
-                        problems << blocks[i].first << " / " << blocks[j].first << "; ";
-            }
-            expect (problems.isEmpty(), what + ": SIGNAL FLOW keeps F1 and F2 (30 px or more), no block overlaps another or BALANCE "
-                                            + problems);
-        };
-
-        check ("Felt Hammer Board");
-        for (const auto* id : { "sym_on", "sb_on", "west_on", "res_on" })
-            setParam (id, 1.0f);
-        settle (200);
-        check ("WEST, BODY, strings and soundboard on");
-        setParam ("filters_parallel", 1.0f);
-        setParam ("osc1_route", 3.0f);
-        settle (200);
-        check ("the same in parallel, OSC 1 bypassing the filters");
-        setParam ("west_pos", 1.0f);
-        settle (200);
-        check ("WEST in Filter 2's place");
-        if (flow != nullptr)
-        {
-            juce::StringArray names;
-            for (const auto& block : flow->getBlocks())
-                names.add (block.first);
-            expect (names.contains ("WEST") && ! names.contains ("F2"), "WEST in Filter 2's place is drawn there, F2 isn't ("
-                                                                           + names.joinIntoString (", ") + ")");
-        }
-
-        // While WEST and BODY are off they are stubs, not stages of the chain.
-        setParam ("west_on", 0.0f);
-        setParam ("res_on", 0.0f);
-        settle (200);
-        if (flow != nullptr)
-        {
-            juce::StringArray names;
-            for (const auto& block : flow->getBlocks())
-                names.add (block.first);
-            expect (names.contains ("WEST (off)") && names.contains ("BODY (off)") && names.contains ("F2"),
-                    "switched-off WEST and BODY are stubs off the chain, and Filter 2 runs again (" + names.joinIntoString (", ") + ")");
-        }
-        check ("WEST and BODY off");
-        loadNamed ("Felt Hammer Board");
-    }
-
-    // V7-34, S7-23: a switched-off module draws every control at the off
-    // alpha; S7-24: BODY's menus sit on WEST's menu row.
-    {
-        loadNamed ("Init");
-        editor.showPage ("FILTER");
-        setParam ("west_on", 0.0f);
-        setParam ("res_on", 0.0f);
-        settle (400);
-        const auto offAlpha = FilterColours::offAlpha + 0.01f;
-        auto* fold = shownKnob ("west_fold");
-        auto* amount = shownKnob ("res_amount");
-        auto* decay = shownKnob ("res_decay");
-        (void) offAlpha;
-        const auto offDrawn = fold != nullptr && amount != nullptr && decay != nullptr
-                              && fold->getAlpha() < 0.99f && amount->getAlpha() < 0.99f && decay->getAlpha() < 0.99f; // open, dimmed in place (the design)
-        setParam ("west_on", 1.0f);
-        setParam ("res_on", 1.0f);
-        settle (400);
-        fold = shownKnob ("west_fold");
-        amount = shownKnob ("res_amount");
-        decay = shownKnob ("res_decay");
-        expect (offDrawn && fold != nullptr && amount != nullptr && decay != nullptr
-                    && fold->getAlpha() > 0.99f && amount->getAlpha() > 0.99f && decay->getAlpha() > 0.99f,
-                "WEST and BODY stay open and dimmed while off, and draw every knob in full while on");
-
-        auto* place = shownCombo ("west_pos");
-        auto* bodyType = shownCombo ("body_type");
-        auto* westFold = shownKnob ("west_fold");
-        auto* bodyAmount = shownKnob ("res_amount");
-        expect (place != nullptr && bodyType != nullptr && westFold != nullptr && bodyAmount != nullptr
-                    && editor.getLocalArea (place->getParentComponent(), place->getBounds()).getY()
-                           == editor.getLocalArea (bodyType->getParentComponent(), bodyType->getBounds()).getY()
-                    && editor.getLocalArea (westFold->getParentComponent(), westFold->getBounds()).getY()
-                           == editor.getLocalArea (bodyAmount->getParentComponent(), bodyAmount->getBounds()).getY(),
-                "BODY's menus and knobs line up with WEST's, row for row");
-        expect (place != nullptr && place->getComboBox().getItemText (1) == "Replaces F2",
-                "WEST's PLACE reads \"Replaces F2\" (fits the menu's font)");
-        setParam ("west_on", 0.0f);
-        setParam ("res_on", 0.0f);
-    }
+    // (I7-1, S7-1, I7-32, V7-35 SIGNAL FLOW, and V7-34 / S7-23 / S7-24 the FILTER page's WEST and BODY cards, went with
+    // that page.)
 
     // V7-37, I7-40, V7-18 / S7-11: BALANCE reads a value; PLAY's TYPE
     // names a filter as FILTER does; Init's two open filters' markers sit
@@ -206,7 +81,7 @@ void runFilterFxTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProce
                     && FilterTypes::shortNames().size() == FilterType::Count,
                 "PLAY's filter TYPE uses FILTER's names (Low Pass, Smooth LP)");
         loadNamed ("Init");
-        editor.showPage ("FILTER");
+        editor.showPage ("MAIN");
         settle (300);
         if (auto* display = findChild<FilterDisplay> (editor); display != nullptr)
         {
@@ -218,7 +93,7 @@ void runFilterFxTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProce
 
         // A DX7 voice has no filter: the response says so (N16-2 / I15-2), as PLAY's note does.
         loadNamed ("E.PIANO 1 (ROM1A)");
-        editor.showPage ("FILTER");
+        editor.showPage ("MAIN");
         settle (500);
         if (auto* display = findChild<FilterDisplay> (editor); display != nullptr)
             expect (display->isVoiceOff(), "a DX7 voice: the FILTER response says FILTER OFF");
