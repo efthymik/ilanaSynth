@@ -2085,11 +2085,27 @@ private:
             return;
 
         const auto name = names[presetIndex];
+        // The file is found again by name: the folder may have changed since
+        // the list was read (another window saved, a file was copied in), and
+        // an index into a fresh scan could name the neighbour.
         const auto files = processorRef.getUserPresetFiles();
-        const auto file = files[presetIndex - factoryCount];
+        auto file = juce::isPositiveAndBelow (presetIndex - factoryCount, files.size()) ? files[presetIndex - factoryCount] : juce::File();
+        if (file.getFileNameWithoutExtension() != name)
+        {
+            file = juce::File();
+            for (const auto& candidate : files)
+                if (candidate.getFileNameWithoutExtension() == name)
+                {
+                    file = candidate;
+                    break;
+                }
+        }
 
         if (! file.existsAsFile())
+        {
+            refresh();
             return;
+        }
 
         juce::Component::SafePointer<PresetPanel> safeThis (this);
 
@@ -2101,8 +2117,25 @@ private:
                                             {
                                                 if (result == 1 && safeThis != nullptr)
                                                 {
+                                                    // No bin (or it refused): ask before deleting for good; the
+                                                    // first question promised the bin.
                                                     if (! file.moveToTrash())
-                                                        file.deleteFile();
+                                                    {
+                                                        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::WarningIcon, "Delete preset",
+                                                                                            "The " + binName() + " can't take '" + file.getFileNameWithoutExtension() + "'. Delete it for good?",
+                                                                                            "DELETE", "CANCEL", safeThis.getComponent(),
+                                                                                            juce::ModalCallbackFunction::create ([safeThis, file] (int again)
+                                                                                            {
+                                                                                                if (again == 1)
+                                                                                                    file.deleteFile();
+                                                                                                if (safeThis != nullptr)
+                                                                                                {
+                                                                                                    safeThis->selectedPreset = -1;
+                                                                                                    safeThis->refresh();
+                                                                                                }
+                                                                                            }));
+                                                        return;
+                                                    }
 
                                                     safeThis->selectedPreset = -1;
                                                     safeThis->refresh();

@@ -1571,8 +1571,11 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
 
     for (int lfo = 0; lfo < VoiceParams::numLfos; ++lfo)
     {
-        lfoIncrements[lfo] = params.lfos[lfo].baseIncrement
-                             * std::exp2 ((double) blockMod (Mod::lfoRateDestinationFor (lfo)) * (double) Mod::Range::lfoRateOctaves);
+        // At most 0.45 cycles a sample (as key tracking caps it): routes into
+        // RATE sum without a limit, and at 2^36 the random and friction
+        // shapes' catch-up loops never finished a block.
+        lfoIncrements[lfo] = juce::jmin (0.45, params.lfos[lfo].baseIncrement
+                                                   * std::exp2 ((double) blockMod (Mod::lfoRateDestinationFor (lfo)) * (double) Mod::Range::lfoRateOctaves));
 
         // Key tracked: RATE 4 Hz runs at the note's own pitch, 8 Hz an
         // octave above, 2 Hz an octave below.

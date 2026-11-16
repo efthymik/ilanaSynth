@@ -23,6 +23,7 @@
 #include "dsp/MultiSample.h"
 #include "dsp/GranularSmear.h"
 #include "dsp/LfoCurve.h"
+#include "dsp/LfoSim.h"
 #include "dsp/LfoShape.h"
 #include "dsp/Modulation.h"
 #include "dsp/PitchDetect.h"

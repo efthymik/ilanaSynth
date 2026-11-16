@@ -98,13 +98,19 @@ juce::ValueTree IlanaSynthAudioProcessor::buildFullState()
         state.removeChild (state.getChildWithName ("SampleOptions"), nullptr);
         juce::ValueTree options ("SampleOptions");
         for (int i = 0; i < numSampleOscs; ++i)
-            if (samplePaths[(size_t) i].isNotEmpty() && sampleOptions[(size_t) i].isNotEmpty())
+        {
+            // A file that is missing right now (drive offline) keeps its options
+            // with its path, as the path itself is kept above.
+            const auto& path = samplePaths[(size_t) i].isNotEmpty() ? samplePaths[(size_t) i]
+                                                                    : (embeddedSamples[(size_t) i] == nullptr ? missingSamplePaths[(size_t) i] : juce::String());
+            if (path.isNotEmpty() && sampleOptions[(size_t) i].isNotEmpty())
                 if (const auto xml = SafeXml::parse (sampleOptions[(size_t) i]))
-                    if (auto tree = juce::ValueTree::fromXml (*xml); tree.isValid() && tree.getProperty ("path").toString() == samplePaths[(size_t) i])
+                    if (auto tree = juce::ValueTree::fromXml (*xml); tree.isValid() && tree.getProperty ("path").toString() == path)
                     {
                         tree.setProperty ("osc", i, nullptr);
                         options.appendChild (tree, nullptr);
                     }
+        }
         if (options.getNumChildren() > 0)
             state.appendChild (options, nullptr);
 

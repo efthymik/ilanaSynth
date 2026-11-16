@@ -96,6 +96,8 @@ struct LfoCurve
         return parts.joinIntoString (";");
     }
 
+    static constexpr size_t maxParsedPoints = 1024;
+
     static LfoCurve fromString (const juce::String& text)
     {
         LfoCurve curve;
@@ -104,6 +106,11 @@ struct LfoCurve
         for (const auto& part : juce::StringArray::fromTokens (text, ";", ""))
         {
             const auto values = juce::StringArray::fromTokens (part, ",", "");
+
+            // A drawn curve has tens of points: a hostile preset's millions
+            // took seconds per curve (and the copy runs under a SpinLock).
+            if (curve.points.size() >= maxParsedPoints)
+                break;
 
             if (values.size() >= 2)
                 curve.points.push_back ({ values[0].getFloatValue(), values[1].getFloatValue(),
