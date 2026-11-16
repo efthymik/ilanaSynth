@@ -103,8 +103,7 @@ public:
             // card (rest on it) the same.
             const auto font = IlanaTheme::font (IlanaTheme::TextSize::label, true).withKerningFactor (0.07f); // (the sheet's .mk b)
             const auto name = title.toUpperCase();
-            const auto markWidth = evolving ? 16 : 0;
-            const auto nameWidth = juce::jmin (nameArea.getWidth() - markWidth,
+            const auto nameWidth = juce::jmin (nameArea.getWidth(), // (the drift wave rides on the value line: it must not cut the name)
                                                juce::GlyphArrangement::getStringWidthInt (font, name) + 1);
             // A macro routed nowhere reads quietly, so the preset's own
             // macros stand out (V8-37).
@@ -118,8 +117,8 @@ public:
             if (evolving)
             {
                 const auto capHeight = juce::Font (font).getAscent() * 0.72f;
-                const auto wave = juce::Rectangle<float> ((float) nameArea.getX() + 4.0f,
-                                                          (float) nameArea.getBottom() - juce::Font (font).getDescent() - capHeight,
+                const auto wave = juce::Rectangle<float> ((float) text.getRight() - 12.0f,
+                                                          (float) text.getY() + juce::Font (font).getAscent() * 0.5f - capHeight * 0.5f + 1.0f,
                                                           11.0f, capHeight);
                 juce::Path path;
                 for (int i = 0; i <= 12; ++i)
@@ -134,7 +133,6 @@ public:
                 }
                 g.setColour (modSourceColour ((int) Mod::macroSourceFor (macroIndex)));
                 g.strokePath (path, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-                nameArea.removeFromLeft (16);
             }
 
             markBounds = {};

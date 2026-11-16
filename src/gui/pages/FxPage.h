@@ -530,7 +530,7 @@ private:
     DashedAddButton addTile { "+ ADD EFFECT", "+ ADD EFFECT" };
     std::vector<std::unique_ptr<FxSuggestTile>> suggestTiles;
     juce::Rectangle<int> suggestCaption;
-    bool growRows = false, bigDials = false;
+    bool growRows = false, bigDials = false, loneCard = false;
     std::array<bool, 64> ownMix {};
     int stackNaturalHeight = 0, stackRows = 0, rowsPlaced = 0, availableStackHeight = 0;
     std::unique_ptr<juce::FileChooser> fileChooser;

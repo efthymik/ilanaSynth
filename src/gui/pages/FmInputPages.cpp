@@ -618,20 +618,30 @@ void FmPage::layoutPlainOperator (OperatorControls& controls)
     constexpr int menuHeight = 40, footHeight = 18, gap = 6;
     layoutRow (left.removeFromTop (menuHeight), menus);
     left.removeFromTop (gap);
+    const auto belowMenus = left;
     ampHint = left.removeFromBottom (footHeight).withTrimmedLeft (2);
     // (The make-operator button stands on its own line above the hint, so a narrow knob block never wraps the hint.)
-    const auto buttonRow = makeOperator.isVisible() ? left.removeFromBottom (26) : juce::Rectangle<int>();
+    auto buttonRow = makeOperator.isVisible() ? left.removeFromBottom (26) : juce::Rectangle<int>();
     const auto count = (int) knobsInRow.size();
     const auto twoRows = count > 5 && left.getHeight() >= 140;
+    if (! twoRows)
+    {
+        // One row of rings: the button and the hint stand right under it (no band of empty card between them).
+        auto stack = belowMenus;
+        left = stack.removeFromTop (juce::jmin (88, juce::jmax (0, stack.getHeight() - footHeight - (makeOperator.isVisible() ? 26 : 0))));
+        if (makeOperator.isVisible())
+            buttonRow = stack.removeFromTop (26);
+        ampHint = stack.removeFromTop (footHeight).withTrimmedLeft (2);
+    }
     const auto columns = twoRows ? 3 : count;
     const auto rowsHere = twoRows ? (count + 2) / 3 : 1;
     const auto cellWidth = left.getWidth() / juce::jmax (1, columns);
     // (A single row stays under the menus a standard gap, not centred in the leftover height.)
-    const auto cellHeight = twoRows ? left.getHeight() / juce::jmax (1, rowsHere) : juce::jmin (left.getHeight(), 100);
+    const auto cellHeight = twoRows ? left.getHeight() / juce::jmax (1, rowsHere) : left.getHeight();
     for (int i = 0; i < count; ++i)
         if (auto* knob = dynamic_cast<KnobControl*> (knobsInRow[(size_t) i]))
             knob->placeAsRing (juce::Rectangle<int> (left.getX() + (i % columns) * cellWidth, left.getY() + (i / columns) * cellHeight,
-                                                     cellWidth, cellHeight).reduced (2, 0), twoRows ? 46 : count <= 5 ? 50 : 40);
+                                                     cellWidth, cellHeight).reduced (2, 0), twoRows ? 46 : count <= 5 ? 54 : 40);
     // Another type's way to the operator's controls, at the hint's end.
     if (makeOperator.isVisible())
     {

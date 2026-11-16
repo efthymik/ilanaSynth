@@ -629,7 +629,7 @@ private:
             {
                 const auto name = db < -0.5f ? juce::String::fromUTF8 ("\xe2\x88\x92") + juce::String ((int) -db) : juce::String ("0");
                 paintTick (g, name, juce::Rectangle<float> (toX (db) + 3.0f, plot.getBottom() - 10.0f, 22.0f, 10.0f), juce::Justification::centredLeft);
-                if (db > -40.0f)
+                if (db > -40.0f && plot.getHeight() >= 70.0f) // a short plot's side ticks would sit on the curve
                     paintTick (g, name, juce::Rectangle<float> (plot.getX() + 2.0f, toY (db) + 1.0f, 22.0f, 10.0f), juce::Justification::centredLeft);
             }
 
@@ -1415,7 +1415,9 @@ private:
         // The seconds ride in a band under the bars, not over them (P-6).
         const auto full = plotArea();
         const auto scaleBand = full.getHeight() > 30.0f ? 11.0f : 0.0f;
-        const auto plot = full.withTrimmedBottom (scaleBand);
+        // The dB tags ride in a gutter at the left, not over the bars.
+        const auto gutter = scaleBand > 0.0f ? 26.0f : 0.0f;
+        const auto plot = full.withTrimmedBottom (scaleBand).withTrimmedLeft (gutter);
         auto step = 1.0f;
         for (const auto candidate : { 0.005f, 0.01f, 0.02f, 0.05f, 0.1f, 0.25f, 0.5f, 1.0f })
             if (impulseSeconds / candidate <= 6.0f)
@@ -1437,8 +1439,8 @@ private:
                 const auto label = impulseSeconds < 1.0f ? juce::String (juce::roundToInt (t * 1000.0f)) + " ms" : juce::String (t, 1) + " s";
                 paintTick (g, label, juce::Rectangle<float> (plot.getX() + t / impulseSeconds * plot.getWidth() + 2.0f, plot.getBottom() + 1.0f, 40.0f, 10.0f), juce::Justification::centredLeft);
             }
-            paintTick (g, "0 dB", juce::Rectangle<float> (plot.getX() + 2.0f, plot.getY(), 30.0f, 10.0f), juce::Justification::centredLeft);
-            paintTick (g, juce::String::fromUTF8 ("\xe2\x88\x92") + "24", juce::Rectangle<float> (plot.getX() + 2.0f, plot.getCentreY() - 5.0f, 30.0f, 10.0f), juce::Justification::centredLeft);
+            paintTick (g, "0 dB", juce::Rectangle<float> (full.getX() + 2.0f, plot.getY(), 24.0f, 10.0f), juce::Justification::centredLeft);
+            paintTick (g, juce::String::fromUTF8 ("\xe2\x88\x92") + "24", juce::Rectangle<float> (full.getX() + 2.0f, plot.getBottom() - 24.0f / 48.0f * plot.getHeight() - 5.0f, 24.0f, 10.0f), juce::Justification::centredLeft);
         }
 
         auto peak = 1.0e-6f;
@@ -1655,7 +1657,7 @@ private:
         {
             for (const auto s : { 1.0f, 2.0f, 3.0f })
                 paintTick (g, juce::String ((int) s) + " s", juce::Rectangle<float> (toX (s) + 2.0f, plot.getY() + 1.0f, 24.0f, 10.0f), juce::Justification::centredLeft);
-            paintTick (g, "100%", juce::Rectangle<float> (plot.getX() + 2.0f, plot.getY(), 26.0f, 10.0f), juce::Justification::centredLeft);
+            paintTick (g, "100%", juce::Rectangle<float> (plot.getX() + 2.0f, plot.getY() + 6.0f, 26.0f, 10.0f), juce::Justification::centredLeft);
             paintTick (g, "0", juce::Rectangle<float> (plot.getX() + 2.0f, plot.getBottom() - 11.0f, 10.0f, 10.0f), juce::Justification::centredLeft);
         }
         // The tape's speed: full, a ramp down over the stop time, and standstill.
@@ -2030,7 +2032,7 @@ private:
         g.fillRect (juce::Rectangle<float> (plot.getWidth(), 1.0f).withPosition (plot.getX(), plot.getBottom() - 1.0f));
         if (plot.getHeight() > 30.0f)
             for (const auto ms : { 100.0f, 200.0f })
-                paintTick (g, juce::String ((int) ms) + " ms", juce::Rectangle<float> (toX (ms) + 2.0f, plot.getBottom() - 11.0f, 34.0f, 10.0f), juce::Justification::centredLeft);
+                paintTick (g, juce::String ((int) ms) + " ms", juce::Rectangle<float> (toX (ms) + 2.0f, plot.getBottom() - 14.0f, 34.0f, 10.0f), juce::Justification::centredLeft);
         // Each trip round the loop comes back AMOUNT as loud.
         auto level = 1.0f;
         for (int i = 0; i < 80 && toX ((float) i * delay) < plot.getRight(); ++i)

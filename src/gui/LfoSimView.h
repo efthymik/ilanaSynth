@@ -168,7 +168,12 @@ public:
         const auto full = outputB ? "OUT 2: " + names.second : "OUT 1: " + names.first; // spelt out (UI review 9, V9-20)
         const auto fits = (float) juce::GlyphArrangement::getStringWidthInt (juce::Font (IlanaTheme::font (IlanaTheme::TextSize::tiny, true)), full) + 14.0f
                           <= scopeWidth * 0.5f - 4.0f;
-        return fits ? full : juce::String (outputB ? "OUT 2" : "OUT 1");
+        if (fits)
+            return full;
+        // Never let a short tag ellipsise: OUT 1 / OUT 2, or just the digit on a very narrow scope.
+        const juce::String shortText (outputB ? "OUT 2" : "OUT 1");
+        const auto shortWidth = (float) juce::GlyphArrangement::getStringWidthInt (juce::Font (IlanaTheme::font (IlanaTheme::TextSize::tiny, true)), shortText) + 14.0f;
+        return shortWidth <= scopeWidth * 0.5f - 4.0f ? shortText : juce::String (outputB ? "2" : "1");
     }
 
 private:
@@ -197,7 +202,7 @@ private:
             g.setColour (tagColour.withAlpha (0.55f));
             g.drawRoundedRectangle (tag.reduced (0.5f), 7.0f, 1.0f);
             g.setColour (tagColour);
-            IlanaTheme::drawFitted (g, text, tag.reduced (7.0f, 0.0f).toNearestInt(), juce::Justification::centred, 1);
+            IlanaTheme::drawFitted (g, text, tag.reduced (4.0f, 0.0f).toNearestInt(), juce::Justification::centred, 1);
         }
         area.removeFromTop (18.0f);
 
