@@ -1,5 +1,5 @@
 #include "ProcessorInternal.h"
-#include "PatchValues.h"
+#include "Migrations.h"
 #include "../SamplePaths.h"
 
 #include <cstring>
@@ -1307,10 +1307,7 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
         values.push_back ({ "osc2_fine", -7.0f });
 
     if (presets[(size_t) index].category == nullptr)
-    {
-        FactoryPatchValues patch (values, PatchValues::MissingId::add);
-        migrateLegacyOsc3 (patch.getter(), patch.setter());
-    }
+        Migrations::runFactory (values, Migrations::FactoryStage::legacyRecipes);
 
     std::array<juce::String, 4> voicedMacroNames;
     applyPresetVoicing (presets[(size_t) index].name, values, voicedMacroNames);
@@ -1321,66 +1318,11 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
     applyPresetTrims (presets[(size_t) index].name, getFactoryPresetCategories()[index], values);
     moveLevelToTrim (values);
 
-    // The factory recipes were written for the old string knob scales.
-    {
-        FactoryPatchValues patch (values, PatchValues::MissingId::skip, FactoryPatchValues::Duplicates::all);
-        migrateStringKnobs (patch.getter(), patch.setter());
-    }
-
-    // The recipes set ENV AMOUNT (Filter 1's default was 1.5 octaves), TENSION
-    // and WARP ENV; they are now matrix routes and curves with the same sound.
-    {
-        FactoryPatchValues patch (values, PatchValues::MissingId::add);
-        migrateRedundantKnobs (patch.getter(), patch.setter());
-    }
-
-    // The recipes on the Dense board were heard with its old, short MIX.
-    {
-        FactoryPatchValues patch (values, PatchValues::MissingId::add);
-        migrateDenseBoardMix (patch.getter(), patch.setter());
-    }
-
-    // ...and either board's colour was on even at MIX 0 % (moved up the knob, same sound).
-    for (const auto classicBoard : { false, true })
-    {
-        FactoryPatchValues patch (values, PatchValues::MissingId::add);
-        migrateDenseBoardBypass (patch.getter(), patch.setter(), classicBoard);
-    }
-
-    // Its operators (a wavetable tuned by ratio or fixed Hz, or on the
-    // Operator EG) load as FM / DX7, which renders the same.
-    {
-        FactoryPatchValues patch (values, PatchValues::MissingId::add);
-        migrateOperatorModes (patch.getter(), patch.setter());
-    }
-
-    // The recipes' (and every baked pack's) GLIDE times are in the old,
-    // 16x slow units: they load x16 and glide as they were heard.
-    {
-        FactoryPatchValues patch (values, PatchValues::MissingId::skip, FactoryPatchValues::Duplicates::all);
-        migrateGlideTime (patch.getter(), patch.setter());
-    }
-
-    // The factory recipes on a material body were heard at its old level.
-    {
-        FactoryPatchValues patch (values, PatchValues::MissingId::add);
-        migrateBodyLevel (patch.getter(), patch.setter());
-    }
-
-    // Step 45: a preset written before Grain Position existed plays its
-    // cloud at Sample Start; give it that value.
-    {
-        FactoryPatchValues patch (values, PatchValues::MissingId::add);
-        for (int osc = 0; osc < OscillatorIds::count; ++osc)
-        {
-            const auto prefix = juce::String (OscillatorIds::prefixes[(size_t) osc]);
-            const auto positionId = prefix + "_grain_pos";
-            const auto startId = prefix + "_sample_start";
-
-            if (! patch.contains (positionId) && patch.contains (startId))
-                patch.set (positionId, patch.get (startId, 0.0f));
-        }
-    }
+    // The migrations for every recipe (Migrations::table, in order): the
+    // recipes were written for the old string knob scales, ENV AMOUNT, TENSION
+    // and WARP ENV knobs, the boards' old MIX, the old operator modes, GLIDE
+    // units and body levels, and before Grain Position.
+    Migrations::runFactory (values, Migrations::FactoryStage::afterTrims);
 
     for (const auto& value : values)
         if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (apvts.getParameter (value.first)))

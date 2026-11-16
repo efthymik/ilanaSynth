@@ -1,7 +1,7 @@
 #include "ProcessorInternal.h"
 #include "../ThreadChecks.h"
 #include "../BuildInfo.h"
-#include "PatchValues.h"
+#include "Migrations.h"
 
 namespace
 {
@@ -975,6 +975,292 @@ void IlanaSynthAudioProcessor::ensureBuiltInTables()
             BuiltInTables::build (choice - base);
 }
 
+// ---- The migration table (see Migrations.h) ----
+
+namespace
+{
+    using Processor = IlanaSynthAudioProcessor;
+    using Missing = PatchValues::MissingId;
+    using Duplicates = FactoryPatchValues::Duplicates;
+    using Migrations::SavedStage;
+    using Migrations::FactoryStage;
+
+    void legacyOsc3 (PatchValues& values, int) { Processor::migrateLegacyOsc3 (values.getter(), values.setter()); }
+
+    // Step 45: the grain position became its own parameter. Before it, the
+    // cloud sat at Sample Start, so an older patch takes that value (as saved:
+    // a string in a file, not through a float).
+    void savedGrainPosition (PatchValues& values, int)
+    {
+        auto* tree = dynamic_cast<TreePatchValues*> (&values);
+        if (tree == nullptr)
+        {
+            jassertfalse;
+            return;
+        }
+
+        for (int osc = 0; osc < OscillatorIds::count; ++osc)
+        {
+            const auto prefix = juce::String (OscillatorIds::prefixes[(size_t) osc]);
+            const auto start = tree->find (prefix + "_sample_start");
+
+            if (! start.isValid() || ! start.hasProperty ("value"))
+                continue;
+
+            tree->findOrAdd (prefix + "_grain_pos").setProperty ("value", start.getProperty ("value"), nullptr);
+        }
+    }
+
+    // 2026-10-23: Lorenz loops once per cycle of RATE (it looped 1.6 to 2.5
+    // times). A free-running Lorenz LFO saved before gets the faster RATE
+    // that moves it as before; a synced one keeps its division and now
+    // loops on it.
+    void lorenzRate (PatchValues& values, int)
+    {
+        for (int lfo = 1; lfo <= Processor::numLfos; ++lfo)
+        {
+            const auto prefix = "lfo" + juce::String (lfo);
+
+            if (juce::roundToInt (values.get (prefix + "_shape", 0.0f)) != LfoSimShapes::Lorenz || values.get (prefix + "_sync", 0.0f) > 0.5f)
+                continue;
+
+            const auto rho = LfoSimInfo::value (LfoSimShapes::Lorenz, 1, values.get (prefix + "_p2", 0.5f));
+            const auto scaled = (double) values.get (prefix + "_rate", 4.0f) * LfoSimInfo::lorenzLegacyRateScale (rho);
+            values.set (prefix + "_rate", (float) juce::jlimit (0.01, 40.0, scaled));
+        }
+    }
+
+    // Moves every saved choice at or above `from` of the given table
+    // parameters up by `added` (every child with that id, as saved).
+    template <typename IsTable>
+    void moveTables (PatchValues& values, int from, int added, IsTable&& isTable)
+    {
+        auto* state = values.tree();
+        if (state == nullptr)
+        {
+            jassertfalse;
+            return;
+        }
+
+        for (int i = 0; i < state->getNumChildren(); ++i)
+        {
+            auto child = state->getChild (i);
+            const auto id = child.getProperty ("id").toString();
+
+            if (isTable (id))
+            {
+                const auto table = juce::roundToInt ((float) child.getProperty ("value"));
+
+                if (table >= from)
+                    child.setProperty ("value", table + added, nullptr);
+            }
+        }
+    }
+
+    bool isAnyOscTable (const juce::String& id)
+    {
+        for (const auto* prefix : OscillatorIds::prefixes)
+            if (id == juce::String (prefix) + "_table")
+                return true;
+        return false;
+    }
+
+    // v1.1 added factory wavetables ahead of the four user slots, so older
+    // saved choices of a user slot move up.
+    void tablesV11 (PatchValues& values, int)
+    {
+        moveTables (values, 16, 40 - 16, // the v1.1 tables (the v1.3 ones are moved below)
+                    [] (const juce::String& id) { return id == "osc1_table" || id == "osc2_table" || id == "sub_table"; });
+    }
+
+    // v1.3 (M10) added 80 factory tables ahead of the User tables, for all
+    // six oscillators.
+    void tablesV13 (PatchValues& values, int)
+    {
+        moveTables (values, 40, 120 - 40, isAnyOscTable); // the factory count then (step 19's tables are moved below)
+    }
+
+    // Step 19 appended 14 factory tables (Arca Tear ... Noise Choir) ahead of
+    // the User tables, for all six oscillators.
+    void tablesStep19 (PatchValues& values, int)
+    {
+        moveTables (values, 120, 134 - 120, isAnyOscTable); // the factory count then (a fixed number: later tables get their own schema step)
+    }
+
+    // v1.1 added explicit (FM) destinations ahead of the parameter
+    // destinations, so older saved routings to those move up.
+    void destinationsV11 (PatchValues& values, int)
+    {
+        auto* state = values.tree();
+        if (state == nullptr)
+        {
+            jassertfalse;
+            return;
+        }
+
+        const auto added = Mod::numExplicitDestinations - Mod::explicitDestinationsV10;
+
+        for (int i = 0; i < state->getNumChildren(); ++i)
+        {
+            auto child = state->getChild (i);
+            const auto id = child.getProperty ("id").toString();
+
+            if (id.startsWith ("mod") && id.endsWith ("_dst"))
+            {
+                const auto destination = juce::roundToInt ((float) child.getProperty ("value"));
+
+                if (destination >= Mod::explicitDestinationsV10)
+                    child.setProperty ("value", destination + added, nullptr);
+            }
+        }
+    }
+
+    void stringKnobs (PatchValues& values, int) { Processor::migrateStringKnobs (values.getter(), values.setter()); }
+    void redundantKnobs (PatchValues& values, int) { Processor::migrateRedundantKnobs (values.getter(), values.setter()); }
+
+    // Schema 2 was stamped by the 2026-11-05 build, which divided MIX but not
+    // the routes and macros into it: those states get only the routes' part.
+    void denseBoardMix (PatchValues& values, int stamp)
+    {
+        Processor::migrateDenseBoardMix (values.getter(), values.setter(), stamp < 2);
+    }
+
+    void denseBoardBypass (PatchValues& values, int) { Processor::migrateDenseBoardBypass (values.getter(), values.setter()); }
+    void classicBoardBypass (PatchValues& values, int) { Processor::migrateDenseBoardBypass (values.getter(), values.setter(), true); }
+    void modDepthRanges (PatchValues& values, int) { Processor::migrateModDepthRanges (values.getter(), values.setter()); }
+    void operatorModes (PatchValues& values, int) { Processor::migrateOperatorModes (values.getter(), values.setter()); }
+    void glideTime (PatchValues& values, int) { Processor::migrateGlideTime (values.getter(), values.setter()); }
+    void bodyLevel (PatchValues& values, int) { Processor::migrateBodyLevel (values.getter(), values.setter()); }
+
+    // Step 45 for a recipe: one written before Grain Position existed plays
+    // its cloud at Sample Start. Unlike the saved-state row, a recipe that
+    // sets its own position keeps it.
+    void recipeGrainPosition (PatchValues& values, int)
+    {
+        for (int osc = 0; osc < OscillatorIds::count; ++osc)
+        {
+            const auto prefix = juce::String (OscillatorIds::prefixes[(size_t) osc]);
+            const auto positionId = prefix + "_grain_pos";
+            const auto startId = prefix + "_sample_start";
+
+            if (! values.contains (positionId) && values.contains (startId))
+                values.set (positionId, values.get (startId, 0.0f));
+        }
+    }
+}
+
+// In the order they run. The saved and factory columns differ where the two
+// loads always did; those differences are deliberate (each recipe was heard
+// with them) and kept as they are.
+const std::vector<Migrations::Row>& Migrations::table()
+{
+    static const std::vector<Row> rows {
+        // Before v1.1 OSC 3 doubled as the sub (migrateLegacyOsc3).
+        { "osc3Schema", 1, 2, legacyOsc3,
+          SavedStage::beforeDefaults, Missing::add, FactoryStage::legacyRecipes, Missing::add, Duplicates::first },
+        // Recipes get their grain position in their own row below.
+        { "grainPosSchema", 1, 2, savedGrainPosition,
+          SavedStage::beforeDefaults, Missing::skip, FactoryStage::none, Missing::skip, Duplicates::first },
+        { "lorenzSchema", 1, 2, lorenzRate,
+          SavedStage::beforeDefaults, Missing::add, FactoryStage::none, Missing::skip, Duplicates::first },
+        // Recipes name their tables and destinations in today's numbers.
+        { "tableSchema", 1, 2, tablesV11,
+          SavedStage::beforeDefaults, Missing::skip, FactoryStage::none, Missing::skip, Duplicates::first },
+        { "tableSchema", 2, 3, tablesV13,
+          SavedStage::beforeDefaults, Missing::skip, FactoryStage::none, Missing::skip, Duplicates::first },
+        { "tableSchema", 3, 4, tablesStep19,
+          SavedStage::beforeDefaults, Missing::skip, FactoryStage::none, Missing::skip, Duplicates::first },
+        { "destSchema", 1, 2, destinationsV11,
+          SavedStage::beforeDefaults, Missing::skip, FactoryStage::none, Missing::skip, Duplicates::first },
+        // A patch saved before the string knobs were rescaled keeps its sound.
+        { "stringSchema", 1, 2, stringKnobs,
+          SavedStage::afterDefaults, Missing::skip, FactoryStage::afterTrims, Missing::skip, Duplicates::all },
+        // ENV AMOUNT on Filter 1 or 2, an envelope TENSION or a WARP ENV become
+        // matrix routes and curves with the same sound (the knobs are gone;
+        // Filter 1's ENV AMOUNT defaulted to 1.5 octaves in the recipes).
+        { "redundantKnobsSchema", 1, 2, redundantKnobs,
+          SavedStage::afterDefaults, Missing::skip, FactoryStage::afterTrims, Missing::add, Duplicates::first },
+        // The Dense board's MIX reaches further (2026-11-05); from 1 or 2.
+        { "boardMixSchema", 2, 3, denseBoardMix,
+          SavedStage::afterDefaults, Missing::add, FactoryStage::afterTrims, Missing::add, Duplicates::first },
+        // ...and its colour, on even at MIX 0 %, fades in on the knob's first quarter.
+        { "boardMixSchema", 3, 4, denseBoardBypass,
+          SavedStage::afterDefaults, Missing::add, FactoryStage::afterTrims, Missing::add, Duplicates::first },
+        // The Classic board's MIX got the same bypass at 0 % a day later.
+        { "boardMixSchema", 4, 5, classicBoardBypass,
+          SavedStage::afterDefaults, Missing::add, FactoryStage::afterTrims, Missing::add, Duplicates::first },
+        // A route saved before 100 % meant the knob's whole range (after the
+        // rows above, whose cutoff routes are old-scale). Recipes: on the live
+        // parameters, after the default macros (loadFactoryPreset).
+        { "modRangeSchema", 1, 2, modDepthRanges,
+          SavedStage::afterDefaults, Missing::skip, FactoryStage::none, Missing::skip, Duplicates::first },
+        // An operator from before the FM / DX7 type loads as one (it renders the same). No stamp.
+        { nullptr, 0, 0, operatorModes,
+          SavedStage::afterDefaults, Missing::skip, FactoryStage::afterTrims, Missing::add, Duplicates::first },
+        // GLIDE took 16 times its knob's time (the recipes' and every baked
+        // pack's too): x16, so they glide as they were heard.
+        { "glideSchema", 1, 2, glideTime,
+          SavedStage::afterDefaults, Missing::skip, FactoryStage::afterTrims, Missing::skip, Duplicates::all },
+        // A material body from before its levels changed (2026-11-13) keeps the old body.
+        { "bodyLevelSchema", 1, 2, bodyLevel,
+          SavedStage::afterDefaults, Missing::add, FactoryStage::afterTrims, Missing::add, Duplicates::first },
+        // Step 45 for recipes (see the saved-state row above).
+        { "grainPosSchema", 1, 2, recipeGrainPosition,
+          SavedStage::none, Missing::skip, FactoryStage::afterTrims, Missing::add, Duplicates::first },
+    };
+    return rows;
+}
+
+void Migrations::runSaved (juce::ValueTree& state, SavedStage stage)
+{
+    TreePatchValues values (state);
+
+    for (const auto& row : table())
+    {
+        if (row.saved != stage)
+            continue;
+
+        const auto stamp = row.schemaKey != nullptr ? (int) state.getProperty (row.schemaKey, 1) : 0;
+        if (row.schemaKey != nullptr && stamp >= row.toVersion)
+            continue;
+
+        values.setMissing (row.savedMissing);
+        row.run (values, stamp);
+
+        if (row.schemaKey != nullptr)
+            state.setProperty (row.schemaKey, row.toVersion, nullptr);
+    }
+}
+
+void Migrations::runFactory (FactoryPatchValues::Values& values, FactoryStage stage)
+{
+    FactoryPatchValues patch (values);
+    const auto& rows = table();
+
+    for (size_t r = 0; r < rows.size(); ++r)
+    {
+        const auto& row = rows[r];
+        if (row.factory != stage)
+            continue;
+
+        // A recipe starts at version 1 of every key and reaches each row's
+        // toVersion as the recipe rows above run.
+        auto stamp = 1;
+        if (row.schemaKey != nullptr)
+            for (size_t above = 0; above < r; ++above)
+                if (rows[above].factory != FactoryStage::none && rows[above].schemaKey != nullptr
+                    && juce::String (rows[above].schemaKey) == row.schemaKey)
+                    stamp = rows[above].toVersion;
+
+        if (row.schemaKey != nullptr && stamp >= row.toVersion)
+            continue;
+
+        patch.setMissing (row.factoryMissing);
+        patch.setDuplicates (row.factoryDuplicates);
+        row.run (patch, stamp);
+    }
+}
+
 void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
 {
     liveRetrigger = true;
@@ -1011,149 +1297,8 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
         ++revealVersion;
     }
 
-    if ((int) state.getProperty ("osc3Schema", 1) < 2)
-    {
-        TreePatchValues values (state, PatchValues::MissingId::add);
-        migrateLegacyOsc3 (values.getter(), values.setter());
-
-        state.setProperty ("osc3Schema", 2, nullptr);
-    }
-
-    // Step 45: the grain position became its own parameter. Before it, the
-    // cloud sat at Sample Start, so an older patch takes that value.
-    if ((int) state.getProperty ("grainPosSchema", 1) < 2)
-    {
-        TreePatchValues values (state);
-
-        for (int osc = 0; osc < OscillatorIds::count; ++osc)
-        {
-            const auto prefix = juce::String (OscillatorIds::prefixes[(size_t) osc]);
-            const auto start = values.find (prefix + "_sample_start");
-
-            if (! start.isValid() || ! start.hasProperty ("value"))
-                continue;
-
-            // The saved value as it is (a string in a file), not through a float.
-            values.findOrAdd (prefix + "_grain_pos").setProperty ("value", start.getProperty ("value"), nullptr);
-        }
-
-        state.setProperty ("grainPosSchema", 2, nullptr);
-    }
-
-    // 2026-10-23: Lorenz loops once per cycle of RATE (it looped 1.6 to 2.5
-    // times). A free-running Lorenz LFO saved before gets the faster RATE
-    // that moves it as before; a synced one keeps its division and now
-    // loops on it.
-    if ((int) state.getProperty ("lorenzSchema", 1) < 2)
-    {
-        TreePatchValues values (state, PatchValues::MissingId::add);
-
-        for (int lfo = 1; lfo <= numLfos; ++lfo)
-        {
-            const auto prefix = "lfo" + juce::String (lfo);
-
-            if (juce::roundToInt (values.get (prefix + "_shape", 0.0f)) != LfoSimShapes::Lorenz || values.get (prefix + "_sync", 0.0f) > 0.5f)
-                continue;
-
-            const auto rho = LfoSimInfo::value (LfoSimShapes::Lorenz, 1, values.get (prefix + "_p2", 0.5f));
-            const auto scaled = (double) values.get (prefix + "_rate", 4.0f) * LfoSimInfo::lorenzLegacyRateScale (rho);
-            values.set (prefix + "_rate", (float) juce::jlimit (0.01, 40.0, scaled));
-        }
-
-        state.setProperty ("lorenzSchema", 2, nullptr);
-    }
-
-    // v1.1 added factory wavetables ahead of the four user slots, so older
-    // saved choices of a user slot move up.
-    if ((int) state.getProperty ("tableSchema", 1) < 2)
-    {
-        const auto added = 40 - 16; // the v1.1 tables (the v1.3 ones are moved below)
-
-        for (int i = 0; i < state.getNumChildren(); ++i)
-        {
-            auto child = state.getChild (i);
-            const auto id = child.getProperty ("id").toString();
-
-            if (id == "osc1_table" || id == "osc2_table" || id == "sub_table")
-            {
-                const auto table = juce::roundToInt ((float) child.getProperty ("value"));
-
-                if (table >= 16)
-                    child.setProperty ("value", table + added, nullptr);
-            }
-        }
-
-        state.setProperty ("tableSchema", 2, nullptr);
-    }
-
-    // v1.3 (M10) added 80 factory tables ahead of the User tables, for all
-    // six oscillators.
-    if ((int) state.getProperty ("tableSchema", 1) < 3)
-    {
-        const auto added = 120 - 40; // the factory count then (step 19's tables are moved below)
-
-        for (int i = 0; i < state.getNumChildren(); ++i)
-        {
-            auto child = state.getChild (i);
-            const auto id = child.getProperty ("id").toString();
-
-            for (const auto* prefix : OscillatorIds::prefixes)
-                if (id == juce::String (prefix) + "_table")
-                {
-                    const auto table = juce::roundToInt ((float) child.getProperty ("value"));
-                    if (table >= 40)
-                        child.setProperty ("value", table + added, nullptr);
-                }
-        }
-
-        state.setProperty ("tableSchema", 3, nullptr);
-    }
-
-    // Step 19 appended 14 factory tables (Arca Tear ... Noise Choir) ahead of
-    // the User tables, for all six oscillators.
-    if ((int) state.getProperty ("tableSchema", 1) < 4)
-    {
-        const auto added = 134 - 120; // the factory count then (a fixed number: later tables get their own schema step)
-
-        for (int i = 0; i < state.getNumChildren(); ++i)
-        {
-            auto child = state.getChild (i);
-            const auto id = child.getProperty ("id").toString();
-
-            for (const auto* prefix : OscillatorIds::prefixes)
-                if (id == juce::String (prefix) + "_table")
-                {
-                    const auto table = juce::roundToInt ((float) child.getProperty ("value"));
-                    if (table >= 120)
-                        child.setProperty ("value", table + added, nullptr);
-                }
-        }
-
-        state.setProperty ("tableSchema", 4, nullptr);
-    }
-
-    // v1.1 added explicit (FM) destinations ahead of the parameter
-    // destinations, so older saved routings to those move up.
-    if ((int) state.getProperty ("destSchema", 1) < 2)
-    {
-        const auto added = Mod::numExplicitDestinations - Mod::explicitDestinationsV10;
-
-        for (int i = 0; i < state.getNumChildren(); ++i)
-        {
-            auto child = state.getChild (i);
-            const auto id = child.getProperty ("id").toString();
-
-            if (id.startsWith ("mod") && id.endsWith ("_dst"))
-            {
-                const auto destination = juce::roundToInt ((float) child.getProperty ("value"));
-
-                if (destination >= Mod::explicitDestinationsV10)
-                    child.setProperty ("value", destination + added, nullptr);
-            }
-        }
-
-        state.setProperty ("destSchema", 2, nullptr);
-    }
+    // The migrations for the state as saved (Migrations::table, in order).
+    Migrations::runSaved (state, Migrations::SavedStage::beforeDefaults);
 
     const auto parseDraw = [this] (int lfoIndex, const juce::String& text)
     {
@@ -1435,80 +1580,8 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
             }
         }
 
-    // A patch saved before the string knobs were rescaled keeps its sound.
-    if ((int) state.getProperty ("stringSchema", 1) < 2)
-    {
-        TreePatchValues values (state, PatchValues::MissingId::skip);
-        migrateStringKnobs (values.getter(), values.setter());
-        state.setProperty ("stringSchema", 2, nullptr);
-    }
-
-    // A patch saved with an ENV AMOUNT on Filter 1 or 2, an envelope TENSION or
-    // a WARP ENV carries them as matrix routes and curves (the knobs are gone).
-    if ((int) state.getProperty ("redundantKnobsSchema", 1) < 2)
-    {
-        TreePatchValues values (state, PatchValues::MissingId::skip);
-        migrateRedundantKnobs (values.getter(), values.setter());
-        state.setProperty ("redundantKnobsSchema", 2, nullptr);
-    }
-
-    // A patch on the Dense board saved before its MIX reached further keeps its wood.
-    // Schema 2 was stamped by the 2026-11-05 build, which divided MIX but not the
-    // routes and macros into it: those states get only the routes' part.
-    if (const auto boardMixSchema = (int) state.getProperty ("boardMixSchema", 1); boardMixSchema < 3)
-    {
-        TreePatchValues values (state, PatchValues::MissingId::add);
-        migrateDenseBoardMix (values.getter(), values.setter(), boardMixSchema < 2);
-        state.setProperty ("boardMixSchema", 3, nullptr);
-    }
-    // ...and its colour, which was on even at MIX 0 %, now fades in on the knob's
-    // first quarter: older patches move up the knob so they sound the same.
-    if ((int) state.getProperty ("boardMixSchema", 1) < 4)
-    {
-        TreePatchValues values (state, PatchValues::MissingId::add);
-        migrateDenseBoardBypass (values.getter(), values.setter());
-        state.setProperty ("boardMixSchema", 4, nullptr);
-    }
-    // The Classic board's MIX got the same bypass at 0 % a day later (schema 5).
-    if ((int) state.getProperty ("boardMixSchema", 1) < 5)
-    {
-        TreePatchValues values (state, PatchValues::MissingId::add);
-        migrateDenseBoardBypass (values.getter(), values.setter(), true);
-        state.setProperty ("boardMixSchema", 5, nullptr);
-    }
-
-    // A patch saved before 100 % meant the knob's whole range keeps its
-    // routes' sound (after the step above, whose cutoff routes are old-scale).
-    if ((int) state.getProperty ("modRangeSchema", 1) < 2)
-    {
-        TreePatchValues values (state, PatchValues::MissingId::skip);
-        migrateModDepthRanges (values.getter(), values.setter());
-        state.setProperty ("modRangeSchema", 2, nullptr);
-    }
-
-    // An operator saved before the FM / DX7 type loads as one (it renders
-    // the same: the type only picks its card).
-    {
-        TreePatchValues values (state, PatchValues::MissingId::skip);
-        migrateOperatorModes (values.getter(), values.setter());
-    }
-
-    // A patch saved while GLIDE took 16 times its knob's time glides as it did.
-    if ((int) state.getProperty ("glideSchema", 1) < 2)
-    {
-        TreePatchValues values (state, PatchValues::MissingId::skip);
-        migrateGlideTime (values.getter(), values.setter());
-        state.setProperty ("glideSchema", 2, nullptr);
-    }
-
-    // A patch on a material body saved before its levels changed (2026-11-13)
-    // keeps the old body.
-    if ((int) state.getProperty ("bodyLevelSchema", 1) < 2)
-    {
-        TreePatchValues values (state, PatchValues::MissingId::add);
-        migrateBodyLevel (values.getter(), values.setter());
-        state.setProperty ("bodyLevelSchema", 2, nullptr);
-    }
+    // The migrations for the whole parameter set (Migrations::table, in order).
+    Migrations::runSaved (state, Migrations::SavedStage::afterDefaults);
 
     apvts.replaceState (state);
     undoManager.clearUndoHistory(); // (the tree's own undo manager did this; it has none now)
