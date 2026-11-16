@@ -1,7 +1,7 @@
 // Dev tool: renders the plugin editor offscreen and writes one PNG per tab,
 // so the UI can be reviewed without a DAW or a display session.
 //   ilanaSnapshot <output dir> [factory preset index]
-//   ilanaSnapshot --uitest     (drives the editor and checks the wiring)
+//   ilanaSnapshot --uitest [--list | --only GROUP[,GROUP]]   (drives the editor and checks the wiring)
 //   ilanaSnapshot --idlecpu    (UI cost of each page while nothing moves)
 //   ilanaSnapshot --vulkanlive <dir>  (on screen through Vulkan: each page against software)
 
@@ -211,6 +211,7 @@ void save (juce::Component& editor, const juce::File& file)
     }
 }
 int uiFailures = 0;
+int uiChecks = 0;
 
 // isShowing() needs a window on screen; the editor here is offscreen, so
 // walk the visibility chain instead.
@@ -226,6 +227,7 @@ bool visibleInTree (const juce::Component* component)
 
 void expect (bool condition, const juce::String& message)
 {
+    ++uiChecks;
     std::cout << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
 
     if (! condition)
@@ -1731,27 +1733,156 @@ void runReview31MatrixTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudi
     settle (300);
 }
 
-int runUiTests()
+
+// ---------------------------------------------------------------------------
+// UI tests: a registry of named groups.
+//   ilanaSnapshot --uitest                 every group in order, on one shared editor
+//   ilanaSnapshot --uitest --list          the group ids
+//   ilanaSnapshot --uitest --only A,B      just those groups, each on a fresh editor
+// ILANA_UITEST_ONLY=A,B does the same (the old single ids T1, T2, U1, R6, PLAY, PG, HR,
+// WF, OS, OR, FC, FL, FF, DD, R31C, STRIPS still work; OSC is the six groups that
+// make up the OSC page checks).
+// ---------------------------------------------------------------------------
+struct UiCtx
 {
-    // The FILTER page's SIGNAL FLOW opens on hover or click: the tests hold it open.
-    filterFlowForcedOpen() = true;
     IlanaSynthAudioProcessor processor;
-    processor.prepareToPlay (48000.0, 512);
-    // ILANA_UITEST_ONLY=R6 runs just review 8's R6 checks (a quick loop).
-    const auto only = juce::SystemStats::getEnvironmentVariable ("ILANA_UITEST_ONLY", {});
+    std::unique_ptr<juce::AudioProcessorEditor> editor;
+    IlanaSynthAudioProcessorEditor* pages = nullptr;
+    juce::StringArray names;
+    int neuroWobble = -1;
+    bool askedBefore = true;
 
-    const auto names = processor.getFactoryPresetNames();
-    const auto neuroWobble = names.indexOf ("Neuro Wobble");
-    processor.loadFactoryPreset (neuroWobble);
+    UiCtx()
+    {
+        processor.prepareToPlay (48000.0, 512);
+        names = processor.getFactoryPresetNames();
+        neuroWobble = names.indexOf ("Neuro Wobble");
+        processor.loadFactoryPreset (neuroWobble);
+        openEditor();
+    }
 
-    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
-    editor->setSize (1060, 720);
-    settle (400);
+    void openEditor()
+    {
+        editor.reset (processor.createEditor());
+        editor->setSize (1060, 720);
+        settle (400);
 
-    if (auto* tutorial = findChild<TutorialOverlay> (*editor))
-        tutorial->setVisible (false);
+        if (auto* tutorial = findChild<TutorialOverlay> (*editor))
+            tutorial->setVisible (false);
 
-    auto* pages = dynamic_cast<IlanaSynthAudioProcessorEditor*> (editor.get());
+        pages = dynamic_cast<IlanaSynthAudioProcessorEditor*> (editor.get());
+        // Loads don't ask over edited patches except in the test that checks it
+        // (the user's own choice is put back at the end).
+        askedBefore = pages->asksBeforeReplacingEdits();
+        pages->setAsksBeforeReplacingEdits (false);
+    }
+
+    void closeEditor()
+    {
+        if (pages != nullptr)
+            pages->setAsksBeforeReplacingEdits (askedBefore);
+
+        pages = nullptr;
+        editor.reset();
+    }
+};
+
+// Undo checks start from an empty history, with every parameter change
+// already in the tree (it otherwise catches up on a timer).
+void uiClearHistory (UiCtx& ctx)
+{
+    ctx.processor.apvts.copyState();
+    ctx.processor.getUndoManager().clearUndoHistory();
+}
+
+juce::StringArray uiUndoSteps (UiCtx& ctx)
+{
+    ctx.processor.apvts.copyState();
+    return ctx.processor.getUndoManager().getUndoDescriptions();
+}
+
+// An oscillator card's switch on the page shown (its tooltip names the
+// parameter).
+ToggleControl* uiToggleFor (UiCtx& ctx, const juce::String& id)
+{
+    auto* parameter = ctx.processor.apvts.getParameter (id);
+    std::vector<ToggleControl*> toggles;
+    findAll<ToggleControl> (*ctx.editor, toggles);
+    for (auto* toggle : toggles)
+        if (parameter != nullptr && visibleInTree (toggle) && toggle->getWidth() > 0
+            && toggle->getButton().getTooltip().startsWith (parameter->getName (64)))
+            return toggle;
+    return nullptr;
+}
+
+// A click on that card's title line: a card folded to fit opens (UI review 4, V13).
+bool uiClickCardTitle (UiCtx& ctx, const juce::String& onId, bool rightClick)
+{
+    auto* toggle = uiToggleFor (ctx, onId);
+    auto* card = toggle != nullptr ? toggle->getParentComponent() : nullptr;
+    if (card == nullptr)
+        return false;
+    const juce::Point<float> position (40.0f, (float) toggle->getBounds().getCentreY());
+    const juce::MouseEvent event (juce::Desktop::getInstance().getMainMouseSource(), position,
+                                  rightClick ? juce::ModifierKeys (juce::ModifierKeys::rightButtonModifier | juce::ModifierKeys::popupMenuClickModifier)
+                                             : juce::ModifierKeys(),
+                                  1.0f, 0.0f, 0.0f, 0.0f, 0.0f, card, card, juce::Time::getCurrentTime(),
+                                  position, juce::Time::getCurrentTime(), 1, false);
+    card->mouseUp (event);
+    settle (200);
+    return true;
+}
+
+// OSC's tab for an oscillator, clicked (UI review 6: one oscillator at a time on OSC).
+bool uiSelectOscTab (UiCtx& ctx, int osc)
+{
+    std::vector<StateTabs*> rows;
+    findAll<StateTabs> (*ctx.editor, rows);
+    for (auto* tabs : rows)
+        for (int i = 0; i < tabs->getNumItems(); ++i)
+            if (tabs->getItem (i).name == "OSC " + juce::String (osc + 1) && tabs->onSelect != nullptr
+                && (dynamic_cast<OscPicker*> (tabs) == nullptr || tabs->getName() == "OSC tabs"))
+            {
+                tabs->setSelected (i);
+                tabs->onSelect (i);
+                settle (200);
+                return true;
+            }
+    return false;
+}
+
+// Plain-value parameter access.
+void uiSetParam (UiCtx& ctx, const juce::String& id, float plain)
+{
+    if (auto* parameter = ctx.processor.apvts.getParameter (id))
+        parameter->setValueNotifyingHost (parameter->convertTo0to1 (plain));
+}
+
+float uiReadParam (UiCtx& ctx, const juce::String& id)
+{
+    const auto* value = ctx.processor.apvts.getRawParameterValue (id);
+    return value != nullptr ? value->load() : 0.0f;
+}
+
+// What every group body starts from: the names the old single function had in scope.
+#define UI_GROUP_PRELUDE \
+    [[maybe_unused]] auto& processor = ctx.processor; \
+    [[maybe_unused]] auto& editor = ctx.editor; \
+    [[maybe_unused]] auto* pages = ctx.pages; \
+    [[maybe_unused]] const auto& names = ctx.names; \
+    [[maybe_unused]] const auto neuroWobble = ctx.neuroWobble; \
+    [[maybe_unused]] const auto clearHistory = [&ctx] { uiClearHistory (ctx); }; \
+    [[maybe_unused]] const auto undoSteps = [&ctx] { return uiUndoSteps (ctx); }; \
+    [[maybe_unused]] const auto toggleFor = [&ctx] (const juce::String& id) { return uiToggleFor (ctx, id); }; \
+    [[maybe_unused]] const auto clickCardTitle = [&ctx] (const juce::String& id, bool rightClick = false) { return uiClickCardTitle (ctx, id, rightClick); }; \
+    [[maybe_unused]] const auto selectOscTab = [&ctx] (int osc) { return uiSelectOscTab (ctx, osc); }; \
+    [[maybe_unused]] const auto setParam = [&ctx] (const juce::String& id, float plain) { uiSetParam (ctx, id, plain); }; \
+    [[maybe_unused]] const auto readParam = [&ctx] (const juce::String& id) { return uiReadParam (ctx, id); };
+
+
+void uiGroup_BASICS (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     expect (pages != nullptr && pages->getPageIds()[0] == "MAIN", "MAIN is the first page");
 
     // The animation clock's cheap "is it on screen" (IlanaAnim::showing)
@@ -1765,213 +1896,15 @@ int runUiTests()
         parent.setVisible (true);
         expect (IlanaAnim::showing (child) == child.isShowing(), "showing() agrees with isShowing() for a component with no window");
     }
+}
 
-    // Loads don't ask over edited patches except in the test that checks it
-    // (the user's own choice is put back at the end).
-    const auto askedBefore = pages->asksBeforeReplacingEdits();
-    pages->setAsksBeforeReplacingEdits (false);
-
-    if (only == "T1" || only == "T2" || only == "U1")
-    {
-        if (only == "U1")
-            runLayoutReview10Tests (processor, *pages);
-        else if (only == "T1")
-            runLayoutReview9Tests (processor, *pages);
-        else
-            runReview9T2Tests (processor, *pages);
-        pages->setAsksBeforeReplacingEdits (askedBefore);
-        editor.reset();
-        std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
-        return uiFailures == 0 ? 0 : 1;
-    }
-
-    if (only == "PLAY")
-    {
-        runPlayPageTests (processor, *pages);
-        pages->setAsksBeforeReplacingEdits (askedBefore);
-        editor.reset();
-        std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
-        return uiFailures == 0 ? 0 : 1;
-    }
-
-    if (only == "OSC")
-    {
-        runOscTypeTests (processor, *pages);
-        runLayoutReview8Tests (processor, *pages);
-        runLayoutReview9Tests (processor, *pages);
-        runLayoutReview10Tests (processor, *pages);
-        runOscCardOverlapTests (processor, *pages);
-        runGlobalReview8Tests (processor, *pages);
-        pages->setAsksBeforeReplacingEdits (askedBefore);
-        editor.reset();
-        std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
-        return uiFailures == 0 ? 0 : 1;
-    }
-
-    if (only == "R31C")
-    {
-        runReview31MatrixTests (processor, *pages);
-        pages->setAsksBeforeReplacingEdits (askedBefore);
-        editor.reset();
-        std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
-        return uiFailures == 0 ? 0 : 1;
-    }
-
-    if (only == "R6")
-    {
-        runGlobalReview8Tests (processor, *pages);
-        pages->setAsksBeforeReplacingEdits (askedBefore);
-        editor.reset();
-        std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
-        return uiFailures == 0 ? 0 : 1;
-    }
-
-    if (only == "PG")
-    {
-        runPatchCableTests (processor);
-        pages->setAsksBeforeReplacingEdits (askedBefore);
-        editor.reset();
-        std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
-        return uiFailures == 0 ? 0 : 1;
-    }
-
-    if (only == "HR")
-    {
-        runHitReachTests (processor, *pages);
-        pages->setAsksBeforeReplacingEdits (askedBefore);
-        editor.reset();
-        std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
-        return uiFailures == 0 ? 0 : 1;
-    }
-
-    if (only == "WF")
-    {
-        runWorkflowUiTests (processor, *pages);
-        pages->setAsksBeforeReplacingEdits (askedBefore);
-        editor.reset();
-        std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
-        return uiFailures == 0 ? 0 : 1;
-    }
-
-    if (only == "OS")
-    {
-        runOscSlotUiTests (processor, *pages);
-        pages->setAsksBeforeReplacingEdits (askedBefore);
-        editor.reset();
-        std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
-        return uiFailures == 0 ? 0 : 1;
-    }
-
-    if (only == "OR")
-    {
-        runOscRoutingUiTests (processor, *pages);
-        pages->setAsksBeforeReplacingEdits (askedBefore);
-        editor.reset();
-        std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
-        return uiFailures == 0 ? 0 : 1;
-    }
-
-    if (only == "FC")
-    {
-        runFxCarouselUiTests (processor, *pages);
-        pages->setAsksBeforeReplacingEdits (askedBefore);
-        editor.reset();
-        std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
-        return uiFailures == 0 ? 0 : 1;
-    }
-
-    if (only == "FL")
-    {
-        runFxLfoUiTests (processor, *pages);
-        pages->setAsksBeforeReplacingEdits (askedBefore);
-        editor.reset();
-        std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
-        return uiFailures == 0 ? 0 : 1;
-    }
-
-    if (only == "FF")
-    {
-        runFilterFxTests (processor, *pages);
-        pages->setAsksBeforeReplacingEdits (askedBefore);
-        editor.reset();
-        std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
-        return uiFailures == 0 ? 0 : 1;
-    }
-
-    if (only == "DD")
-    {
-        runDropdownTests (processor, *pages);
-        pages->setAsksBeforeReplacingEdits (askedBefore);
-        editor.reset();
-        std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
-        return uiFailures == 0 ? 0 : 1;
-    }
-
-    // Undo checks start from an empty history, with every parameter change
-    // already in the tree (it otherwise catches up on a timer).
-    const auto clearHistory = [&processor]
-    {
-        processor.apvts.copyState();
-        processor.getUndoManager().clearUndoHistory();
-    };
-    const auto undoSteps = [&processor]
-    {
-        processor.apvts.copyState();
-        return processor.getUndoManager().getUndoDescriptions();
-    };
+void uiGroup_TABS (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     expect (findChild<juce::TabbedComponent> (*editor) != nullptr
                 && findChild<juce::TabbedComponent> (*editor)->getNumTabs() == (IlanaSynthAudioProcessor::isEffectBuild ? 10 : 9),
             "nine tabs");
 
-    // An oscillator card's switch on the page shown (its tooltip names the
-    // parameter), and a click on that card's title line: a card folded to
-    // fit opens (UI review 4, V13).
-    const auto toggleFor = [&processor, &editor] (const juce::String& id) -> ToggleControl*
-    {
-        auto* parameter = processor.apvts.getParameter (id);
-        std::vector<ToggleControl*> toggles;
-        findAll<ToggleControl> (*editor, toggles);
-        for (auto* toggle : toggles)
-            if (parameter != nullptr && visibleInTree (toggle) && toggle->getWidth() > 0
-                && toggle->getButton().getTooltip().startsWith (parameter->getName (64)))
-                return toggle;
-        return nullptr;
-    };
-    const auto clickCardTitle = [&toggleFor] (const juce::String& onId, bool rightClick = false)
-    {
-        auto* toggle = toggleFor (onId);
-        auto* card = toggle != nullptr ? toggle->getParentComponent() : nullptr;
-        if (card == nullptr)
-            return false;
-        const juce::Point<float> position (40.0f, (float) toggle->getBounds().getCentreY());
-        const juce::MouseEvent event (juce::Desktop::getInstance().getMainMouseSource(), position,
-                                      rightClick ? juce::ModifierKeys (juce::ModifierKeys::rightButtonModifier | juce::ModifierKeys::popupMenuClickModifier)
-                                                 : juce::ModifierKeys(),
-                                      1.0f, 0.0f, 0.0f, 0.0f, 0.0f, card, card, juce::Time::getCurrentTime(),
-                                      position, juce::Time::getCurrentTime(), 1, false);
-        card->mouseUp (event);
-        settle (200);
-        return true;
-    };
-
-    // OSC's tab for an oscillator, clicked (UI review 6: one oscillator at
-    // a time on OSC).
-    const auto selectOscTab = [&editor] (int osc)
-    {
-        std::vector<StateTabs*> rows;
-        findAll<StateTabs> (*editor, rows);
-        for (auto* tabs : rows)
-            for (int i = 0; i < tabs->getNumItems(); ++i)
-                if (tabs->getItem (i).name == "OSC " + juce::String (osc + 1) && tabs->onSelect != nullptr
-                    && (dynamic_cast<OscPicker*> (tabs) == nullptr || tabs->getName() == "OSC tabs"))
-                {
-                    tabs->setSelected (i);
-                    tabs->onSelect (i);
-                    settle (200);
-                    return true;
-                }
-        return false;
-    };
 
     // Pages inside a tab: MATRIX is its own tab, and the scope opens over any page.
     pages->showPage ("MATRIX");
@@ -2010,7 +1943,11 @@ int runUiTests()
     expect (pages->isScopeOpen(), "the scope panel opens");
     pages->setScopeOpen (false);
     expect (! pages->isScopeOpen(), "the scope panel closes");
+}
 
+void uiGroup_KEYS (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // KEYS opens the keyboard and gives the page less room; COMPARE flips
     // to B and lights; the page switch changes the page.
     {
@@ -2332,7 +2269,11 @@ int runUiTests()
         settle (200);
         expect (pages->getCurrentPageId() == "MATRIX", "MATRIX opens in its own tab");
     }
+}
 
+void uiGroup_MATRIX_ROWS (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Matrix shows the preset's routing with the right destination text.
     pages->showPage ("MATRIX");
     settle (300);
@@ -2370,7 +2311,11 @@ int runUiTests()
             }
         }
     }
+}
 
+void uiGroup_DROP_SOURCE (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Dropping a source on a knob routes it, and the knob grows a dot.
     // (BODY folds while its coupling is off: V9-4, so it is switched on.)
     if (auto* resOn = processor.apvts.getParameter ("res_on"))
@@ -2494,10 +2439,18 @@ int runUiTests()
     }
 
     // (The old MODULATION card tests are retired: PLAY now carries its envelope and LFO carousels, covered in PlayPageUiTests.)
+}
 
+void uiGroup_MACRO_NAMES (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Legacy presets get named default macros, and the matrix shows the names.
     {
+        pages->showPage ("MATRIX");
+        settle (300);
         auto showsMacroName = false;
+        std::vector<MatrixRow*> rows;
+        findAll<MatrixRow> (*editor, rows);
 
         for (auto* row : rows)
         {
@@ -2510,7 +2463,11 @@ int runUiTests()
 
         expect (showsMacroName, "matrix source shows the macro's name alone ('TONE', review 9 I9-8)");
     }
+}
 
+void uiGroup_ENVLFO_PAGES (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // ENV/LFO: every envelope has a card, and picking one shows its controls.
     pages->showPage ("ENV/LFO");
     settle (300);
@@ -2522,7 +2479,7 @@ int runUiTests()
             envCards->onSelect (3);
             settle (100);
 
-            knobs.clear();
+            std::vector<KnobControl*> knobs;
             findAll<KnobControl> (*page, knobs);
             auto modAttackShown = false, ampAttackShown = false;
 
@@ -2712,7 +2669,11 @@ int runUiTests()
             expect (false, "ENV/LFO shows the amp envelope display");
         }
     }
+}
 
+void uiGroup_MAIN_OSC (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // MAIN shows OSC 1-3 by default, and only those; added ones get the same
     // full card, with the mode's own knobs.
     {
@@ -2773,7 +2734,6 @@ int runUiTests()
                                                                  + level1->getBoundsInParent().toString() + " / " + level3->getBoundsInParent().toString() + "; "
                                                                  + juce::String (level1->labelBlockHeight()) + " " + juce::String (level3->labelBlockHeight()) + " "
                                                                  + juce::String (level1->getNameLabel().getFont().getHeight()) + " " + juce::String (level3->getNameLabel().getFont().getHeight()) + ")" : juce::String()));
-            if (only == "STRIPS") return uiFailures == 0 ? 0 : 1; // (a quick loop for this check)
         }
 
         for (int osc = 3; osc < OscillatorIds::count; ++osc)
@@ -2815,7 +2775,11 @@ int runUiTests()
         settle (300);
         expect (! shownOnMain ("osc4_level"), "removing OSC 4 takes its card off MAIN");
     }
+}
 
+void uiGroup_FX_QUICK_ADD (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // An empty FX rack offers one-click effects.
     {
         for (int slot = 1; slot <= IlanaSynthAudioProcessor::numFxSlots; ++slot)
@@ -2906,7 +2870,11 @@ int runUiTests()
         expect (! awPrefix && fxTypeName (30) == "Airwindows (all)" && fxTypeName (35) == "Echoes",
                 "every effect has a library name, none starts with AW, the catch-all is \"Airwindows (all)\"");
     }
+}
 
+void uiGroup_FX_CARDS (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // FX cards (UI review 4, batch D): sized to their controls, a display
     // per family, one MIX, the header's solo / band / SLOT BLEND.
     {
@@ -3469,7 +3437,11 @@ int runUiTests()
         processor.loadFactoryPreset (neuroWobble);
         settle (300);
     }
+}
 
+void uiGroup_M5_PAGES (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // M5/M6/M6b pages.
     {
         const auto visibleKnob = [&] (const juce::String& id)
@@ -4361,7 +4333,11 @@ int runUiTests()
             slot60 = slot60 || (row->isVisible() && row->getSlotIndex() == 59);
         expect (matrixRows.size() == (size_t) Mod::maxSlots && slot60, "the matrix page has 64 rows and shows slot 60");
     }
+}
 
+void uiGroup_NEXT_PRESET (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Header: next steps to the following preset and the display follows.
     std::vector<IconButton*> buttons;
     findAll<IconButton> (*editor, buttons);
@@ -4384,7 +4360,11 @@ int runUiTests()
                         + following + "')");
         }
     }
+}
 
+void uiGroup_UNDO_DRAWN (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 4 (V1, S1): drawn data (LFO curves, remaps, clips) is undone
     // one gesture at a time, EDITED sees it, and a load over an edited patch
     // asks once.
@@ -4440,6 +4420,8 @@ int runUiTests()
         }
 
         // A clip note: one step, and EDITED follows it (no parameter changes).
+        std::vector<IconButton*> buttons;
+        findAll<IconButton> (*editor, buttons);
         auto* confirm = findChild<ConfirmOverlay> (*editor);
         IconButton* nextButton = nullptr;
         for (auto* button : buttons)
@@ -4570,7 +4552,11 @@ int runUiTests()
             expect (false, "the editor has the confirm overlay and the next button");
         }
     }
+}
 
+void uiGroup_PIANO_ROLL (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 4 (S9): the clip piano roll's grid menu, velocity lane,
     // selection and copy / paste / duplicate / nudge keys, each edit one
     // undo step. A 400 x 200 roll on a 2-bar clip, reached through its own
@@ -4941,7 +4927,11 @@ int runUiTests()
         processor.loadFactoryPreset (0);
         settle (100);
     }
+}
 
+void uiGroup_INIT_MODULES (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Init puts the modules back to two oscillators and three envelopes and LFOs, and forgets the old patch's
     // macro CCs and drawn LFO shapes.
     {
@@ -4958,7 +4948,11 @@ int runUiTests()
         expect (std::abs (processor.getLfoCustomPoint (0, 3) - 0.9f) > 0.1f && processor.getMacroCc (0) == 20,
                 "Init resets drawn LFO shapes and macro CCs");
     }
+}
 
+void uiGroup_INIT_STARTERS (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // M7.0: on Init, a matrix starter adds its routing and an FX quick-add
     // fills the first slot.
     {
@@ -5011,7 +5005,11 @@ int runUiTests()
         processor.loadFactoryPreset (0);
         settle (200);
     }
+}
 
+void uiGroup_GENERATIVE (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // M7.1: the Generative card switches between ARP, EUCLID and PROB SEQ.
     {
         pages->showPage ("ARP/SEQ");
@@ -5348,9 +5346,14 @@ int runUiTests()
             engineTabs->setSelected (0, true);
         }
     }
+}
 
+void uiGroup_LFO_CARD (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // M8.1: the LFO card for a simulated shape.
     {
+        processor.loadFactoryPreset (0); // (Init: the patch the checks below were written on)
         const auto knobFor = [&editor] (const juce::String& id) -> KnobControl*
         {
             std::vector<KnobControl*> knobs;
@@ -5554,7 +5557,11 @@ int runUiTests()
             expect (shapeParameter != nullptr && clash.isEmpty(), "every LFO shape has its own name in the SHAPE list (" + clash + ")");
         }
     }
+}
 
+void uiGroup_MSEG_CARD (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 8, I8-4 / S8-5 / V8-2: one MSEG. UI review 9, I9-2: an old
     // patch that routes a looping MSEG module loads with it drawn on an LFO
     // (SHAPE > MSEG, the same points and RATE) and its routes moved there, so
@@ -5646,7 +5653,11 @@ int runUiTests()
         processor.loadFactoryPreset (neuroWobble);
         settle (300);
     }
+}
 
+void uiGroup_VECTOR_PAGE (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // M8.5: the VECTOR page has the pad (EVOLVE moved onto the macro card,
     // and VECTOR X / Y live in the source bar only: review 8, I8-13/14).
     {
@@ -5786,7 +5797,27 @@ int runUiTests()
             expect (false, "the macro strip and its card exist");
         }
     }
+}
 
+// Bounces the patch into OSC 2 (which turns it to Sample mode) and shows OSC 2's tab.
+void uiBounceIntoOsc2 (UiCtx& ctx)
+{
+    auto& processor = ctx.processor;
+    IlanaSynthAudioProcessor::BounceRequest request;
+    request.targetOsc = 1;
+    request.holdSeconds = 0.5;
+    request.tailSeconds = 0.5;
+    request.muteOthers = false;
+    processor.startBounce (request);
+    for (int i = 0; i < 300 && processor.getBounceState() == IlanaSynthAudioProcessor::BounceState::Rendering; ++i)
+        settle (50);
+    settle (300);
+    uiSelectOscTab (ctx, 1);
+}
+
+void uiGroup_BOUNCE (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // M8.6: BOUNCE on every oscillator card; a bounce turns the card to
     // Sample mode.
     {
@@ -5799,16 +5830,7 @@ int runUiTests()
             bounces += button->getButtonText() == "RESAMPLE" && visibleInTree (button) ? 1 : 0;
         expect (bounces >= 1, "the switched-on oscillator cards have RESAMPLE buttons (" + juce::String (bounces) + ")");
 
-        IlanaSynthAudioProcessor::BounceRequest request;
-        request.targetOsc = 1;
-        request.holdSeconds = 0.5;
-        request.tailSeconds = 0.5;
-        request.muteOthers = false;
-        processor.startBounce (request);
-        for (int i = 0; i < 300 && processor.getBounceState() == IlanaSynthAudioProcessor::BounceState::Rendering; ++i)
-            settle (50);
-        settle (300);
-        selectOscTab (1);
+        uiBounceIntoOsc2 (ctx);
         std::vector<KnobControl*> knobs;
         findAll<KnobControl> (*editor, knobs);
         auto sampleShown = false;
@@ -5818,7 +5840,11 @@ int runUiTests()
                 "a bounce puts OSC 2 in Sample mode with the sample controls showing (state "
                     + juce::String ((int) processor.getBounceState()) + ", sample knobs " + (sampleShown ? "shown" : "hidden") + ")");
     }
+}
 
+void uiGroup_WARP2 (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // WARP 2 as FM / Ring / FM Noise: the wave display draws each one (pictures with ILANA_UITEST_SHOTS).
     {
         selectOscTab (0);
@@ -5876,9 +5902,20 @@ int runUiTests()
             settle (150);
         }
     }
+}
 
+void uiGroup_SAMPLE_ZOOM (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Step 30: the sample display zooms, and a typed position sets START / END.
     {
+        // (Needs OSC 2 in Sample mode: BOUNCE leaves it so; alone, this bounces it first.)
+        if (processor.getBounceState() != IlanaSynthAudioProcessor::BounceState::Done)
+        {
+            pages->showPage ("OSC");
+            settle (200);
+            uiBounceIntoOsc2 (ctx);
+        }
         std::vector<WaveDisplay*> waves;
         findAll<WaveDisplay> (*editor, waves);
         WaveDisplay* wave = nullptr;
@@ -6004,7 +6041,11 @@ int runUiTests()
             set ("osc2_sample_loop", 0.0f);
         }
     }
+}
 
+void uiGroup_PHYSICAL (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // The string has one editor, its oscillator's card (the PHYSICAL tab
     // folded in, 2026-10-10): every control of the physical list is on the
     // card, in its order, with the moving string in the well; the body is
@@ -6131,19 +6172,11 @@ int runUiTests()
             settle (200);
         }
     }
+}
 
-    // (Plain-value parameter access for the review-6 FILTER checks below.)
-    const auto setParam = [&processor] (const juce::String& id, float plain)
-    {
-        if (auto* parameter = processor.apvts.getParameter (id))
-            parameter->setValueNotifyingHost (parameter->convertTo0to1 (plain));
-    };
-    const auto readParam = [&processor] (const juce::String& id)
-    {
-        const auto* value = processor.apvts.getRawParameterValue (id);
-        return value != nullptr ? value->load() : 0.0f;
-    };
-
+void uiGroup_FILTER_PICKERS (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 6 (V5-17, S5-12, S6-20): the filter type is one compact
     // picker per filter (no 12-button grids), every model once in its menu,
     // the analogue models under ANALOG, and arrows that step through it as
@@ -6193,7 +6226,11 @@ int runUiTests()
             expect (juce::roundToInt (readParam ("f1_type")) == before, "undo brings the filter type back");
         }
     }
+}
 
+void uiGroup_WEST_CARD (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 6 (I6-15, I6-16): WEST is its own card, shown beside Filter 2
     // (not a hidden tab); with PLACE Replace Filter 2, Filter 2's card dims
     // and the graph and flow drop Filter 2.
@@ -6234,7 +6271,11 @@ int runUiTests()
         expect (litBefore && dimmed && markerFor2 == 0 && f2Cutoff->getAlpha() > 0.99f,
                 "WEST in Filter 2's place dims Filter 2's card and the graph stops offering Filter 2's marker");
     }
+}
 
+void uiGroup_WEST_BODY (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Review 14 (I14-5, V14-12): WEST and BODY open together (WEST on shows
     // BODY's knobs too, dimmed, so no hole sits beside it), and Filter 2 has
     // a switch in its header that parks CUTOFF at the top and brings it back.
@@ -6280,7 +6321,11 @@ int runUiTests()
         setParam ("f2_cutoff", 20000.0f);
         settle (200);
     }
+}
 
+void uiGroup_FILTER_MARKERS (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 6 (V6-18, S6-21): the graph's markers sit on their filter's
     // response, 8 px inside the plot: Init's two filters, open at 20 kHz,
     // are high on the right (not in the bottom corner) and fanned apart.
@@ -6317,7 +6362,11 @@ int runUiTests()
         setParam ("filters_parallel", 0.0f);
         settle (200);
     }
+}
 
+void uiGroup_SIGNAL_FLOW (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 6 (S6-16): in SIGNAL FLOW an oscillator with OUT off is an
     // FM modulator, not a source into the filters (checked through its
     // tooltip, which names what it modulates).
@@ -6347,7 +6396,11 @@ int runUiTests()
         processor.loadFactoryPreset (0);
         settle (200);
     }
+}
 
+void uiGroup_REVIEW1 (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Knobs, chips, the filter graph, the browser and SUB + NOISE (UI review 1 fixes).
     {
         const auto makeEvent = [] (juce::Component& component, juce::Point<float> position, bool dragged)
@@ -7718,7 +7771,11 @@ int runUiTests()
             expect (strips == 1, "the header shows one live waveform strip");
         }
     }
+}
 
+void uiGroup_MOD_RINGS (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Modulation rings: every knob on every page that drives a destination
     // shows that destination's live depth. Each destination is routed from a
     // macro at full travel, a note is played, and the depth the ring reads
@@ -7768,7 +7825,11 @@ int runUiTests()
         if (juce::SystemStats::getEnvironmentVariable ("ILANA_RING_REPORT", "").isNotEmpty())
             std::cout << "knobs without a ring: " << ringless.joinIntoString (", ") << std::endl;
     }
+}
 
+void uiGroup_REVIEW4C (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 4, batch C (V4, V10, V12, V29, S5, S7, S19, S21, S22):
     // LFOs and envelopes.
     {
@@ -8566,7 +8627,11 @@ int runUiTests()
             expect (lit && ! display.trailIsLit(), "the envelope's trail lights with a note and has died away (no repaints asked) once it is over");
         }
     }
+}
 
+void uiGroup_REVIEW4E (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 4, batch E: oscillators, filter, PLAY.
     {
         const auto setParam = [&processor] (const juce::String& id, float plain)
@@ -8953,30 +9018,84 @@ int runUiTests()
         }
         loadNamed ("Neuro Wobble");
     }
+}
 
+void uiGroup_MOD (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 6, P1: rings, badges, the macro strip and the matrix.
     runModulationTests (processor, *pages);
+}
 
+void uiGroup_SMALL (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Batch H (UI review 4: V19, V27, V28, S17, S20, S23, S25).
     runSmallThingsTests (processor, *pages);
+}
 
+void uiGroup_T2 (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 9, T2: voice, SEQ, matrix, browser, macros.
     runReview9T2Tests (processor, *pages);
+}
 
+void uiGroup_PLAYOSC7 (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 7, Q4: PLAY, OSC, PHYSICAL, VECTOR.
     runPlayOscReview7Tests (processor, *pages);
+}
 
+void uiGroup_FF (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 7, FILTER and FX.
     runFilterFxTests (processor, *pages);
+}
 
+void uiGroup_MOD8 (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 8, R4: modulation.
     runModulationReview8Tests (processor, *pages);
+}
+
+void uiGroup_L8 (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 8, R5: PLAY / OSC / PHYSICAL / VECTOR / FILTER / FX layout.
     runLayoutReview8Tests (processor, *pages);
+}
+
+void uiGroup_T1 (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     runLayoutReview9Tests (processor, *pages);
+}
+
+void uiGroup_U1 (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     runLayoutReview10Tests (processor, *pages);
+}
+
+void uiGroup_OV (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     runOscCardOverlapTests (processor, *pages);
+}
+
+void uiGroup_PLAY (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     runPlayPageTests (processor, *pages);
+}
+
+void uiGroup_VECTOR_FIT (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 29: switching VECTOR on fits the pad's shape to the patch (one corner per oscillator), once.
     {
         processor.loadFactoryPreset (processor.getFactoryPresetNames().indexOf ("Neuro Wobble")); // (three oscillators)
@@ -9046,6 +9165,11 @@ int runUiTests()
         processor.loadFactoryPreset (0);
         settle (100);
     }
+}
+
+void uiGroup_PLAY_LFO_DRAG (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 29, L5: PLAY's LFO graph takes a drag, as the pop-up's does (a preset wave becomes a curve).
     {
         processor.setRevealed (IlanaSynthAudioProcessor::Module::Lfo, 0, true);
@@ -9088,6 +9212,11 @@ int runUiTests()
         processor.loadFactoryPreset (0);
         settle (100);
     }
+}
+
+void uiGroup_ECHO_SLIDER (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Knobs jumped back a frame mid-drag (2026-11-12): a VST3 host (Live)
     // echoes each edit back through the audio thread a block late; the slider
     // drew that older value. The knob's attachment now ignores the parameter
@@ -9132,6 +9261,11 @@ int runUiTests()
         parameter->setValueNotifyingHost (original);
         settle (30);
     }
+}
+
+void uiGroup_ECHO_GRAPH (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // The echo also stepped the parameter itself back (2026-11-13, ilana's
     // recording: "stuttery when moving the knob"): the filter graph and the
     // sound read the parameter, not the knob. ParameterEchoGuard puts the
@@ -9170,6 +9304,11 @@ int runUiTests()
         parameter->setValueNotifyingHost (original);
         settle ((int) ParameterEchoGuard::holdMs + 50);
     }
+}
+
+void uiGroup_HELD_GRAPH (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // The filter graph still stuttered (2026-11-14, ilana: "still happening but
     // only in the illustration", playing or stopped): it drew the parameter,
     // which an echo can still step back. It now draws a held knob's value (as
@@ -9198,6 +9337,11 @@ int runUiTests()
         parameter->setValueNotifyingHost (original);
         settle (30);
     }
+}
+
+void uiGroup_MODAL_SNAP (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // The modal SIZE / SCALE knobs snap to real instruments (2026-11-12, ilana: "snap to the real instrument
     // sizes ... holding alt while draggin"): a drag that comes within a few pixels of a ring mark lands on its
     // exact value; Alt held passes it.
@@ -9243,29 +9387,93 @@ int runUiTests()
         drag (violaPixels - 2.0f, {});
         expect (std::abs (knob.getValue() - 1.17) > 0.005, "snap marks: a knob without marks never snaps");
     }
+}
+
+void uiGroup_R6 (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 8, R6: text fitting, header, browser, SEQ, dialogs.
     runGlobalReview8Tests (processor, *pages);
+}
+
+void uiGroup_R31C (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 31 (builder C): MATRIX, + ASSIGN, the dock, the wheels.
     runReview31MatrixTests (processor, *pages);
+}
+
+void uiGroup_DD (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Step 18: every drop-down select opens its list, click after click.
     runDropdownTests (processor, *pages);
+}
+
+void uiGroup_PG (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Step A: the cable view.
     runPatchCableTests (processor);
+}
+
+void uiGroup_OR (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Step 16: the oscillators' ROUTING cables.
     runOscRoutingUiTests (processor, *pages);
+}
+
+void uiGroup_OS (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Duplicate, drag to reorder, x to remove (2026-10-26).
     runOscSlotUiTests (processor, *pages);
+}
+
+void uiGroup_HR (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Bug hunt 2026-10-31: every visible control takes a click at its centre, at 100 % and 175 %.
     runHitReachTests (processor, *pages);
+}
+
+void uiGroup_WF (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // The RC 1.0 workflow fixes (2026-10-28).
     runWorkflowUiTests (processor, *pages);
+}
+
+void uiGroup_FL (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // The PATCH tab's LFO boxes.
     runFxLfoUiTests (processor, *pages);
+}
+
+void uiGroup_FC (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     runFxCarouselUiTests (processor, *pages);
+}
+
+void uiGroup_OP8 (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // UI review 8, R1: operator editors and names.
     runOperatorReview8Tests (processor, *pages);
-    runOscTypeTests (processor, *pages);
+}
 
+void uiGroup_OT (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
+    runOscTypeTests (processor, *pages);
+}
+
+void uiGroup_LAF (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // Design sweep: every pop-up draws in the design's look. A menu shown on
     // the desktop never asks its target for a look, nor does an AlertWindow
     // with no owner or JUCE's file browser: they use the process default,
@@ -9313,7 +9521,11 @@ int runUiTests()
         expect (dynamic_cast<IlanaLookAndFeel*> (&probe.getLookAndFeel()) != nullptr,
                 "sweep: a component outside the editor (a dialog's, a file browser's) draws in the design's look");
     }
+}
 
+void uiGroup_DOCK_CHIP (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // A dock chip's click opens its source's editor over the page (pinned,
     // the knobs it drives lit); a second click closes it.
     {
@@ -9340,7 +9552,11 @@ int runUiTests()
         else
             expect (false, "the dock's chips open their source's editor");
     }
+}
 
+void uiGroup_OP_LFO (UiCtx& ctx)
+{
+    UI_GROUP_PRELUDE
     // An LFO's pop-up: its SHAPE sits in the title row, but the cross and the
     // rest of that row (the drag strip) still take the mouse (ilana, 2026-10-30:
     // "i cant close the lfo thing", "cant drag it either").
@@ -9392,12 +9608,161 @@ int runUiTests()
         else
             expect (false, "the dock has an LFO chip");
     }
+}
 
-    pages->setAsksBeforeReplacingEdits (askedBefore);
-    editor.reset();
-    expect (dynamic_cast<IlanaLookAndFeel*> (&juce::LookAndFeel::getDefaultLookAndFeel()) == nullptr,
-            "sweep: with no editor open the default look is JUCE's own again");
-    std::cout << (uiFailures == 0 ? "UI TESTS PASSED" : "UI TESTS FAILED") << " (" << uiFailures << " failures)" << std::endl;
+
+struct UiGroup
+{
+    const char* id;
+    void (*run) (UiCtx&);
+};
+
+const UiGroup uiGroups[] = {
+
+    { "BASICS", uiGroup_BASICS },
+    { "TABS", uiGroup_TABS },
+    { "KEYS", uiGroup_KEYS },
+    { "MATRIX_ROWS", uiGroup_MATRIX_ROWS },
+    { "DROP_SOURCE", uiGroup_DROP_SOURCE },
+    { "MACRO_NAMES", uiGroup_MACRO_NAMES },
+    { "ENVLFO_PAGES", uiGroup_ENVLFO_PAGES },
+    { "MAIN_OSC", uiGroup_MAIN_OSC },
+    { "FX_QUICK_ADD", uiGroup_FX_QUICK_ADD },
+    { "FX_CARDS", uiGroup_FX_CARDS },
+    { "M5_PAGES", uiGroup_M5_PAGES },
+    { "NEXT_PRESET", uiGroup_NEXT_PRESET },
+    { "UNDO_DRAWN", uiGroup_UNDO_DRAWN },
+    { "PIANO_ROLL", uiGroup_PIANO_ROLL },
+    { "INIT_MODULES", uiGroup_INIT_MODULES },
+    { "INIT_STARTERS", uiGroup_INIT_STARTERS },
+    { "GENERATIVE", uiGroup_GENERATIVE },
+    { "LFO_CARD", uiGroup_LFO_CARD },
+    { "MSEG_CARD", uiGroup_MSEG_CARD },
+    { "VECTOR_PAGE", uiGroup_VECTOR_PAGE },
+    { "BOUNCE", uiGroup_BOUNCE },
+    { "WARP2", uiGroup_WARP2 },
+    { "SAMPLE_ZOOM", uiGroup_SAMPLE_ZOOM },
+    { "PHYSICAL", uiGroup_PHYSICAL },
+    { "FILTER_PICKERS", uiGroup_FILTER_PICKERS },
+    { "WEST_CARD", uiGroup_WEST_CARD },
+    { "WEST_BODY", uiGroup_WEST_BODY },
+    { "FILTER_MARKERS", uiGroup_FILTER_MARKERS },
+    { "SIGNAL_FLOW", uiGroup_SIGNAL_FLOW },
+    { "REVIEW1", uiGroup_REVIEW1 },
+    { "MOD_RINGS", uiGroup_MOD_RINGS },
+    { "REVIEW4C", uiGroup_REVIEW4C },
+    { "REVIEW4E", uiGroup_REVIEW4E },
+    { "MOD", uiGroup_MOD },
+    { "SMALL", uiGroup_SMALL },
+    { "T2", uiGroup_T2 },
+    { "PLAYOSC7", uiGroup_PLAYOSC7 },
+    { "FF", uiGroup_FF },
+    { "MOD8", uiGroup_MOD8 },
+    { "L8", uiGroup_L8 },
+    { "T1", uiGroup_T1 },
+    { "U1", uiGroup_U1 },
+    { "OV", uiGroup_OV },
+    { "PLAY", uiGroup_PLAY },
+    { "VECTOR_FIT", uiGroup_VECTOR_FIT },
+    { "PLAY_LFO_DRAG", uiGroup_PLAY_LFO_DRAG },
+    { "ECHO_SLIDER", uiGroup_ECHO_SLIDER },
+    { "ECHO_GRAPH", uiGroup_ECHO_GRAPH },
+    { "HELD_GRAPH", uiGroup_HELD_GRAPH },
+    { "MODAL_SNAP", uiGroup_MODAL_SNAP },
+    { "R6", uiGroup_R6 },
+    { "R31C", uiGroup_R31C },
+    { "DD", uiGroup_DD },
+    { "PG", uiGroup_PG },
+    { "OR", uiGroup_OR },
+    { "OS", uiGroup_OS },
+    { "HR", uiGroup_HR },
+    { "WF", uiGroup_WF },
+    { "FL", uiGroup_FL },
+    { "FC", uiGroup_FC },
+    { "OP8", uiGroup_OP8 },
+    { "OT", uiGroup_OT },
+    { "LAF", uiGroup_LAF },
+    { "DOCK_CHIP", uiGroup_DOCK_CHIP },
+    { "OP_LFO", uiGroup_OP_LFO },
+};
+
+// The ids the old ILANA_UITEST_ONLY understood that were more than one group.
+juce::StringArray uiExpandAlias (const juce::String& id)
+{
+    if (id == "OSC")
+        return { "OT", "L8", "T1", "U1", "OV", "R6" };
+    if (id == "STRIPS")
+        return { "MAIN_OSC" };
+    return { id };
+}
+
+int runUiTests (const juce::StringArray& args)
+{
+    if (args.contains ("--list"))
+    {
+        for (const auto& group : uiGroups)
+            std::cout << group.id << std::endl;
+        return 0;
+    }
+
+    // The FILTER page's SIGNAL FLOW opens on hover or click: the tests hold it open.
+    filterFlowForcedOpen() = true;
+
+    juce::StringArray only;
+    const auto onlyIndex = args.indexOf ("--only");
+    const auto onlyText = onlyIndex >= 0 && onlyIndex + 1 < args.size() ? args[onlyIndex + 1]
+                                                                          : juce::SystemStats::getEnvironmentVariable ("ILANA_UITEST_ONLY", {});
+    for (const auto& token : juce::StringArray::fromTokens (onlyText, ",", ""))
+        if (token.trim().isNotEmpty())
+            only.addArray (uiExpandAlias (token.trim()));
+
+    for (const auto& id : only)
+    {
+        auto known = false;
+        for (const auto& group : uiGroups)
+            known = known || id == group.id;
+        if (! known)
+        {
+            std::cout << "unknown UI test group " << id << " (--uitest --list shows them)" << std::endl;
+            return 2;
+        }
+    }
+
+    const auto runGroup = [] (const UiGroup& group, UiCtx& ctx)
+    {
+        const auto failuresBefore = uiFailures;
+        const auto checksBefore = uiChecks;
+        const auto started = juce::Time::getMillisecondCounterHiRes();
+        group.run (ctx);
+        std::cout << "GROUP " << group.id << ": " << (uiChecks - checksBefore) << " checks, "
+                  << (uiFailures - failuresBefore) << " failed, "
+                  << juce::String ((juce::Time::getMillisecondCounterHiRes() - started) / 1000.0, 1) << " s" << std::endl;
+    };
+
+    if (only.isEmpty())
+    {
+        UiCtx ctx;
+        for (const auto& group : uiGroups)
+            runGroup (group, ctx);
+
+        ctx.closeEditor();
+        expect (dynamic_cast<IlanaLookAndFeel*> (&juce::LookAndFeel::getDefaultLookAndFeel()) == nullptr,
+                "sweep: with no editor open the default look is JUCE's own again");
+    }
+    else
+    {
+        // Each named group on its own processor and editor.
+        for (const auto& id : only)
+            for (const auto& group : uiGroups)
+                if (id == group.id)
+                {
+                    UiCtx ctx;
+                    runGroup (group, ctx);
+                    ctx.closeEditor();
+                }
+    }
+
+    std::cout << "UI TESTS " << (uiFailures == 0 ? "PASSED" : "FAILED") << " (" << uiFailures << " failures, " << uiChecks << " checks)" << std::endl;
     return uiFailures == 0 ? 0 : 1;
 }
 } // namespace
@@ -11778,7 +12143,12 @@ int main (int argc, char** argv)
     }
 
     if (juce::String (argv[1]) == "--uitest")
-        return runUiTests();
+    {
+        juce::StringArray args;
+        for (int i = 2; i < argc; ++i)
+            args.add (argv[i]);
+        return runUiTests (args);
+    }
 #if ILANA_VULKAN
     if (juce::String (argv[1]) == "--vulkanlive" && argc > 2)
         return runVulkanLive (juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]));
