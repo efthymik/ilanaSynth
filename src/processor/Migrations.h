@@ -7,7 +7,7 @@
 // The migrations that keep old patches sounding as they were heard: one
 // table, run in its order by both loads (applyFullState for a saved state,
 // loadFactoryPreset for a factory recipe). To add a migration: one row at the
-// end of table() (src/processor/State.cpp) and its stamp's version in
+// end of table() (src/processor/Migrations.cpp) and its stamp's version in
 // savedSchemas (State.cpp). See docs/ARCHITECTURE.md, "Migrations".
 namespace Migrations
 {

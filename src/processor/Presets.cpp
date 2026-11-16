@@ -1121,49 +1121,6 @@ void IlanaSynthAudioProcessor::moveLevelToTrim (std::vector<std::pair<juce::Stri
     values.push_back ({ "output_trim", level });
 }
 
-int IlanaSynthAudioProcessor::migrateBodyLevel (const std::function<float (const juce::String&, float)>& get,
-                                               const std::function<void (const juce::String&, float)>& set)
-{
-    // (Classic, body_type 0, keeps its own resonator and never changed.)
-    if (juce::roundToInt (get ("body_type", 0.0f)) == 0 || get ("body_legacy_level", 0.0f) > 0.5f)
-        return 0;
-    set ("body_legacy_level", 1.0f);
-    return 1;
-}
-
-int IlanaSynthAudioProcessor::migrateGlideTime (const std::function<float (const juce::String&, float)>& get,
-                                               const std::function<void (const juce::String&, float)>& set)
-{
-    constexpr auto factor = 16.0f;  // the old glide's slowness: one coefficient step per 16 samples
-    constexpr auto maxGlide = 2.0f; // the knob's range (ParameterLayout)
-    constexpr auto skew = 0.13f;    // and its skew
-    auto changed = 0;
-
-    // At or under 1 ms GLIDE is off (Voice::startNote); those stay off.
-    if (const auto glide = get ("glide", 0.0f); glide > 0.001f)
-    {
-        set ("glide", juce::jmin (glide * factor, maxGlide));
-        ++changed;
-    }
-
-    // A route adds to the knob's skewed position, (seconds / 2) ^ skew; there
-    // x16 in seconds is x16 ^ skew, so the routes and macros reach as far.
-    const auto depthFactor = std::pow (factor, skew);
-    const auto glideDestination = Mod::destinationForParamId ("glide");
-    for (int slot = 1; slot <= Mod::maxSlots && glideDestination > 0; ++slot)
-    {
-        const auto prefix = "mod" + juce::String (slot);
-        if (juce::roundToInt (get (prefix + "_dst", 0.0f)) != glideDestination)
-            continue;
-        if (const auto depth = get (prefix + "_amt", 0.0f); depth != 0.0f)
-        {
-            set (prefix + "_amt", juce::jlimit (-1.0f, 1.0f, depth * depthFactor));
-            ++changed;
-        }
-    }
-    return changed;
-}
-
 void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
 {
     ++dataEpoch; // what the editor draws changes
