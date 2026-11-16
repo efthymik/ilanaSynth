@@ -58,8 +58,7 @@
 
 // The pages. Each header declares its page (its member functions are in the
 // .cpp of the same name) and includes what it uses (tools/check_headers.sh),
-// so the order here does not matter. FmInputPages.h is still header-only, in
-// this file's anonymous namespace.
+// so the order here does not matter.
 #include "gui/StateTabs.h"
 #include "gui/pages/PageHelpers.h"
 #include "gui/PhysicalApplies.h"

@@ -151,12 +151,13 @@ set(ILANA_ENGINE_SOURCES
 list(TRANSFORM ILANA_ENGINE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 
 # The editor, for every target that builds it (the plugins, ilanaSnapshot,
-# ilanaFxTest): PluginEditor.cpp (the shell, and FmPage / InputPage still in
-# its anonymous namespace) and the pages, each in its own .cpp (ARCH-8).
+# ilanaFxTest): PluginEditor.cpp (the shell) and the pages, each in its own
+# .cpp (ARCH-8).
 set(ILANA_GUI_SOURCES
     src/PluginEditor.cpp
     src/gui/pages/EnvLfoPages.cpp
     src/gui/pages/FilterVectorPhysicalPages.cpp
+    src/gui/pages/FmInputPages.cpp
     src/gui/pages/FxPage.cpp
     src/gui/pages/MatrixPage.cpp
     src/gui/pages/ModSourcePanel.cpp
