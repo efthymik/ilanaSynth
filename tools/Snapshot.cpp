@@ -244,6 +244,7 @@ void expect (bool condition, const juce::String& message)
 #include "OscSlotUiTests.h"
 #include "WorkflowUiTests.h"
 #include "FxLfoUiTests.h"
+#include "KnobGeometryUiTests.h"
 #include "FxCarouselUiTests.h"
 #include "LayoutUiTests10.h"
 #include "OperatorUiTests.h"
@@ -9261,6 +9262,8 @@ int runUiTests()
     runWorkflowUiTests (processor, *pages);
     // The PATCH tab's LFO boxes.
     runFxLfoUiTests (processor, *pages);
+    // ARCH-10: the knob geometry table.
+    runKnobGeometryUiTests (processor, *pages);
     runFxCarouselUiTests (processor, *pages);
     // UI review 8, R1: operator editors and names.
     runOperatorReview8Tests (processor, *pages);
