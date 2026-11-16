@@ -1,11 +1,12 @@
 # Current handoff
 
-Updated 2026-11-14. The source tree is the source of truth. Work on `main` (cloud sessions work on their assigned branch and open a PR); Claude and Codex take turns and should not edit at the same time.
+Updated 2026-11-16. The source tree is the source of truth. Work on `main` (cloud sessions work on their assigned branch and open a PR); Claude and Codex take turns and should not edit at the same time.
 
 **Keep this file short** (under about 80 lines): current state, next step, open issues and the rules below. Every session reads it first, so each long note costs every later session. Put a finished piece of work here as ONE line (what, PR, where its notes are); the full write-up goes at the end of [docs/HANDOFF-HISTORY.md](docs/HANDOFF-HISTORY.md). (On 2026-11-06 this file had grown to 290 KB of State notes; they are now in the history file under "State notes from HANDOFF.md".)
 
 ## State
 - Next milestone: RC 1.0 (tagline "El Sinte de Big Ilana Da GOAT"). Feature freeze since 2026-10-13 (UX only).
+- **Polish pass (2026-11-16, branch `claude/project-thread-g52ep9`; ilana: "so EVERYTHING in one PR"):** all 20 items of https://claude.ai/artifact/MKsvGmHVBNJBogbmbcQE2i. Visual: FX last level tag, FM graph tag gaps, SEQ GENERATE menu widths, PATCH opens near 100 %, FM card one knob grid, FM ROUTES stack, VECTOR even corner cells, NOISE spectrum picture, reverb legend. Architecture: engine static libraries per flavour + gate builds only what it runs; `IlanaTheme::Space` tokens + `tools/layout_literal_ratchet.py`; thread checks (`src/ThreadChecks.h`) + Threads section in ARCHITECTURE; migrations in one table (`src/processor/Migrations.cpp`, old-state corpus `tests/old-states/`, `ILANA_OLDSTATE_TEST=1`); hidden FILTER/OSC/MOD pages removed; UI tests as groups (`--uitest --only`, `--list`); `PopupStack`; `KnobRoutingModel` + `computeKnobGeometry`; pages in their own .cpp (`tools/check_headers.sh`). Pictures `/mnt/project-files/ilanasynth/polish-pass/`.
 - **Bug hunt** (2026-11-15, #275, #276): details in the history file.
 - **OP LFO pop-up** (2026-11-14): details in the history file.
 - **Scopes at the display's refresh** (2026-11-14): details in the history file.
