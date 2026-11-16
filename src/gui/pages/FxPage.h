@@ -762,7 +762,9 @@ public:
         layoutStack();
         if (! empty)
         {
-            const auto fits = stackNaturalHeight <= stackArea.getHeight();
+            // (Two pixels over still count as fitting: the view reaches them into the add row's band, so the last level
+            // tag is whole at rest instead of half under the foot's fade: polish pass 1.)
+            const auto fits = stackNaturalHeight <= stackArea.getHeight() + 2;
             availableStackHeight = fits ? stackArea.getHeight() : scrollArea.getHeight();
             stackView.setBounds (fits ? stackArea.withHeight (stackNaturalHeight) : scrollArea);
             layoutStack();
@@ -1668,6 +1670,9 @@ private:
     static constexpr int minDisplayWidth = 150, tapGridHeight = 56;
     static constexpr int splitHeaderHeight = 38, splitInsetLeft = 18, splitInsetRight = 6;
     static constexpr int toolbarHeight = 38, toolbarItemHeight = 24, stackTopMargin = 4, stackFootMargin = 14;
+    // What the rack's content keeps under its last card: the level tag hangs 13 px below it (half a gap, 8 px of tag), so a
+    // rack that scrolls ends with that tag whole, and one that fits by a pixel does not scroll for it (polish pass 1).
+    static constexpr int stackTailMargin = 13;
 
     static int splitKind (int band) { return band >= 1 && band <= 3 ? 1 : (band >= 4 ? 2 : 0); }
 
@@ -1979,7 +1984,7 @@ private:
         // single-line rows (to 88 at most), a long one compresses them (to 64)
         // before the stack scrolls.
         const auto viewHeight = availableStackHeight;
-        auto overhead = stackTopMargin + stackFootMargin + juce::jmax (0, (int) cards.size() - 1) * rowGap;
+        auto overhead = stackTopMargin + stackTailMargin + juce::jmax (0, (int) cards.size() - 1) * rowGap;
         for (const auto& run : runs)
             overhead += run.kind != 0 ? splitHeaderHeight + splitInsetRight : 0;
 
@@ -2112,7 +2117,7 @@ private:
 
         updateModuleDimming();
 
-        stackNaturalHeight = y - rowGap + stackFootMargin;
+        stackNaturalHeight = y - rowGap + stackTailMargin;
         stackRows = rowsPlaced;
         stackContent.setSize (width, juce::jmax (stackNaturalHeight, stackView.getHeight()));
         stackContent.repaint();

@@ -590,7 +590,7 @@ public:
         area.removeFromTop (26);
         area.removeFromBottom (8);
 
-        struct Item { juce::Component* control; float weight; };
+        struct Item { juce::Component* control; float weight; float pixels = 0.0f; };
         // EUCLID's TARGET needs the width of "Trance Gate" (it read "Not..."): EUCLID's own rings take the ARP's
         // ring pitch and SPRAY's rings a little less, so the boxes keep their sizes (UI review 31, item 2; SNAP TO
         // KEY, STRUM and the DIRECTION menus have no slack: their names and values fill them).
@@ -618,15 +618,65 @@ public:
             groups.insert (groups.begin(), items);
         }
         const auto merged = groups.size() == 4;
-        constexpr int gap = 8, padding = 6;
-        auto total = 0.0f;
-        for (const auto& group : groups)
-            for (const auto& item : group)
-                total += item.weight;
+        constexpr int gap = 6, padding = 4;
 
-        // (Capped, so the boxes stay a group at the left rather than spreading over the card.)
+        // Every menu's value reads at one size (polish pass 3): a menu's text area is its width less the arrow, and a
+        // value wider than that is shrunk to fit, so RATE, ROOT and the DIRECTION menus (narrow cells) read small beside
+        // KEY and MODE. Each menu gets the width its longest value needs at the select text size (a very long list is
+        // judged by its first 52 px), taken from the knobs' share.
+        const auto nameFont = juce::Font (IlanaTheme::font (IlanaTheme::TextSize::label, true).withKerningFactor (0.07f));
+        for (auto& group : groups)
+            for (auto& item : group)
+            {
+                if (auto* menu = dynamic_cast<ComboControl*> (item.control))
+                {
+                    const juce::Font font (IlanaTheme::font (IlanaLookAndFeel::selectText));
+                    auto widest = 0.0f;
+                    const auto& box = menu->getComboBox();
+                    for (int i = 0; i < box.getNumItems(); ++i)
+                        widest = juce::jmax (widest, (float) juce::GlyphArrangement::getStringWidth (font, box.getItemText (i)));
+                    item.pixels = juce::jmin (widest, 52.0f) + 23.0f + 3.0f + 6.0f; // (the arrow's 23 px, the label's borders, the cell's 3 px a side)
+                }
+                // (OCTAVES' and SNAP PLAYED's names keep their room too.)
+                else if (item.control == &arpOctaves)
+                    item.pixels = 47.0f;
+                else if (item.control == &genSnap)
+                    item.pixels = (float) juce::GlyphArrangement::getStringWidthInt (nameFont, "SNAP PLAYED") + 6.0f + 4.0f;
+            }
+        // (STRUM's title and its switch need 130 px: its TIME knob takes up what DIRECTION leaves.)
+        {
+            auto& strum = groups[merged ? 2 : 1];
+            strum.back().pixels = juce::jmax (strum.back().pixels, 130.0f - (float) padding * 2.0f - strum.front().pixels);
+        }
         const auto boxCount = (int) groups.size();
-        const auto unit = juce::jmin (118.0f, (float) (area.getWidth() - gap * (boxCount - 1) - padding * 2 * boxCount) / total);
+        const auto available = (float) (area.getWidth() - gap * (boxCount - 1) - padding * 2 * boxCount);
+        std::vector<Item*> flat;
+        for (auto& group : groups)
+            for (auto& item : group)
+                flat.push_back (&item);
+        // A menu keeps its weight's share unless its values need more: those are pinned to their width, the rest share what is left.
+        auto unit = 0.0f;
+        {
+            std::vector<bool> pinned (flat.size(), false);
+            for (auto pass = 0; pass < 8; ++pass)
+            {
+                auto weights = 0.0f, fixed = 0.0f;
+                for (size_t i = 0; i < flat.size(); ++i)
+                    (pinned[i] ? fixed : weights) += pinned[i] ? flat[i]->pixels : flat[i]->weight;
+                unit = (available - fixed) / juce::jmax (0.1f, weights);
+                auto changed = false;
+                for (size_t i = 0; i < flat.size(); ++i)
+                    if (! pinned[i] && flat[i]->pixels > flat[i]->weight * unit)
+                        pinned[i] = true, changed = true;
+                if (! changed)
+                    break;
+            }
+            // (Capped, so the boxes stay a group at the left rather than spreading over the card.)
+            unit = juce::jmin (118.0f, unit);
+            for (size_t i = 0; i < flat.size(); ++i)
+                if (pinned[i])
+                    flat[i]->weight = flat[i]->pixels / unit;
+        }
         std::vector<juce::Rectangle<int>*> boxes { &snapBox, &strumBox, &sprayBox };
         std::vector<juce::Component*> switches { &scaleSwitch, &strumSwitch, &sprayOn };
         if (merged)

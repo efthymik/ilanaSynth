@@ -682,7 +682,8 @@ public:
 private:
     static constexpr int toolbarHeight = 28;
     static constexpr int inspectorHeight = 70;
-    static constexpr float maxZoom = 1.8f, minZoom = 0.5f;
+    // (FIT opens at 100 % at the most: polish pass 4; it was 1.8 x.)
+    static constexpr float minZoom = 0.5f, fitMaxZoom = 1.0f, fitPadX = 60.0f, fitPadY = 90.0f;
     // The 10 px grid: voice columns 160 apart (a 130 px box and 30 px for the
     // cables; R18-1: tighter than the rack's 180, so a whole patch fits the
     // canvas at full size), rows 70 apart (a 50 px box and a 20 px gap).
@@ -1286,27 +1287,32 @@ private:
     {
         if (animated)
             autoFit = true;
-        view.fitContentInto (view.getLocalBounds(), maxZoom, minZoom, 60.0f, 90.0f, 0.05f, animated);
+        view.fitContentInto (view.getLocalBounds(), fitMaxZoom, minZoom, fitPadX, fitPadY, 0.05f, animated);
 
-        // Review 20, R20-1: the fit is limited by the width, so the rows of
-        // the per-note column spread until the graph also fills the height.
-        if (! hasVoice || ! autoFit || stretching || view.getHeight() <= 0)
+        // Review 20, R20-1 (polish pass 4): the fit is limited by the height
+        // or the width. The rows of the per-note column spread (to 1.8 x) when
+        // the width limits, so the graph fills the height; they close up (to
+        // 70 px apart) when the height limits, so the boxes stay as big as
+        // the width allows, 100 % at the most, instead of opening at 70 %.
+        if (! hasVoice || ! autoFit || stretching || view.getHeight() <= 0 || view.getWidth() <= 0)
             return;
         const auto content = view.getContentArea();
-        const auto zoom = view.getTargetZoom();
         const auto bandHeight = 100.0f; // (the per-note band: 40 px above the boxes, 60 below)
-        const auto nodesNow = content.getHeight() - PatchCableView::nodeHeight;
-        if (zoom <= 0.0f || nodesNow <= 1.0f)
+        const auto spreadNow = content.getHeight() - bandHeight - PatchCableView::nodeHeight;
+        if (spreadNow <= 1.0f)
             return;
-        const auto nodesWanted = (float) view.getHeight() * 0.92f / zoom - bandHeight - PatchCableView::nodeHeight;
-        const auto wanted = juce::jlimit (1.0f, 1.8f, rowStretch * nodesWanted / nodesNow);
+        const auto widthZoom = std::floor ((float) view.getWidth() / (content.getWidth() + fitPadX) / 0.05f) * 0.05f;
+        const auto target = juce::jlimit (minZoom, fitMaxZoom, widthZoom);
+        const auto spreadWanted = (float) view.getHeight() / target - fitPadY - bandHeight - PatchCableView::nodeHeight;
+        const auto lowest = 70.0f / rowStepFor (lastSourceCount); // (70 px is a box and a 20 px gap)
+        const auto wanted = juce::jlimit (juce::jmin (1.0f, lowest), 1.8f, rowStretch * spreadWanted / spreadNow);
         if (stepOf (lastSourceCount, wanted) == stepOf (lastSourceCount, rowStretch))
             return;
         rowStretch = wanted;
         stretching = true;
         refresh (true);
         stretching = false;
-        view.fitContentInto (view.getLocalBounds(), maxZoom, minZoom, 60.0f, 90.0f, 0.05f, animated);
+        view.fitContentInto (view.getLocalBounds(), fitMaxZoom, minZoom, fitPadX, fitPadY, 0.05f, animated);
     }
 
     // A cable may not cross the line at VOICES: the per-note boxes feed only
