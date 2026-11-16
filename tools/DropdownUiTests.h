@@ -23,7 +23,7 @@ void runDropdownTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProce
     int tried = 0;
     juce::StringArray stuck;
 
-    for (const char* page : { "MAIN", "VECTOR", "OSC", "FILTER", "ENV/LFO", "MATRIX", "FM", "ARP/SEQ", "FX" })
+    for (const char* page : { "MAIN", "VECTOR", "MATRIX", "FM", "ARP/SEQ", "FX" })
     {
         editor.showPage (page);
         settle (350);
@@ -98,7 +98,7 @@ void runDropdownTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProce
             mode->setValueNotifyingHost (mode->convertTo0to1 (3.0f)); // (granular)
         int boxes = 0;
 
-        for (const char* page : { "OSC", "MAIN" })
+        for (const char* page : { "MAIN" })
         {
             editor.showPage (page);
             settle (350);

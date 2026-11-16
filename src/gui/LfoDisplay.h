@@ -503,7 +503,7 @@ public:
         addBrushItems (menu);
 
         juce::Component::SafePointer<LfoDisplay> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safeThis] (int result)
+        menu.showMenuAsync (IlanaTheme::menuOptions (this), [safeThis] (int result)
         {
             if (safeThis != nullptr && result >= 200 && result < 300)
             {
@@ -1208,7 +1208,7 @@ private:
         menu.addItem (401, "Use 16 steps (Steps shape)");
 
         juce::Component::SafePointer<LfoDisplay> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
+        menu.showMenuAsync (IlanaTheme::menuOptions (this),
                             [safeThis, converting] (int result)
                             {
                                 if (safeThis == nullptr || result == 0)

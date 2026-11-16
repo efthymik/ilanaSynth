@@ -90,11 +90,10 @@ void runGlobalReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudio
                                          + (offenders.isEmpty() ? juce::String (")") : ": " + offenders.joinIntoString (", ") + ")"));
 
         // No "OFF" spelled out away from a switch (I8-20): the FM matrix's
-        // headings and the SIGNAL FLOW's stubs are dimmed instead.
+        // headings are dimmed instead.
         const auto fmPage = sources.getChildFile ("gui/pages/FmInputPages.h").loadFileAsString();
-        const auto flow = sources.getChildFile ("gui/FilterWidgets.h").loadFileAsString();
-        expect (fmPage.isNotEmpty() && ! fmPage.contains ("name + \": OFF\"") && flow.isNotEmpty() && ! flow.contains ("drawText (\"OFF\""),
-                "the FM matrix's headings and the SIGNAL FLOW's stubs don't spell OFF out (dimmed instead)");
+        expect (fmPage.isNotEmpty() && ! fmPage.contains ("name + \": OFF\""),
+                "the FM matrix's headings don't spell OFF out (dimmed instead)");
 
         auto* top = editor.getTopLevelComponent();
         const auto before = top->getBounds();
@@ -492,7 +491,7 @@ void runGlobalReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudio
     // strip is one card, its groups named in colour, no dots). What stays true:
     // an off oscillator says nothing in words and its card dims in place.
     {
-        editor.showPage ("OSC");
+        editor.showPage ("MAIN");
         settle (300);
         std::vector<StateTabs*> rows;
         findAll<StateTabs> (editor, rows);

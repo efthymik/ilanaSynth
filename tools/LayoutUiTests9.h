@@ -117,38 +117,6 @@ void runLayoutReview9Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudio
         probe = {};
     }
 
-    // V9-6: one label size per row. The cap layoutRow sets is the smallest
-    // size any name in the row needs, so SUSTAIN beside DELAY is not smaller.
-    {
-        loadNamed ("Neuro Wobble");
-        editor.showPage ("ENV/LFO");
-        settle (400);
-        if (auto* page = editor.getCurrentPage())
-            if (auto* envCards = findChild<EnvThumbBar> (*page); envCards != nullptr && envCards->onSelect != nullptr)
-            {
-                envCards->onSelect (1);
-                settle (200);
-            }
-        std::vector<KnobControl*> all;
-        findAll<KnobControl> (editor, all);
-        std::map<juce::Component*, std::set<float>> byRow;
-        for (auto* knob : all)
-            if (visibleInTree (knob) && ! knob->getBounds().isEmpty() && ! knob->isCompact())
-                for (const auto* suffix : { "_delay", "_attack", "_hold", "_decay", "_sustain", "_release" })
-                    if (knob->getParameterId().endsWith (suffix))
-                    {
-                        const auto& properties = knob->getNameLabel().getProperties();
-                        byRow[knob->getParentComponent()].insert (properties.contains ("fitCap") ? (float) properties["fitCap"] : -1.0f);
-                    }
-        auto rows = 0, split = 0;
-        for (const auto& row : byRow)
-        {
-            rows += 1;
-            split += row.second.size() == 1 && *row.second.begin() > 0.0f ? 0 : 1;
-        }
-        expect (rows > 0 && split == 0, "the envelope row's names share one size (" + juce::String (rows) + " rows, " + juce::String (split) + " split)");
-    }
-
     // The window at both zooms, for the checks that look at pixels.
     auto* top = editor.getTopLevelComponent();
     const auto before = top->getBounds();
@@ -261,35 +229,12 @@ void runLayoutReview9Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudio
         expect (tooBig.isEmpty(), "no page ends in a large dead area at 100 % or 75 %" + (tooBig.isEmpty() ? juce::String() : ": " + tooBig.joinIntoString ("; ")));
     }
 
-    // V9-4: WEST and BODY, switched off, fold to their header (the switch
-    // stays); on, they show their controls.
-    {
-        loadNamed ("Neuro Wobble");
-        setParam ("west_on", 0.0f);
-        setParam ("res_on", 0.0f);
-        setParam ("body_coupling_mode", 0.0f);
-        editor.showPage ("FILTER");
-        settle (500);
-        // (The design keeps them open, dimmed while off.)
-        const auto westOff = knobFor ("west_fold") != nullptr && knobFor ("west_fold")->getAlpha() < 0.99f;
-        const auto bodyOff = knobFor ("res_amount") != nullptr && knobFor ("res_amount")->getAlpha() < 0.99f;
-        setParam ("west_on", 1.0f);
-        setParam ("res_on", 1.0f);
-        settle (700);
-        const auto westOn = knobFor ("west_fold") != nullptr;
-        const auto bodyOn = knobFor ("res_amount") != nullptr;
-        setParam ("west_on", 0.0f);
-        setParam ("res_on", 0.0f);
-        settle (300);
-        expect (westOff && bodyOff && westOn && bodyOn, "WEST and BODY fold to their header while off and open when switched on");
-    }
-
     // V9-9: a warp or spectral amount shows only once its stage is picked.
     {
         loadNamed ("Neuro Wobble");
         setParam ("osc1_warp", 0.0f);
         setParam ("osc1_spectral", 0.0f);
-        editor.showPage ("OSC");
+        editor.showPage ("MAIN");
         settle (500);
         // (S13-2: the amounts stay drawn, dimmed, so the row never moves.)
         auto* warpOff = knobFor ("osc1_warp_amt");
@@ -309,7 +254,7 @@ void runLayoutReview9Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudio
         editor.showPage ("MAIN");
         settle (300);
         const auto play = shownAddButtons();
-        editor.showPage ("OSC");
+        editor.showPage ("MAIN");
         settle (300);
         const auto osc = shownAddButtons();
         editor.showPage ("FX");

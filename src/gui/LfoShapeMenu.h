@@ -114,7 +114,7 @@ inline void show (juce::ComboBox& box, const IlanaSynthAudioProcessor& processor
     }
 
     juce::Component::SafePointer<juce::ComboBox> safeBox (&box);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&box).withMinimumWidth (box.getWidth())
+    menu.showMenuAsync (IlanaTheme::menuOptions (&box).withMinimumWidth (box.getWidth())
                             .withItemThatMustBeVisible (box.getSelectedId()),
                         [safeBox, picked = std::move (picked)] (int id)
                         {
@@ -156,7 +156,7 @@ inline void applyOperatorLfo (ComboControl& control)
                 menu.addItem (wave + 1, box.getItemText (wave), true, wave == current);
         }
         juce::Component::SafePointer<juce::ComboBox> safeBox (&box);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&box).withMinimumWidth (box.getWidth()),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&box).withMinimumWidth (box.getWidth()),
                             [safeBox] (int id)
                             {
                                 if (safeBox != nullptr && id > 0)

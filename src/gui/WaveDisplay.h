@@ -677,7 +677,7 @@ public:
         juce::PopupMenu menu;
         addSliceItems (menu, -1);
         juce::Component::SafePointer<WaveDisplay> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&target),
                             [safeThis] (int result)
                             {
                                 if (safeThis != nullptr && result >= sliceItemBase && result < sliceItemBase + 1000)
@@ -757,7 +757,7 @@ public:
 
         juce::Component::SafePointer<WaveDisplay> safeThis (this);
 
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target),
+        menu.showMenuAsync (IlanaTheme::menuOptions (&target),
                             [safeThis, paramId, presets, slice] (int result)
                             {
                                 if (safeThis == nullptr || result <= 0)

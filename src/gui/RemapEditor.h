@@ -496,7 +496,7 @@ private:
         menu.addItem (301, "Reverse");
 
         juce::Component::SafePointer<RemapEditor> safeThis (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target != nullptr ? target : this), [safeThis] (int result)
+        menu.showMenuAsync (IlanaTheme::menuOptions (target != nullptr ? target : this), [safeThis] (int result)
         {
             if (safeThis == nullptr || result == 0)
                 return;

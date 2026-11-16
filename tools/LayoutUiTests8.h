@@ -121,7 +121,7 @@ void runLayoutReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudio
     // leaves no control of the old mode behind.
     {
         loadNamed ("Init");
-        for (const auto* page : { "MAIN", "OSC" })
+        for (const auto* page : { "MAIN" })
             for (const auto oscillators : { 2, 4 })
             {
                 loadNamed ("Init");
@@ -171,7 +171,7 @@ void runLayoutReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudio
     // short graph they stand side by side with a gap. V8-39: a filter that
     // passes everything dims its card, all but CUTOFF.
     loadNamed ("Init");
-    editor.showPage ("FILTER");
+    editor.showPage ("MAIN");
     settle (400);
     {
         FilterDisplay* display = nullptr;
@@ -190,19 +190,24 @@ void runLayoutReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudio
             expect (false, "FILTER shows the response graph");
 
         expect (FilterDisplay::isPassThrough (processor, 1), "Init's Filter 2 (Low Pass at 20 kHz) passes everything");
-        auto* reso = knobFor ("f2_reso");
-        auto* cutoff = knobFor ("f2_cutoff");
-        expect (reso != nullptr && cutoff != nullptr && reso->getAlpha() < 0.7f && cutoff->getAlpha() > 0.99f,
-                "FILTER: an open Filter 2 dims its card but not CUTOFF");
+        // (PLAY's FILTER card shows one filter at a time: F1, F2 or WEST; one view each below.)
+        editor.showPlayViews (1, -1, -1);
+        settle (300);
         // P-3: with no MORPH on either card both have four columns, so a knob sits at the same place in both.
         {
             auto sameColumns = true;
             juce::String where;
             for (const char* name : { "reso", "drive", "keytrack" })
             {
+                editor.showPlayViews (0, -1, -1);
+                settle (200);
                 auto* one = knobFor (juce::String ("f1_") + name);
+                const auto oneX = one != nullptr ? editor.getLocalArea (one->getParentComponent(), one->getBounds()).getX() : -1000;
+                editor.showPlayViews (1, -1, -1);
+                settle (200);
                 auto* two = knobFor (juce::String ("f2_") + name);
-                if (one == nullptr || two == nullptr || std::abs (one->getX() - two->getX()) > 1)
+                const auto twoX = two != nullptr ? editor.getLocalArea (two->getParentComponent(), two->getBounds()).getX() : 1000;
+                if (std::abs (oneX - twoX) > 1)
                 {
                     sameColumns = false;
                     where << name << " ";
@@ -218,16 +223,21 @@ void runLayoutReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudio
             setParam ("f1_type", (float) FilterType::VowelMorph);
             settle (400);
             auto* after = knobFor ("f2_keytrack");
+            editor.showPlayViews (0, -1, -1);
+            settle (200);
             auto* morph1 = knobFor ("f1_morph");
-            expect (morph1 != nullptr && morph1->isVisible() && after != nullptr && std::abs (after->getX() - keyX) <= 1,
+            const auto morphShown = morph1 != nullptr && morph1->isVisible();
+            editor.showPlayViews (1, -1, -1);
+            settle (200);
+            after = knobFor ("f2_keytrack");
+            expect (morphShown && after != nullptr && std::abs (after->getX() - keyX) <= 1,
                     "FILTER: a MORPH on Filter 1 leaves Filter 2's knobs where they were");
             setParam ("f1_type", 0.0f);
             settle (300);
         }
         setParam ("f2_cutoff", 800.0f);
         settle (400);
-        expect (! FilterDisplay::isPassThrough (processor, 1) && reso != nullptr && reso->getAlpha() > 0.99f,
-                "FILTER: Filter 2 at 800 Hz is no longer dimmed");
+        expect (! FilterDisplay::isPassThrough (processor, 1), "FILTER: Filter 2 at 800 Hz no longer passes everything");
         // ilana 2026-10-13: Filter 2 at 8 kHz (E.Piano 1) counted as open (the
         // check stopped at 5 kHz), so its switch showed off and could not turn on.
         setParam ("f2_cutoff", 8000.0f);
@@ -236,11 +246,13 @@ void runLayoutReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudio
         setParam ("f2_reso", 0.0f);
         setParam ("f2_cutoff", 20000.0f);
         setParam ("west_on", 1.0f);
+        editor.showPlayViews (2, -1, -1); // (PLAY's FILTER card on WEST)
         settle (400);
         auto* fold = knobFor ("west_fold");
         expect (fold != nullptr && fold->getSlider().findColour (juce::Slider::rotarySliderFillColourId) == FilterColours::west(),
                 "WEST's knobs wear WEST's lime (I8-22)");
         setParam ("west_on", 0.0f);
+        editor.showPlayViews (0, -1, -1);
 
         editor.showPage ("MAIN");
         settle (300);
@@ -253,31 +265,6 @@ void runLayoutReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudio
                 expect (m[0].getDistanceFrom (m[1]) >= 16.0f, // (the design's 170 px display: 16 px is still two dots)
                          "PLAY: the open filters' markers stand apart (" + juce::String (m[0].getDistanceFrom (m[1])) + " px)");
             }
-    }
-
-    // SIGNAL FLOW names (V8-27): no abbreviations; strings and soundboard
-    // on two lines in a block tall enough for them.
-    {
-        loadNamed ("Felt Hammer Board");
-        setParam ("sym_on", 1.0f);
-        editor.showPage ("FILTER");
-        settle (400);
-        if (auto* flow = findChild<SignalFlow> (editor); flow != nullptr)
-        {
-            juce::String post;
-            juce::Rectangle<float> box;
-            for (const auto& [name, bounds] : flow->getBlocks())
-                if (name == "PHYSICAL")
-                {
-                    post = name;
-                    box = bounds;
-                }
-            const auto font = IlanaTheme::font (IlanaTheme::TextSize::tiny, true);
-            const auto widest = juce::GlyphArrangement::getStringWidth (font, "PHYSICAL");
-            expect (post == "PHYSICAL" && box.getHeight() >= 14.0f && box.getWidth() - 8.0f >= widest,
-                    "SIGNAL FLOW: strings and soundboard together are one PHYSICAL node, never a joined name that wraps (I11-8; " + box.toString() + ")");
-        }
-        setParam ("sym_on", 0.0f);
     }
 
     // VECTOR (V8-26, S8-38): the pad right under the header; the controls

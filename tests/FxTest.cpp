@@ -542,20 +542,15 @@ int main()
         };
         find (*editor);
         const auto index = tabs != nullptr ? tabs->getTabNames().indexOf ("INPUT") : -1;
-        // (The OSC, FILTER and MOD sections sit after it with no button: one-tab PLAY, 2026-10-25.)
-        auto lastShown = -1;
-        for (int i = 0; tabs != nullptr && i < tabs->getNumTabs(); ++i)
-            if (auto* button = tabs->getTabbedButtonBar().getTabButton (i); button != nullptr && ! (bool) button->getProperties()["hiddenTab"])
-                lastShown = i;
-        check (index >= 0 && index == lastShown, "ilanaSynth FX has an INPUT page (the last tab)");
-        // The INPUT page and the OSC page (a Live oscillator) paint.
+        check (index >= 0 && index == tabs->getNumTabs() - 1, "ilanaSynth FX has an INPUT page (the last tab)");
+        // The INPUT page and PLAY (a Live oscillator) paint.
         const auto paint = [&editor] { editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f); };
         if (index >= 0)
         {
             tabs->setCurrentTabIndex (index);
             juce::MessageManager::getInstance()->runDispatchLoopUntil (300);
             paint();
-            tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("OSC"));
+            tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("PLAY"));
             processor.loadFactoryPreset (processor.getFactoryPresetNames().indexOf ("Live Wah"));
             juce::MessageManager::getInstance()->runDispatchLoopUntil (400);
             paint();

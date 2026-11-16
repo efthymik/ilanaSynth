@@ -61,9 +61,21 @@ public:
     VectorCornerWave (IlanaSynthAudioProcessor& p, int cornerIn)
         : processorRef (p), corner (cornerIn)
     {
-        setInterceptsMouseClicks (false, false);
         startTimerHz (20);
     }
+
+    // A corner with no oscillator is a "+ add OSC n" button over its dimmed empty picture (as the pad's pill).
+    bool hitTest (int, int) override { return isMissing(); }
+
+    void mouseDown (const juce::MouseEvent&) override
+    {
+        const auto osc = processorRef.getVectorCorner (corner);
+        if (isMissing() && osc >= 0 && osc < OscillatorIds::count)
+            processorRef.performEdit ("Add OSC " + juce::String (osc + 1), [this, osc] { processorRef.addOscillator (osc); });
+    }
+
+    void mouseEnter (const juce::MouseEvent&) override { hover = true; repaint(); }
+    void mouseExit (const juce::MouseEvent&) override { hover = false; repaint(); }
 
     void paint (juce::Graphics& g) override
     {
@@ -80,6 +92,14 @@ public:
             g.drawHorizontalLine ((int) (area.getY() + area.getHeight() * (float) i / 4.0f), area.getX() + 1.0f, area.getRight() - 1.0f);
             g.drawVerticalLine ((int) (area.getX() + area.getWidth() * (float) i / 4.0f), area.getY() + 1.0f, area.getBottom() - 1.0f);
         }
+        if (isMissing())
+        {
+            // Empty: the grid only (no centre line through the words), the add button's text in the middle.
+            g.setColour (hover ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2);
+            g.setFont (IlanaTheme::font (IlanaTheme::TextSize::body, true));
+            g.drawText ("+ add OSC " + juce::String (osc + 1), area, juce::Justification::centred);
+            return;
+        }
         g.setColour (IlanaTheme::Ui::line);
         g.drawHorizontalLine ((int) plot.getCentreY(), plot.getX(), plot.getRight());
 
@@ -91,6 +111,12 @@ public:
             // (A missing oscillator's picture stays blank: the corner's menu says "OSC 4: none", R19-4.)
             if (shown)
                 g.drawText ("NOT A WAVETABLE", area, juce::Justification::centred);
+            else
+            {
+                g.setColour (IlanaTheme::Ui::text3.withMultipliedAlpha (hover ? 1.0f : 0.7f));
+                g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true));
+                g.drawText ("+ add OSC " + juce::String (osc + 1), area, juce::Justification::centred);
+            }
             return;
         }
 
@@ -108,8 +134,20 @@ public:
     }
 
 private:
+    bool isMissing() const
+    {
+        const auto osc = processorRef.getVectorCorner (corner);
+        return ! (osc >= 0 && osc < OscillatorIds::count && processorRef.isOscillatorShown (osc));
+    }
+
     void timerCallback() override
     {
+        if (const auto missing = isMissing(); missing != wasMissing)
+        {
+            wasMissing = missing;
+            setMouseCursor (missing ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+            repaint();
+        }
         if (IlanaAnim::showing (*this) && changeGate.check (processorRef.getUiEpoch()))
             repaint();
     }
@@ -117,6 +155,7 @@ private:
     IlanaAnim::ChangeGate changeGate;
     IlanaSynthAudioProcessor& processorRef;
     int corner;
+    bool hover = false, wasMissing = false;
 };
 
 class VectorPadDisplay : public juce::Component,

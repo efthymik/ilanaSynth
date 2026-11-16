@@ -1,4 +1,5 @@
 #include "ProcessorInternal.h"
+#include "Migrations.h"
 #include "../SamplePaths.h"
 
 #include <cstring>
@@ -1120,49 +1121,6 @@ void IlanaSynthAudioProcessor::moveLevelToTrim (std::vector<std::pair<juce::Stri
     values.push_back ({ "output_trim", level });
 }
 
-int IlanaSynthAudioProcessor::migrateBodyLevel (const std::function<float (const juce::String&, float)>& get,
-                                               const std::function<void (const juce::String&, float)>& set)
-{
-    // (Classic, body_type 0, keeps its own resonator and never changed.)
-    if (juce::roundToInt (get ("body_type", 0.0f)) == 0 || get ("body_legacy_level", 0.0f) > 0.5f)
-        return 0;
-    set ("body_legacy_level", 1.0f);
-    return 1;
-}
-
-int IlanaSynthAudioProcessor::migrateGlideTime (const std::function<float (const juce::String&, float)>& get,
-                                               const std::function<void (const juce::String&, float)>& set)
-{
-    constexpr auto factor = 16.0f;  // the old glide's slowness: one coefficient step per 16 samples
-    constexpr auto maxGlide = 2.0f; // the knob's range (ParameterLayout)
-    constexpr auto skew = 0.13f;    // and its skew
-    auto changed = 0;
-
-    // At or under 1 ms GLIDE is off (Voice::startNote); those stay off.
-    if (const auto glide = get ("glide", 0.0f); glide > 0.001f)
-    {
-        set ("glide", juce::jmin (glide * factor, maxGlide));
-        ++changed;
-    }
-
-    // A route adds to the knob's skewed position, (seconds / 2) ^ skew; there
-    // x16 in seconds is x16 ^ skew, so the routes and macros reach as far.
-    const auto depthFactor = std::pow (factor, skew);
-    const auto glideDestination = Mod::destinationForParamId ("glide");
-    for (int slot = 1; slot <= Mod::maxSlots && glideDestination > 0; ++slot)
-    {
-        const auto prefix = "mod" + juce::String (slot);
-        if (juce::roundToInt (get (prefix + "_dst", 0.0f)) != glideDestination)
-            continue;
-        if (const auto depth = get (prefix + "_amt", 0.0f); depth != 0.0f)
-        {
-            set (prefix + "_amt", juce::jlimit (-1.0f, 1.0f, depth * depthFactor));
-            ++changed;
-        }
-    }
-    return changed;
-}
-
 void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
 {
     ++dataEpoch; // what the editor draws changes
@@ -1306,29 +1264,7 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
         values.push_back ({ "osc2_fine", -7.0f });
 
     if (presets[(size_t) index].category == nullptr)
-    {
-        const auto find = [&values] (const juce::String& id) -> std::pair<juce::String, float>*
-        {
-            for (auto& entry : values)
-                if (entry.first == id)
-                    return &entry;
-
-            return nullptr;
-        };
-
-        migrateLegacyOsc3 ([&find] (const juce::String& id, float fallback)
-                           {
-                               const auto* entry = find (id);
-                               return entry != nullptr ? entry->second : fallback;
-                           },
-                           [&find, &values] (const juce::String& id, float value)
-                           {
-                               if (auto* entry = find (id))
-                                   entry->second = value;
-                               else
-                                   values.push_back ({ id, value });
-                           });
-    }
+        Migrations::runFactory (values, Migrations::FactoryStage::legacyRecipes);
 
     std::array<juce::String, 4> voicedMacroNames;
     applyPresetVoicing (presets[(size_t) index].name, values, voicedMacroNames);
@@ -1339,163 +1275,11 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
     applyPresetTrims (presets[(size_t) index].name, getFactoryPresetCategories()[index], values);
     moveLevelToTrim (values);
 
-    // The factory recipes were written for the old string knob scales.
-    migrateStringKnobs ([&values] (const juce::String& id, float fallback)
-                        {
-                            for (const auto& entry : values)
-                                if (entry.first == id)
-                                    return entry.second;
-                            return fallback;
-                        },
-                        [&values] (const juce::String& id, float value)
-                        {
-                            for (auto& entry : values)
-                                if (entry.first == id)
-                                    entry.second = value;
-                        });
-
-    // The recipes set ENV AMOUNT (Filter 1's default was 1.5 octaves), TENSION
-    // and WARP ENV; they are now matrix routes and curves with the same sound.
-    {
-        const auto find = [&values] (const juce::String& id) -> std::pair<juce::String, float>*
-        {
-            for (auto& entry : values)
-                if (entry.first == id)
-                    return &entry;
-            return nullptr;
-        };
-        migrateRedundantKnobs ([&find] (const juce::String& id, float fallback)
-                                 {
-                                     const auto* entry = find (id);
-                                     return entry != nullptr ? entry->second : fallback;
-                                 },
-                                 [&find, &values] (const juce::String& id, float value)
-                                 {
-                                     if (auto* entry = find (id))
-                                         entry->second = value;
-                                     else
-                                         values.push_back ({ id, value });
-                                 });
-    }
-
-    // The recipes on the Dense board were heard with its old, short MIX.
-    migrateDenseBoardMix ([&values] (const juce::String& id, float fallback)
-                          {
-                              for (const auto& entry : values)
-                                  if (entry.first == id)
-                                      return entry.second;
-                              return fallback;
-                          },
-                          [&values] (const juce::String& id, float value)
-                          {
-                              for (auto& entry : values)
-                                  if (entry.first == id)
-                                  {
-                                      entry.second = value;
-                                      return;
-                                  }
-                              values.push_back ({ id, value });
-                          });
-
-    // ...and either board's colour was on even at MIX 0 % (moved up the knob, same sound).
-    for (const auto classicBoard : { false, true })
-        migrateDenseBoardBypass ([&values] (const juce::String& id, float fallback)
-                                 {
-                                     for (const auto& entry : values)
-                                         if (entry.first == id)
-                                             return entry.second;
-                                     return fallback;
-                                 },
-                                 [&values] (const juce::String& id, float value)
-                                 {
-                                     for (auto& entry : values)
-                                         if (entry.first == id)
-                                         {
-                                             entry.second = value;
-                                             return;
-                                         }
-                                     values.push_back ({ id, value });
-                                 }, classicBoard);
-
-    // Its operators (a wavetable tuned by ratio or fixed Hz, or on the
-    // Operator EG) load as FM / DX7, which renders the same.
-    {
-        const auto find = [&values] (const juce::String& id) -> std::pair<juce::String, float>*
-        {
-            for (auto& entry : values)
-                if (entry.first == id)
-                    return &entry;
-            return nullptr;
-        };
-        migrateOperatorModes ([&find] (const juce::String& id, float fallback)
-                              {
-                                  const auto* entry = find (id);
-                                  return entry != nullptr ? entry->second : fallback;
-                              },
-                              [&find, &values] (const juce::String& id, float value)
-                              {
-                                  if (auto* entry = find (id))
-                                      entry->second = value;
-                                  else
-                                      values.push_back ({ id, value });
-                              });
-    }
-
-    // The recipes' (and every baked pack's) GLIDE times are in the old,
-    // 16x slow units: they load x16 and glide as they were heard.
-    migrateGlideTime ([&values] (const juce::String& id, float fallback)
-                      {
-                          for (const auto& entry : values)
-                              if (entry.first == id)
-                                  return entry.second;
-                          return fallback;
-                      },
-                      [&values] (const juce::String& id, float value)
-                      {
-                          for (auto& entry : values)
-                              if (entry.first == id)
-                                  entry.second = value;
-                      });
-
-    // The factory recipes on a material body were heard at its old level.
-    migrateBodyLevel ([&values] (const juce::String& id, float fallback)
-                      {
-                          for (const auto& entry : values)
-                              if (entry.first == id)
-                                  return entry.second;
-                          return fallback;
-                      },
-                      [&values] (const juce::String& id, float value)
-                      {
-                          for (auto& entry : values)
-                              if (entry.first == id)
-                              {
-                                  entry.second = value;
-                                  return;
-                              }
-                          values.push_back ({ id, value });
-                      });
-
-    // Step 45: a preset written before Grain Position existed plays its
-    // cloud at Sample Start; give it that value.
-    for (int osc = 0; osc < OscillatorIds::count; ++osc)
-    {
-        const auto prefix = juce::String (OscillatorIds::prefixes[(size_t) osc]);
-        const auto positionId = prefix + "_grain_pos";
-        const auto startId = prefix + "_sample_start";
-        const auto hasPosition = std::any_of (values.begin(), values.end(),
-                                              [&positionId] (const auto& entry) { return entry.first == positionId; });
-
-        if (hasPosition)
-            continue;
-
-        for (const auto& entry : values)
-            if (entry.first == startId)
-            {
-                values.push_back ({ positionId, entry.second });
-                break;
-            }
-    }
+    // The migrations for every recipe (Migrations::table, in order): the
+    // recipes were written for the old string knob scales, ENV AMOUNT, TENSION
+    // and WARP ENV knobs, the boards' old MIX, the old operator modes, GLIDE
+    // units and body levels, and before Grain Position.
+    Migrations::runFactory (values, Migrations::FactoryStage::afterTrims);
 
     for (const auto& value : values)
         if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (apvts.getParameter (value.first)))

@@ -971,24 +971,34 @@ private:
         g.strokePath (curveFor (highTime), juce::PathStrokeType (1.0f));
         strokeCurve (g, curveFor (lowTime), plot, plot.getBottom());
 
-        // A legend in the top right, off the curves (UI review 6, V6-25).
-        {
-            auto legend = juce::Rectangle<float> (plot.getRight() - 64.0f, plot.getY() + 2.0f, 62.0f, 22.0f);
-            g.setColour (IlanaTheme::Ui::well.withAlpha (0.85f));
-            g.fillRoundedRectangle (legend, 3.0f);
-            g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny));
-            for (const auto& [highs, text] : { std::pair<bool, const char*> { false, "LOWS" }, { true, "HIGHS" } })
-            {
-                auto line = legend.removeFromTop (11.0f);
-                const auto sample = line.removeFromLeft (16.0f).reduced (3.0f, 0.0f);
-                g.setColour (highs ? colour.withAlpha (0.4f) : colour);
-                g.fillRect (sample.withSizeKeepingCentre (sample.getWidth(), highs ? 1.0f : 1.6f));
-                g.setColour (IlanaTheme::Ui::text3);
-                g.drawText (text, line, juce::Justification::centredLeft);
-            }
-        }
         const auto seconds = gated ? juce::String ("gated") : "RT60 " + juce::String (lowTime, lowTime < 10.0f ? 1 : 0) + " s";
         paintCaption (g, "DECAY", seconds);
+
+        // The legend sits in the header line, left of the RT60 reading, where the curves never draw (polish pass 9;
+        // it was a box on the curve's top right).
+        {
+            const auto captionFont = IlanaTheme::font (IlanaTheme::TextSize::tiny, true);
+            const auto readingWidth = (float) juce::GlyphArrangement::getStringWidthInt (juce::Font (captionFont), seconds);
+            const auto header = getLocalBounds().reduced (8, 0).removeFromTop (16).withTrimmedTop (3).toFloat();
+            const auto font = IlanaTheme::font (IlanaTheme::TextSize::tiny);
+            g.setFont (font);
+            const auto lowsWidth = (float) juce::GlyphArrangement::getStringWidthInt (juce::Font (font), "LOWS");
+            const auto highsWidth = (float) juce::GlyphArrangement::getStringWidthInt (juce::Font (font), "HIGHS");
+            constexpr auto sampleWidth = 14.0f, textGap = 4.0f, itemGap = 12.0f;
+            const auto total = sampleWidth + textGap + lowsWidth + itemGap + sampleWidth + textGap + highsWidth;
+            auto x = header.getRight() - readingWidth - 14.0f - total;
+            if (x > header.getX() + 56.0f) // (clear of the DECAY title)
+                for (const auto& [highs, text, width] : { std::tuple<bool, const char*, float> { false, "LOWS", lowsWidth }, { true, "HIGHS", highsWidth } })
+            {
+                const auto sample = juce::Rectangle<float> (sampleWidth, header.getHeight()).withX (x);
+                g.setColour (highs ? colour.withAlpha (0.4f) : colour);
+                g.fillRect (sample.withSizeKeepingCentre (sampleWidth, highs ? 1.0f : 1.6f));
+                g.setColour (IlanaTheme::Ui::text3);
+                g.drawText (text, juce::Rectangle<float> (width + 2.0f, header.getHeight()).withPosition (x + sampleWidth + textGap, header.getY()),
+                            juce::Justification::centredLeft, false);
+                x += sampleWidth + textGap + width + itemGap;
+            }
+        }
     }
 
     // ---- Shared: a response over frequency, in dB ----

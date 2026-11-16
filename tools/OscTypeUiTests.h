@@ -78,7 +78,7 @@ void runOscTypeTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProces
     // A Wavetable: TUNING offers only Semitones, ENVELOPE no OP ENV, and the
     // card has none of the operator's controls.
     loadNamed ("Neuro Wobble");
-    editor.showPage ("OSC");
+    editor.showPage ("MAIN");
     settle (500);
     {
         auto* mode = comboIn ("osc1_mode", 0);
@@ -131,7 +131,7 @@ void runOscTypeTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProces
 
     // The add row: a Wavetable, or at its right end an FM / DX7 operator.
     loadNamed ("Neuro Wobble");
-    editor.showPage ("OSC");
+    editor.showPage ("MAIN");
     settle (500);
     if (auto* add = addButton ("+  ADD FM / DX7"); add != nullptr)
     {

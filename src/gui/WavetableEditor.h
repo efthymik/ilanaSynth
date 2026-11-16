@@ -763,7 +763,7 @@ private:
         for (int i = 0; i < 8; ++i)
             menu.addItem (i + 1, names[i]);
         juce::Component::SafePointer<WavetableEditor> safe (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&shapesButton), [safe] (int result)
+        menu.showMenuAsync (IlanaTheme::menuOptions (&shapesButton), [safe] (int result)
         {
             if (safe != nullptr && result > 0)
                 safe->applyShape (result - 1);
@@ -854,7 +854,7 @@ private:
         menu.addSubMenu ("Whole table: crossfade first to last", crossfade);
         menu.addSubMenu ("Whole table: spectral morph first to last", spectral);
         juce::Component::SafePointer<WavetableEditor> safe (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&morphButton), [safe, next] (int result)
+        menu.showMenuAsync (IlanaTheme::menuOptions (&morphButton), [safe, next] (int result)
         {
             if (safe == nullptr || result <= 0)
                 return;
@@ -888,7 +888,7 @@ private:
         menu.addItem (3, "Vocode: harmonics follow the audio's spectrum over time...");
         menu.addItem (4, "Time slice: cut the audio into equal slices, one cycle each...");
         juce::Component::SafePointer<WavetableEditor> safe (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&importButton), [safe] (int result)
+        menu.showMenuAsync (IlanaTheme::menuOptions (&importButton), [safe] (int result)
         {
             if (safe == nullptr || result <= 0)
                 return;
@@ -963,7 +963,7 @@ private:
                                            + (sorted[i].withFileExtension ("ilwt").existsAsFile() ? "  (editable)" : ""));
         }
         juce::Component::SafePointer<WavetableEditor> safe (this);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&libraryButton), [safe, sorted] (int result)
+        menu.showMenuAsync (IlanaTheme::menuOptions (&libraryButton), [safe, sorted] (int result)
         {
             if (safe == nullptr || result <= 0)
                 return;
