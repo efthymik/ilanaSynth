@@ -1,4 +1,5 @@
 #include "ProcessorInternal.h"
+#include "PatchValues.h"
 #include "../SamplePaths.h"
 
 #include <cstring>
@@ -1307,27 +1308,8 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
 
     if (presets[(size_t) index].category == nullptr)
     {
-        const auto find = [&values] (const juce::String& id) -> std::pair<juce::String, float>*
-        {
-            for (auto& entry : values)
-                if (entry.first == id)
-                    return &entry;
-
-            return nullptr;
-        };
-
-        migrateLegacyOsc3 ([&find] (const juce::String& id, float fallback)
-                           {
-                               const auto* entry = find (id);
-                               return entry != nullptr ? entry->second : fallback;
-                           },
-                           [&find, &values] (const juce::String& id, float value)
-                           {
-                               if (auto* entry = find (id))
-                                   entry->second = value;
-                               else
-                                   values.push_back ({ id, value });
-                           });
+        FactoryPatchValues patch (values, PatchValues::MissingId::add);
+        migrateLegacyOsc3 (patch.getter(), patch.setter());
     }
 
     std::array<juce::String, 4> voicedMacroNames;
@@ -1340,161 +1322,64 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
     moveLevelToTrim (values);
 
     // The factory recipes were written for the old string knob scales.
-    migrateStringKnobs ([&values] (const juce::String& id, float fallback)
-                        {
-                            for (const auto& entry : values)
-                                if (entry.first == id)
-                                    return entry.second;
-                            return fallback;
-                        },
-                        [&values] (const juce::String& id, float value)
-                        {
-                            for (auto& entry : values)
-                                if (entry.first == id)
-                                    entry.second = value;
-                        });
+    {
+        FactoryPatchValues patch (values, PatchValues::MissingId::skip, FactoryPatchValues::Duplicates::all);
+        migrateStringKnobs (patch.getter(), patch.setter());
+    }
 
     // The recipes set ENV AMOUNT (Filter 1's default was 1.5 octaves), TENSION
     // and WARP ENV; they are now matrix routes and curves with the same sound.
     {
-        const auto find = [&values] (const juce::String& id) -> std::pair<juce::String, float>*
-        {
-            for (auto& entry : values)
-                if (entry.first == id)
-                    return &entry;
-            return nullptr;
-        };
-        migrateRedundantKnobs ([&find] (const juce::String& id, float fallback)
-                                 {
-                                     const auto* entry = find (id);
-                                     return entry != nullptr ? entry->second : fallback;
-                                 },
-                                 [&find, &values] (const juce::String& id, float value)
-                                 {
-                                     if (auto* entry = find (id))
-                                         entry->second = value;
-                                     else
-                                         values.push_back ({ id, value });
-                                 });
+        FactoryPatchValues patch (values, PatchValues::MissingId::add);
+        migrateRedundantKnobs (patch.getter(), patch.setter());
     }
 
     // The recipes on the Dense board were heard with its old, short MIX.
-    migrateDenseBoardMix ([&values] (const juce::String& id, float fallback)
-                          {
-                              for (const auto& entry : values)
-                                  if (entry.first == id)
-                                      return entry.second;
-                              return fallback;
-                          },
-                          [&values] (const juce::String& id, float value)
-                          {
-                              for (auto& entry : values)
-                                  if (entry.first == id)
-                                  {
-                                      entry.second = value;
-                                      return;
-                                  }
-                              values.push_back ({ id, value });
-                          });
+    {
+        FactoryPatchValues patch (values, PatchValues::MissingId::add);
+        migrateDenseBoardMix (patch.getter(), patch.setter());
+    }
 
     // ...and either board's colour was on even at MIX 0 % (moved up the knob, same sound).
     for (const auto classicBoard : { false, true })
-        migrateDenseBoardBypass ([&values] (const juce::String& id, float fallback)
-                                 {
-                                     for (const auto& entry : values)
-                                         if (entry.first == id)
-                                             return entry.second;
-                                     return fallback;
-                                 },
-                                 [&values] (const juce::String& id, float value)
-                                 {
-                                     for (auto& entry : values)
-                                         if (entry.first == id)
-                                         {
-                                             entry.second = value;
-                                             return;
-                                         }
-                                     values.push_back ({ id, value });
-                                 }, classicBoard);
+    {
+        FactoryPatchValues patch (values, PatchValues::MissingId::add);
+        migrateDenseBoardBypass (patch.getter(), patch.setter(), classicBoard);
+    }
 
     // Its operators (a wavetable tuned by ratio or fixed Hz, or on the
     // Operator EG) load as FM / DX7, which renders the same.
     {
-        const auto find = [&values] (const juce::String& id) -> std::pair<juce::String, float>*
-        {
-            for (auto& entry : values)
-                if (entry.first == id)
-                    return &entry;
-            return nullptr;
-        };
-        migrateOperatorModes ([&find] (const juce::String& id, float fallback)
-                              {
-                                  const auto* entry = find (id);
-                                  return entry != nullptr ? entry->second : fallback;
-                              },
-                              [&find, &values] (const juce::String& id, float value)
-                              {
-                                  if (auto* entry = find (id))
-                                      entry->second = value;
-                                  else
-                                      values.push_back ({ id, value });
-                              });
+        FactoryPatchValues patch (values, PatchValues::MissingId::add);
+        migrateOperatorModes (patch.getter(), patch.setter());
     }
 
     // The recipes' (and every baked pack's) GLIDE times are in the old,
     // 16x slow units: they load x16 and glide as they were heard.
-    migrateGlideTime ([&values] (const juce::String& id, float fallback)
-                      {
-                          for (const auto& entry : values)
-                              if (entry.first == id)
-                                  return entry.second;
-                          return fallback;
-                      },
-                      [&values] (const juce::String& id, float value)
-                      {
-                          for (auto& entry : values)
-                              if (entry.first == id)
-                                  entry.second = value;
-                      });
+    {
+        FactoryPatchValues patch (values, PatchValues::MissingId::skip, FactoryPatchValues::Duplicates::all);
+        migrateGlideTime (patch.getter(), patch.setter());
+    }
 
     // The factory recipes on a material body were heard at its old level.
-    migrateBodyLevel ([&values] (const juce::String& id, float fallback)
-                      {
-                          for (const auto& entry : values)
-                              if (entry.first == id)
-                                  return entry.second;
-                          return fallback;
-                      },
-                      [&values] (const juce::String& id, float value)
-                      {
-                          for (auto& entry : values)
-                              if (entry.first == id)
-                              {
-                                  entry.second = value;
-                                  return;
-                              }
-                          values.push_back ({ id, value });
-                      });
+    {
+        FactoryPatchValues patch (values, PatchValues::MissingId::add);
+        migrateBodyLevel (patch.getter(), patch.setter());
+    }
 
     // Step 45: a preset written before Grain Position existed plays its
     // cloud at Sample Start; give it that value.
-    for (int osc = 0; osc < OscillatorIds::count; ++osc)
     {
-        const auto prefix = juce::String (OscillatorIds::prefixes[(size_t) osc]);
-        const auto positionId = prefix + "_grain_pos";
-        const auto startId = prefix + "_sample_start";
-        const auto hasPosition = std::any_of (values.begin(), values.end(),
-                                              [&positionId] (const auto& entry) { return entry.first == positionId; });
+        FactoryPatchValues patch (values, PatchValues::MissingId::add);
+        for (int osc = 0; osc < OscillatorIds::count; ++osc)
+        {
+            const auto prefix = juce::String (OscillatorIds::prefixes[(size_t) osc]);
+            const auto positionId = prefix + "_grain_pos";
+            const auto startId = prefix + "_sample_start";
 
-        if (hasPosition)
-            continue;
-
-        for (const auto& entry : values)
-            if (entry.first == startId)
-            {
-                values.push_back ({ positionId, entry.second });
-                break;
-            }
+            if (! patch.contains (positionId) && patch.contains (startId))
+                patch.set (positionId, patch.get (startId, 0.0f));
+        }
     }
 
     for (const auto& value : values)

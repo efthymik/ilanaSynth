@@ -1,6 +1,7 @@
 #include "ProcessorInternal.h"
 #include "../ThreadChecks.h"
 #include "../BuildInfo.h"
+#include "PatchValues.h"
 
 namespace
 {
@@ -1012,33 +1013,8 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
 
     if ((int) state.getProperty ("osc3Schema", 1) < 2)
     {
-        const auto find = [&state] (const juce::String& id)
-        {
-            for (int i = 0; i < state.getNumChildren(); ++i)
-                if (state.getChild (i).getProperty ("id").toString() == id)
-                    return state.getChild (i);
-
-            return juce::ValueTree();
-        };
-
-        migrateLegacyOsc3 ([&find] (const juce::String& id, float fallback)
-                           {
-                               const auto child = find (id);
-                               return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
-                           },
-                           [&find, &state] (const juce::String& id, float value)
-                           {
-                               auto child = find (id);
-
-                               if (! child.isValid())
-                               {
-                                   child = juce::ValueTree ("PARAM");
-                                   child.setProperty ("id", id, nullptr);
-                                   state.appendChild (child, nullptr);
-                               }
-
-                               child.setProperty ("value", value, nullptr);
-                           });
+        TreePatchValues values (state, PatchValues::MissingId::add);
+        migrateLegacyOsc3 (values.getter(), values.setter());
 
         state.setProperty ("osc3Schema", 2, nullptr);
     }
@@ -1047,33 +1023,18 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
     // cloud sat at Sample Start, so an older patch takes that value.
     if ((int) state.getProperty ("grainPosSchema", 1) < 2)
     {
-        const auto find = [&state] (const juce::String& id)
-        {
-            for (int i = 0; i < state.getNumChildren(); ++i)
-                if (state.getChild (i).getProperty ("id").toString() == id)
-                    return state.getChild (i);
-
-            return juce::ValueTree();
-        };
+        TreePatchValues values (state);
 
         for (int osc = 0; osc < OscillatorIds::count; ++osc)
         {
             const auto prefix = juce::String (OscillatorIds::prefixes[(size_t) osc]);
-            const auto start = find (prefix + "_sample_start");
+            const auto start = values.find (prefix + "_sample_start");
 
             if (! start.isValid() || ! start.hasProperty ("value"))
                 continue;
 
-            auto position = find (prefix + "_grain_pos");
-
-            if (! position.isValid())
-            {
-                position = juce::ValueTree ("PARAM");
-                position.setProperty ("id", prefix + "_grain_pos", nullptr);
-                state.appendChild (position, nullptr);
-            }
-
-            position.setProperty ("value", start.getProperty ("value"), nullptr);
+            // The saved value as it is (a string in a file), not through a float.
+            values.findOrAdd (prefix + "_grain_pos").setProperty ("value", start.getProperty ("value"), nullptr);
         }
 
         state.setProperty ("grainPosSchema", 2, nullptr);
@@ -1085,39 +1046,18 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
     // loops on it.
     if ((int) state.getProperty ("lorenzSchema", 1) < 2)
     {
-        const auto find = [&state] (const juce::String& id)
-        {
-            for (int i = 0; i < state.getNumChildren(); ++i)
-                if (state.getChild (i).getProperty ("id").toString() == id)
-                    return state.getChild (i);
-
-            return juce::ValueTree();
-        };
-        const auto valueOf = [&find] (const juce::String& id, float fallback)
-        {
-            const auto child = find (id);
-            return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
-        };
+        TreePatchValues values (state, PatchValues::MissingId::add);
 
         for (int lfo = 1; lfo <= numLfos; ++lfo)
         {
             const auto prefix = "lfo" + juce::String (lfo);
 
-            if (juce::roundToInt (valueOf (prefix + "_shape", 0.0f)) != LfoSimShapes::Lorenz || valueOf (prefix + "_sync", 0.0f) > 0.5f)
+            if (juce::roundToInt (values.get (prefix + "_shape", 0.0f)) != LfoSimShapes::Lorenz || values.get (prefix + "_sync", 0.0f) > 0.5f)
                 continue;
 
-            const auto rho = LfoSimInfo::value (LfoSimShapes::Lorenz, 1, valueOf (prefix + "_p2", 0.5f));
-            auto rate = find (prefix + "_rate");
-
-            if (! rate.isValid())
-            {
-                rate = juce::ValueTree ("PARAM");
-                rate.setProperty ("id", prefix + "_rate", nullptr);
-                state.appendChild (rate, nullptr);
-            }
-
-            const auto scaled = (double) valueOf (prefix + "_rate", 4.0f) * LfoSimInfo::lorenzLegacyRateScale (rho);
-            rate.setProperty ("value", (float) juce::jlimit (0.01, 40.0, scaled), nullptr);
+            const auto rho = LfoSimInfo::value (LfoSimShapes::Lorenz, 1, values.get (prefix + "_p2", 0.5f));
+            const auto scaled = (double) values.get (prefix + "_rate", 4.0f) * LfoSimInfo::lorenzLegacyRateScale (rho);
+            values.set (prefix + "_rate", (float) juce::jlimit (0.01, 40.0, scaled));
         }
 
         state.setProperty ("lorenzSchema", 2, nullptr);
@@ -1498,23 +1438,8 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
     // A patch saved before the string knobs were rescaled keeps its sound.
     if ((int) state.getProperty ("stringSchema", 1) < 2)
     {
-        const auto find = [&state] (const juce::String& id)
-        {
-            for (int i = 0; i < state.getNumChildren(); ++i)
-                if (state.getChild (i).getProperty ("id").toString() == id)
-                    return state.getChild (i);
-            return juce::ValueTree();
-        };
-        migrateStringKnobs ([&find] (const juce::String& id, float fallback)
-                            {
-                                const auto child = find (id);
-                                return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
-                            },
-                            [&find] (const juce::String& id, float value)
-                            {
-                                if (auto child = find (id); child.isValid())
-                                    child.setProperty ("value", value, nullptr);
-                            });
+        TreePatchValues values (state, PatchValues::MissingId::skip);
+        migrateStringKnobs (values.getter(), values.setter());
         state.setProperty ("stringSchema", 2, nullptr);
     }
 
@@ -1522,23 +1447,8 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
     // a WARP ENV carries them as matrix routes and curves (the knobs are gone).
     if ((int) state.getProperty ("redundantKnobsSchema", 1) < 2)
     {
-        const auto find = [&state] (const juce::String& id)
-        {
-            for (int i = 0; i < state.getNumChildren(); ++i)
-                if (state.getChild (i).getProperty ("id").toString() == id)
-                    return state.getChild (i);
-            return juce::ValueTree();
-        };
-        migrateRedundantKnobs ([&find] (const juce::String& id, float fallback)
-                                 {
-                                     const auto child = find (id);
-                                     return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
-                                 },
-                                 [&find] (const juce::String& id, float value)
-                                 {
-                                     if (auto child = find (id); child.isValid())
-                                         child.setProperty ("value", value, nullptr);
-                                 });
+        TreePatchValues values (state, PatchValues::MissingId::skip);
+        migrateRedundantKnobs (values.getter(), values.setter());
         state.setProperty ("redundantKnobsSchema", 2, nullptr);
     }
 
@@ -1547,76 +1457,23 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
     // routes and macros into it: those states get only the routes' part.
     if (const auto boardMixSchema = (int) state.getProperty ("boardMixSchema", 1); boardMixSchema < 3)
     {
-        const auto find = [&state] (const juce::String& id)
-        {
-            for (int i = 0; i < state.getNumChildren(); ++i)
-                if (state.getChild (i).getProperty ("id").toString() == id)
-                    return state.getChild (i);
-            return juce::ValueTree();
-        };
-        migrateDenseBoardMix ([&find] (const juce::String& id, float fallback)
-                              {
-                                  const auto child = find (id);
-                                  return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
-                              },
-                              [&find, &state] (const juce::String& id, float value)
-                              {
-                                  if (auto child = find (id); child.isValid())
-                                      child.setProperty ("value", value, nullptr);
-                                  else
-                                      state.appendChild (juce::ValueTree ("PARAM", { { "id", id }, { "value", value } }), nullptr);
-                              },
-                              boardMixSchema < 2);
+        TreePatchValues values (state, PatchValues::MissingId::add);
+        migrateDenseBoardMix (values.getter(), values.setter(), boardMixSchema < 2);
         state.setProperty ("boardMixSchema", 3, nullptr);
     }
     // ...and its colour, which was on even at MIX 0 %, now fades in on the knob's
     // first quarter: older patches move up the knob so they sound the same.
     if ((int) state.getProperty ("boardMixSchema", 1) < 4)
     {
-        const auto find = [&state] (const juce::String& id)
-        {
-            for (int i = 0; i < state.getNumChildren(); ++i)
-                if (state.getChild (i).getProperty ("id").toString() == id)
-                    return state.getChild (i);
-            return juce::ValueTree();
-        };
-        migrateDenseBoardBypass ([&find] (const juce::String& id, float fallback)
-                                 {
-                                     const auto child = find (id);
-                                     return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
-                                 },
-                                 [&find, &state] (const juce::String& id, float value)
-                                 {
-                                     if (auto child = find (id); child.isValid())
-                                         child.setProperty ("value", value, nullptr);
-                                     else
-                                         state.appendChild (juce::ValueTree ("PARAM", { { "id", id }, { "value", value } }), nullptr);
-                                 });
+        TreePatchValues values (state, PatchValues::MissingId::add);
+        migrateDenseBoardBypass (values.getter(), values.setter());
         state.setProperty ("boardMixSchema", 4, nullptr);
     }
     // The Classic board's MIX got the same bypass at 0 % a day later (schema 5).
     if ((int) state.getProperty ("boardMixSchema", 1) < 5)
     {
-        const auto find = [&state] (const juce::String& id)
-        {
-            for (int i = 0; i < state.getNumChildren(); ++i)
-                if (state.getChild (i).getProperty ("id").toString() == id)
-                    return state.getChild (i);
-            return juce::ValueTree();
-        };
-        migrateDenseBoardBypass ([&find] (const juce::String& id, float fallback)
-                                 {
-                                     const auto child = find (id);
-                                     return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
-                                 },
-                                 [&find, &state] (const juce::String& id, float value)
-                                 {
-                                     if (auto child = find (id); child.isValid())
-                                         child.setProperty ("value", value, nullptr);
-                                     else
-                                         state.appendChild (juce::ValueTree ("PARAM", { { "id", id }, { "value", value } }), nullptr);
-                                 },
-                                 true);
+        TreePatchValues values (state, PatchValues::MissingId::add);
+        migrateDenseBoardBypass (values.getter(), values.setter(), true);
         state.setProperty ("boardMixSchema", 5, nullptr);
     }
 
@@ -1624,68 +1481,23 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
     // routes' sound (after the step above, whose cutoff routes are old-scale).
     if ((int) state.getProperty ("modRangeSchema", 1) < 2)
     {
-        const auto find = [&state] (const juce::String& id)
-        {
-            for (int i = 0; i < state.getNumChildren(); ++i)
-                if (state.getChild (i).getProperty ("id").toString() == id)
-                    return state.getChild (i);
-            return juce::ValueTree();
-        };
-        migrateModDepthRanges ([&find] (const juce::String& id, float fallback)
-                               {
-                                   const auto child = find (id);
-                                   return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
-                               },
-                               [&find] (const juce::String& id, float value)
-                               {
-                                   if (auto child = find (id); child.isValid())
-                                       child.setProperty ("value", value, nullptr);
-                               });
+        TreePatchValues values (state, PatchValues::MissingId::skip);
+        migrateModDepthRanges (values.getter(), values.setter());
         state.setProperty ("modRangeSchema", 2, nullptr);
     }
 
     // An operator saved before the FM / DX7 type loads as one (it renders
     // the same: the type only picks its card).
     {
-        const auto find = [&state] (const juce::String& id)
-        {
-            for (int i = 0; i < state.getNumChildren(); ++i)
-                if (state.getChild (i).getProperty ("id").toString() == id)
-                    return state.getChild (i);
-            return juce::ValueTree();
-        };
-        migrateOperatorModes ([&find] (const juce::String& id, float fallback)
-                              {
-                                  const auto child = find (id);
-                                  return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
-                              },
-                              [&find] (const juce::String& id, float value)
-                              {
-                                  if (auto child = find (id); child.isValid())
-                                      child.setProperty ("value", value, nullptr);
-                              });
+        TreePatchValues values (state, PatchValues::MissingId::skip);
+        migrateOperatorModes (values.getter(), values.setter());
     }
 
     // A patch saved while GLIDE took 16 times its knob's time glides as it did.
     if ((int) state.getProperty ("glideSchema", 1) < 2)
     {
-        const auto find = [&state] (const juce::String& id)
-        {
-            for (int i = 0; i < state.getNumChildren(); ++i)
-                if (state.getChild (i).getProperty ("id").toString() == id)
-                    return state.getChild (i);
-            return juce::ValueTree();
-        };
-        migrateGlideTime ([&find] (const juce::String& id, float fallback)
-                          {
-                              const auto child = find (id);
-                              return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
-                          },
-                          [&find] (const juce::String& id, float value)
-                          {
-                              if (auto child = find (id); child.isValid())
-                                  child.setProperty ("value", value, nullptr);
-                          });
+        TreePatchValues values (state, PatchValues::MissingId::skip);
+        migrateGlideTime (values.getter(), values.setter());
         state.setProperty ("glideSchema", 2, nullptr);
     }
 
@@ -1693,25 +1505,8 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
     // keeps the old body.
     if ((int) state.getProperty ("bodyLevelSchema", 1) < 2)
     {
-        const auto find = [&state] (const juce::String& id)
-        {
-            for (int i = 0; i < state.getNumChildren(); ++i)
-                if (state.getChild (i).getProperty ("id").toString() == id)
-                    return state.getChild (i);
-            return juce::ValueTree();
-        };
-        migrateBodyLevel ([&find] (const juce::String& id, float fallback)
-                                {
-                                    const auto child = find (id);
-                                    return child.isValid() && child.hasProperty ("value") ? (float) child.getProperty ("value") : fallback;
-                                },
-                                [&find, &state] (const juce::String& id, float value)
-                                {
-                                    if (auto child = find (id); child.isValid())
-                                        child.setProperty ("value", value, nullptr);
-                                    else
-                                        state.appendChild (juce::ValueTree ("PARAM", { { "id", id }, { "value", value } }), nullptr);
-                                });
+        TreePatchValues values (state, PatchValues::MissingId::add);
+        migrateBodyLevel (values.getter(), values.setter());
         state.setProperty ("bodyLevelSchema", 2, nullptr);
     }
 
