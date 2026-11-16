@@ -689,23 +689,20 @@ public:
                     level->setVisible (controlled);
                     power->setVisible (controlled);
                 }
-                if (! controlled)
+                // LEVEL over ON in a narrow column at the picture's right, so the picture keeps the cell's height; an
+                // empty corner's picture is the same size (its column stays bare).
+                constexpr int columnWidth = 66;
+                auto column = cell.removeFromRight (columnWidth);
+                cell.removeFromRight (4);
+                wave.setBounds (cell);
+                wave.setVisible (cell.getHeight() > 20);
+                if (controlled)
                 {
-                    wave.setBounds (cell);
-                    wave.setVisible (cell.getHeight() > 20);
-                    continue;
-                }
-                // (Half the height; a tall cell keeps more picture rather than an empty band round the ring.)
-                const auto picture = cell.removeFromTop (juce::jmax (cell.getHeight() / 2, cell.getHeight() - 96));
-                wave.setBounds (picture);
-                wave.setVisible (picture.getHeight() > 20);
-                {
-                    // The ring and the switch as one group in the middle of the band, the switch level with the
-                    // ring's middle and its name on the ring's name line (as PATH in the row below).
-                    constexpr int ringWidth = 64, switchWidth = 44;
-                    auto band = cell.withSizeKeepingCentre (ringWidth + switchWidth, cell.getHeight());
-                    level->placeAsRing (band.removeFromLeft (ringWidth), 40);
-                    placeSwitchBeside (*power, *level, band);
+                    constexpr int switchHeight = 34;
+                    level->placeAsRing (column.removeFromTop (juce::jmax (0, column.getHeight() - switchHeight - 2)), 40);
+                    power->setPackedName (ToggleControl::NamePlace::below);
+                    power->setBelowNameSize (level->packedNameUnits());
+                    power->setBounds (column.removeFromBottom (switchHeight).withSizeKeepingCentre (level->getWidth(), switchHeight));
                 }
             }
             first += inRow;
