@@ -1,5 +1,5 @@
-// Included only from PluginEditor.cpp; the contents are in its anonymous
-// namespace. Includes what it uses (tools/check_headers.sh checks).
+// The VECTOR page, and operatorVoiceFilterOff (PLAY's FILTER card). VectorPage
+// is declared here; its member functions are in FilterVectorPhysicalPages.cpp.
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -15,8 +15,6 @@
 #include "OscPage.h"
 #include "PageHelpers.h"
 
-namespace
-{
 // An operator (DX7) voice with both filters wide open has none: PLAY's FILTER OFF
 // note says so (a macro sitting at 0 pulls nothing).
 inline bool operatorVoiceFilterOff (const IlanaSynthAudioProcessor& p)
@@ -37,100 +35,7 @@ class VectorPage : public juce::Component,
                    private IlanaAnim::FrameTimer
 {
 public:
-    explicit VectorPage (IlanaSynthAudioProcessor& p)
-        : processorRef (p),
-          pad (p),
-          on (p.apvts, "vec_on", "ON"),
-          path (p.apvts, "vec_path", "PATH"),
-          sync (p.apvts, "vec_sync", "SYNC"),
-          shape (p.apvts, "vec_shape", "SHAPE"),
-          x (p.apvts, "vec_x", "X", colour(), true),
-          y (p.apvts, "vec_y", "Y", colour(), true),
-          // (The motion's own colour, not the accent again: UI review 31, item 40.)
-          rate (p.apvts, "vec_rate", "PATH RATE", motionColour(), false),
-          // PATH RATE as a note value while SYNC is on, in the same place (as an LFO's RATE: UI review 31, item 36).
-          division (p.apvts, "vec_div", "PATH RATE", motionColour(), false),
-          // The pad's own wander, apart from the oscillators' analog drift
-          // (UI review 6, I6-25).
-          drift (p.apvts, "vec_drift", "WANDER", motionColour(), false),
-          driftRate (p.apvts, "vec_drift_rate", "WANDER RATE", motionColour(), false)
-    {
-        const char* ids[] { "vec_a", "vec_b", "vec_c", "vec_d", "vec_e", "vec_f" };
-        for (int c = 0; c < VectorShape::maxCorners; ++c)
-        {
-            cornerMenus[(size_t) c] = std::make_unique<ComboControl> (p.apvts, ids[c], cornerName (VectorShape::square, c));
-            cornerWaves[(size_t) c] = std::make_unique<VectorCornerWave> (p, c);
-            addAndMakeVisible (*cornerMenus[(size_t) c]);
-            addAndMakeVisible (*cornerWaves[(size_t) c]);
-        }
-        addAll (*this, pad, on, path, shape, x, y, rate, drift, driftRate, sync, pathShapes);
-        addChildComponent (division);
-        path.showAsSwitch();
-        sync.showAsSwitch();
-        path.setSwitchColour (motionColour());
-        sync.setSwitchColour (motionColour());
-        division.setTooltip ("Path rate (synced)\nSYNC is on, so PATH RATE is a note value at the host tempo: one trip round the path "
-                             "per note. Turn SYNC off for Hz.");
-
-        // PATH's shapes (UI review 31, item 36): a pick writes the path's eight points in one undo step; the
-        // menu reads the shape the points make, or Custom after a drag on the pad.
-        pathShapes.addItemList (pathShapeNames(), 1);
-        pathShapes.setTextWhenNothingSelected ("Custom");
-        pathShapes.getProperties().set ("packedMenu", true);
-        pathShapes.getProperties().set ("textPrefix", "PATH");
-        pathShapes.setTooltip ("Path shape\nWrites the path's eight points as a Circle, a Figure 8, a Square (every corner), "
-                               "or a line across (X) or up and down (Y), in one undo step. Drag the points on the pad for your own.");
-        pathShapes.onChange = [this]
-        {
-            if (const auto id = pathShapes.getSelectedId(); id > 0 && id != matchedPathShape())
-                writePathShape (id - 1);
-        };
-        // (One box with its name inside, on the CORNERS box's title line.)
-        shape.setPackedMenu (true);
-
-        // The corners name the oscillators as the pad does ("OSC 1").
-        for (auto& corner : cornerMenus)
-        {
-            auto& box = corner->getComboBox();
-            // (Read first: it only matches while the shown text is the item's.)
-            const auto selectedId = box.getSelectedId();
-            for (int item = 0; item < box.getNumItems(); ++item)
-                box.changeItemText (box.getItemId (item), box.getItemText (item).toUpperCase());
-            box.setSelectedId (0, juce::dontSendNotification);
-            box.setSelectedId (selectedId, juce::dontSendNotification);
-        }
-
-        // Switched on with the pad still as it comes (a square on OSC 1-4), the shape follows the patch: one corner
-        // for each oscillator it has, those oscillators at the corners (ilana's idea, UI review 29).
-        on.getButton().onClick = [this] { if (on.getButton().getToggleState()) fitShapeToPatch(); };
-
-        // Off, the whole block dims and says why, as every card's controls
-        // do (one rule, EffectRules: UI review 7, V7-21).
-        for (juce::Component* control : { (juce::Component*) &path, (juce::Component*) &shape, (juce::Component*) &x,
-                                          (juce::Component*) &drift, (juce::Component*) &driftRate })
-            effectRules.add (*control, effectRules.isOn ("vec_on"), "VECTOR is off", [] { return FilterColours::offAlpha; });
-        // Y too, and on a slider (X only, Y held at the centre) it takes the lighter dim of an idle control: it
-        // looked live there and did nothing (UI review 30).
-        effectRules.add (y, [this] { return readParam ("vec_on") > 0.5f && processorRef.getVectorShape() != VectorShape::slider; },
-                         "The Slider shape uses X only",
-                         [this] { return readParam ("vec_on") > 0.5f ? IlanaTheme::dimmedAlpha : FilterColours::offAlpha; });
-        for (auto& corner : cornerMenus)
-            effectRules.add (*corner, effectRules.isOn ("vec_on"), "VECTOR is off", [] { return FilterColours::offAlpha; });
-        // (The corners' pictures too, as the pad: off, nothing in the card stays lit, UI review 26.)
-        for (auto& wave : cornerWaves)
-            effectRules.add (*wave, effectRules.isOn ("vec_on"), "VECTOR is off", [] { return FilterColours::offAlpha; });
-        // At the module-off alpha while VECTOR is off, the lighter dim of one
-        // idle control while only its PATH is (V7-34 with V7-21).
-        for (juce::Component* control : { (juce::Component*) &rate, (juce::Component*) &division, (juce::Component*) &sync,
-                                          (juce::Component*) &pathShapes })
-            effectRules.add (*control, [this] { return readParam ("vec_on") > 0.5f && readParam ("vec_path") > 0.5f; },
-                             "VECTOR or its PATH is off",
-                             [this] { return readParam ("vec_on") > 0.5f ? IlanaTheme::dimmedAlpha : FilterColours::offAlpha; });
-
-        updateCornerControls();
-
-        startTimerHz (20);
-    }
+    explicit VectorPage (IlanaSynthAudioProcessor& p);
 
     // Not modulation sources, so not in a source's colour: the accent.
     static juce::Colour colour() { return IlanaTheme::accent(); }
@@ -140,391 +45,40 @@ public:
     static juce::StringArray pathShapeNames() { return { "Circle", "Figure 8", "Square", "Line X", "Line Y" }; }
 
     // A shape's eight points (x, y in 0..1), in path order.
-    static std::array<juce::Point<float>, 8> pathShapePoints (int shapeIndex)
-    {
-        std::array<juce::Point<float>, 8> points;
-        for (int i = 0; i < 8; ++i)
-        {
-            const auto angle = juce::MathConstants<double>::twoPi * i / 8.0;
-            const auto s = (float) std::sin (angle), c = (float) std::cos (angle), s2 = (float) std::sin (2.0 * angle);
-            const float square[8][2] { { 0, 0 }, { 0.5f, 0 }, { 1, 0 }, { 1, 0.5f }, { 1, 1 }, { 0.5f, 1 }, { 0, 1 }, { 0, 0.5f } };
-            const float line[8] { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f, 0.75f, 0.5f, 0.25f };
-            switch (shapeIndex)
-            {
-                // (The circle is the path every patch starts with: ParameterLayout's vec_px / vec_py defaults.)
-                case 0:  points[(size_t) i] = { 0.5f + 0.35f * c, 0.5f + 0.35f * s }; break;
-                case 1:  points[(size_t) i] = { 0.5f + 0.4f * s, 0.5f + 0.3f * s2 }; break;
-                case 2:  points[(size_t) i] = { square[i][0], square[i][1] }; break;
-                case 3:  points[(size_t) i] = { line[i], 0.5f }; break;
-                default: points[(size_t) i] = { 0.5f, line[i] }; break;
-            }
-        }
-        return points;
-    }
+    static std::array<juce::Point<float>, 8> pathShapePoints (int shapeIndex);
 
     // The shape menu's id (1..5) the path's points make now, 0 for none.
-    int matchedPathShape() const
-    {
-        for (int shapeIndex = 0; shapeIndex < pathShapeNames().size(); ++shapeIndex)
-        {
-            const auto points = pathShapePoints (shapeIndex);
-            auto same = true;
-            for (int i = 0; i < 8 && same; ++i)
-                same = std::abs (readParam ("vec_px" + juce::String (i + 1)) - points[(size_t) i].x) < 0.004f
-                    && std::abs (readParam ("vec_py" + juce::String (i + 1)) - points[(size_t) i].y) < 0.004f;
-            if (same)
-                return shapeIndex + 1;
-        }
-        return 0;
-    }
+    int matchedPathShape() const;
 
     // Writes a shape's points, one undo step (public: the UI test calls it).
-    void writePathShape (int shapeIndex)
-    {
-        const auto index = juce::jlimit (0, pathShapeNames().size() - 1, shapeIndex);
-        const auto points = pathShapePoints (index);
-        processorRef.performEdit ("Vector path: " + pathShapeNames()[index], [this, &points]
-        {
-            for (int i = 0; i < 8; ++i)
-                for (const auto& [id, value] : { std::pair<juce::String, float> { "vec_px" + juce::String (i + 1), points[(size_t) i].x },
-                                                 { "vec_py" + juce::String (i + 1), points[(size_t) i].y } })
-                    if (auto* parameter = processorRef.apvts.getParameter (id))
-                    {
-                        parameter->beginChangeGesture();
-                        parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
-                        parameter->endChangeGesture();
-                    }
-        });
-        pathShapes.setSelectedId (matchedPathShape(), juce::dontSendNotification);
-    }
+    void writePathShape (int shapeIndex);
 
     juce::ComboBox& getPathShapeMenu() { return pathShapes; }
     // The LEVEL knob under a corner's picture (the UI test reaches it here).
     KnobControl* getCornerLevel (int corner) { return cornerLevels[(size_t) juce::jlimit (0, VectorShape::maxCorners - 1, corner)].get(); }
 
     // Each corner's name on its menu, by where it sits on the shape.
-    static juce::String cornerName (int shapeIndex, int corner)
-    {
-        switch (shapeIndex)
-        {
-            case VectorShape::slider:   { const char* n[] { "LEFT", "RIGHT" }; return n[juce::jlimit (0, 1, corner)]; }
-            case VectorShape::triangle: { const char* n[] { "TOP", "BOTTOM RIGHT", "BOTTOM LEFT" }; return n[juce::jlimit (0, 2, corner)]; }
-            case VectorShape::pentagon: { const char* n[] { "TOP", "RIGHT", "BOTTOM RIGHT", "BOTTOM LEFT", "LEFT" }; return n[juce::jlimit (0, 4, corner)]; }
-            case VectorShape::hexagon:  { const char* n[] { "TOP", "UPPER RIGHT", "LOWER RIGHT", "BOTTOM", "LOWER LEFT", "UPPER LEFT" }; return n[juce::jlimit (0, 5, corner)]; }
-            default:                    { const char* n[] { "TOP LEFT", "TOP RIGHT", "BOTTOM LEFT", "BOTTOM RIGHT" }; return n[juce::jlimit (0, 3, corner)]; }
-        }
-    }
+    static juce::String cornerName (int shapeIndex, int corner);
 
-    void paint (juce::Graphics& g) override
-    {
-        IlanaTheme::paintPageBackground (g, getLocalBounds());
-        IlanaTheme::paintCard (g, vectorCard.toFloat(), 7.0f, colour().withAlpha (0.35f));
+    void paint (juce::Graphics& g) override;
 
-        // The switch is at the header's right like every card's own module
-        // (UI-CONVENTIONS; V13-10), the caption after the title.
-        auto header = vectorCard.reduced (12, 0).removeFromTop (28);
-        IlanaTheme::paintCardHeader (g, header, "VECTOR", readParam ("vec_on") > 0.5f ? "one oscillator at each corner; drag VECTOR X or Y from the source bar onto a knob"
-                                                                                       : "one oscillator at each corner", colour());
-
-        // The controls in two boxes, as SEQ's GENERATE has them (UI review
-        // 9, V9-7): where the oscillators sit, and where the point is and how it moves.
-        const struct { juce::Rectangle<int> box; const char* title; } boxes[] {
-            { cornersBox, "CORNERS" }, { motionBox, "POSITION AND MOTION" } };
-        for (const auto& part : boxes)
-        {
-            IlanaTheme::paintRecessedPanel (g, part.box.toFloat(), 5.0f);
-            paintSubBoxTitle (g, part.box.reduced (10, 0).withHeight (boxHeaderHeight), part.title, {}, false, 0, colour());
-        }
-    }
-
-    void resized() override
-    {
-        auto area = getLocalBounds().reduced (12);
-        // The pad gets most of the page, square at the card's full height
-        // (no band above it: V7-21); the controls take the width left.
-        vectorCard = area;
-
-        auto inner = vectorCard.reduced (12, 0);
-        inner.removeFromTop (30);
-        inner.removeFromBottom (12);
-        // (The pad is a square: it takes the card's height and the controls
-        // the rest of the width, so no bare strip stands beside it, V12-3.)
-        const auto padWidth = juce::jlimit (200, juce::jmax (200, inner.getWidth() - 330 - 12), inner.getHeight());
-        pad.setBounds (inner.removeFromLeft (padWidth));
-        inner.removeFromLeft (12);
-        // The vector's on switch in its header, like every card's.
-        on.setBounds (IlanaTheme::cardSwitchBounds (vectorCard, vectorCard.getY() + 14));
-        // Two boxes fill the controls column's height (no empty foot): CORNERS
-        // (the menus, each over a picture of its oscillator, V14-2) over
-        // POSITION AND MOTION in one row (X, Y, PATH, its rate, WANDER and its rate).
-        constexpr int gap = 8, padding = 12;
-        const auto motionHeight = boxHeaderHeight + 2 + 72 + 8; // (a row of PLAY's rings, UI review 26)
-        cornersBox = inner.removeFromTop (juce::jmax (boxHeaderHeight + 2 * 90, inner.getHeight() - gap - motionHeight));
-        inner.removeFromTop (gap);
-        motionBox = inner;
-
-        // SHAPE closes the CORNERS box's title line, the PATH shapes POSITION AND MOTION's.
-        shape.setBounds (juce::Rectangle<int> (200, 26).withPosition (cornersBox.getRight() - padding - 200, cornersBox.getY() + 6));
-        pathShapes.setBounds (juce::Rectangle<int> (200, 26).withPosition (motionBox.getRight() - padding - 200, motionBox.getY() + 6));
-
-        // The corners in rows: two for a slider, three for a triangle, two by two for the square, three over two
-        // for a pentagon, three by two for a hexagon. Each row spans the box, so no cell stands empty.
-        const auto shapeIndex = processorRef.getVectorShape();
-        const auto count = VectorShape::cornerCount (shapeIndex);
-        std::vector<int> rows;
-        switch (count)
-        {
-            case 2:  rows = { 2 }; break;
-            case 3:  rows = { 3 }; break;
-            case 5:  rows = { 3, 2 }; break;
-            case 6:  rows = { 3, 3 }; break;
-            default: rows = { 2, 2 }; break;
-        }
-
-        auto corners = cornersBox.reduced (padding, 0).withTrimmedTop (boxHeaderHeight + 10).withTrimmedBottom (8);
-        // Every corner has the same cell (menu, picture, LEVEL and on switch), so the rows stay even. A corner with
-        // no oscillator ("OSC 4: none") shows a dimmed empty picture over the whole of its cell with "+ add OSC n".
-        const auto missing = [this] (int corner)
-        {
-            const auto osc = processorRef.getVectorCorner (corner);
-            return ! (osc >= 0 && osc < OscillatorIds::count && processorRef.isOscillatorShown (osc));
-        };
-        const auto rowHeight = rows.empty() ? 0 : corners.getHeight() / (int) rows.size();
-
-        auto first = 0;
-        for (size_t r = 0; r < rows.size(); ++r)
-        {
-            auto row = corners.removeFromTop (r + 1 == rows.size() ? corners.getHeight() : rowHeight);
-            const auto inRow = rows[r];
-            const auto cellWidth = row.getWidth() / inRow;
-            for (int i = 0; i < inRow; ++i)
-            {
-                auto cell = (i + 1 == inRow ? row : row.removeFromLeft (cellWidth)).reduced (3, 2);
-                auto& menu = *cornerMenus[(size_t) (first + i)];
-                auto& wave = *cornerWaves[(size_t) (first + i)];
-                menu.setBounds (cell.removeFromTop (46));
-                cell.removeFromTop (2);
-                // The picture at half its height, the corner oscillator's LEVEL ring and on switch under it (UI
-                // review 31, item 18: the pad already shows the wave; balancing the corners needs their levels).
-                auto* level = cornerLevels[(size_t) (first + i)].get();
-                auto* power = cornerSwitches[(size_t) (first + i)].get();
-                const auto controlled = level != nullptr && power != nullptr && ! missing (first + i);
-                if (level != nullptr && power != nullptr)
-                {
-                    level->setVisible (controlled);
-                    power->setVisible (controlled);
-                }
-                // LEVEL over ON in a narrow column at the picture's right, so the picture keeps the cell's height; an
-                // empty corner's picture is the same size (its column stays bare).
-                constexpr int columnWidth = 66;
-                auto column = cell.removeFromRight (columnWidth);
-                cell.removeFromRight (4);
-                wave.setBounds (cell);
-                wave.setVisible (cell.getHeight() > 20);
-                if (controlled)
-                {
-                    constexpr int switchHeight = 34;
-                    level->placeAsRing (column.removeFromTop (juce::jmax (0, column.getHeight() - switchHeight - 2)), 40);
-                    power->setPackedName (ToggleControl::NamePlace::below);
-                    power->setBelowNameSize (level->packedNameUnits());
-                    power->setBounds (column.removeFromBottom (switchHeight).withSizeKeepingCentre (level->getWidth(), switchHeight));
-                }
-            }
-            first += inRow;
-        }
-        for (int c = 0; c < VectorShape::maxCorners; ++c)
-        {
-            cornerMenus[(size_t) c]->setVisible (c < count);
-            cornerMenus[(size_t) c]->setLabelText (cornerName (shapeIndex, c));
-            if (c >= count)
-            {
-                cornerWaves[(size_t) c]->setVisible (false);
-                for (auto* control : { (juce::Component*) cornerLevels[(size_t) c].get(), (juce::Component*) cornerSwitches[(size_t) c].get() })
-                    if (control != nullptr)
-                        control->setVisible (false);
-            }
-        }
-
-        auto knobs = motionBox.reduced (padding, 0).withTrimmedTop (boxHeaderHeight + 2).withTrimmedBottom (6);
-        // (Every name on one line, the PATH switch under its own: the row no longer drops it, S1-14.)
-        // SYNC beside PATH RATE, the note value in RATE's place while it is on (UI review 31, item 36).
-        layoutRow (knobs, { &x, &y, &path, &rate, &sync, &drift, &driftRate }, true);
-        // PLAY's ring knobs (one knob style, UI review 26), at SEQ's and FM's dial, so the values are one size
-        // with theirs (14 px, not 16: UI review 31, item 39); the switches level with their middles.
-        for (auto* knob : { &x, &y, &rate, &drift, &driftRate })
-            knob->placeAsRing (knobs.withX (knob->getX()).withWidth (knob->getWidth()), 40);
-        division.placeAsRing (knobs.withX (rate.getX()).withWidth (rate.getWidth()), 40);
-        for (auto* toggle : { &path, &sync })
-            placeSwitchBeside (*toggle, x, toggle->getBounds().withY (x.getY()));
-    }
+    void resized() override;
 
     // A switch level with `knob`'s ring middle and its name on the ring's name line (as FM's EXTRAS row, UI
     // review 28), centred in `cell`'s width.
-    static void placeSwitchBeside (ToggleControl& toggle, KnobControl& knob, juce::Rectangle<int> cell)
-    {
-        const auto middle = knob.getY() + juce::roundToInt (knob.getDialCentre().y);
-        const auto nameTop = knob.getY() + knob.getPackedNameArea().getY();
-        toggle.setPackedName (ToggleControl::NamePlace::below);
-        toggle.setBelowNameSize (knob.packedNameUnits());
-        toggle.setBounds (juce::Rectangle<int> (cell.getCentreX() - knob.getWidth() / 2, middle - 7, knob.getWidth(),
-                                                knob.getBottom() - (middle - 7)));
-        toggle.setNameDrop (juce::jmax (0, nameTop - (middle - 7 + 15 + 1)));
-    }
+    static void placeSwitchBeside (ToggleControl& toggle, KnobControl& knob, juce::Rectangle<int> cell);
 
     // Each corner's LEVEL and on switch follow the oscillator its menu picks (made again when that changes).
-    void updateCornerControls()
-    {
-        for (int c = 0; c < VectorShape::maxCorners; ++c)
-        {
-            const auto osc = juce::jlimit (0, OscillatorIds::count - 1, processorRef.getVectorCorner (c));
-            if (cornerOsc[(size_t) c] == osc && cornerLevels[(size_t) c] != nullptr)
-                continue;
-
-            cornerOsc[(size_t) c] = osc;
-            const auto prefix = juce::String (OscillatorIds::prefixes[(size_t) osc]);
-            const auto oscColour = IlanaTheme::oscColour (osc);
-            cornerLevels[(size_t) c] = std::make_unique<KnobControl> (processorRef.apvts, prefix + "_level", "LEVEL", oscColour, false);
-            cornerSwitches[(size_t) c] = std::make_unique<ToggleControl> (processorRef.apvts, prefix + "_on", "ON");
-            cornerSwitches[(size_t) c]->showAsSwitch();
-            cornerSwitches[(size_t) c]->setSwitchColour (oscColour);
-            const auto tip = "OSC " + juce::String (osc + 1) + " level and on switch\nThe same controls as its card on PLAY.";
-            cornerLevels[(size_t) c]->setTooltip (tip);
-            addChildComponent (*cornerLevels[(size_t) c]);
-            addChildComponent (*cornerSwitches[(size_t) c]);
-        }
-    }
+    void updateCornerControls();
 
     // The pad as it comes (a square on OSC 1-4) takes one corner per oscillator the patch has, those oscillators
     // in order. A pad already shaped or re-cornered keeps what it has. (Public: the tests and snapshots call it.)
-    void fitShapeToPatch()
-    {
-        if (processorRef.getVectorShape() != VectorShape::square)
-            return;
-        for (int c = 0; c < 4; ++c)
-            if (processorRef.getVectorCorner (c) != c)
-                return;
-
-        std::vector<int> shown;
-        for (int osc = 0; osc < OscillatorIds::count; ++osc)
-            if (processorRef.isOscillatorShown (osc))
-                shown.push_back (osc);
-        if (shown.size() < 2 || shown.size() == 4)
-            return;
-
-        const auto fitted = shown.size() == 2 ? VectorShape::slider : shown.size() == 3 ? VectorShape::triangle
-                          : shown.size() == 5 ? VectorShape::pentagon : VectorShape::hexagon;
-        processorRef.performEdit ("Vector shape", [this, fitted, shown]
-        {
-            const auto write = [this] (const juce::String& id, float value)
-            {
-                if (auto* parameter = processorRef.apvts.getParameter (id))
-                {
-                    parameter->beginChangeGesture();
-                    parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
-                    parameter->endChangeGesture();
-                }
-            };
-            write ("vec_shape", (float) fitted);
-            const char* ids[] { "vec_a", "vec_b", "vec_c", "vec_d", "vec_e", "vec_f" };
-            for (size_t c = 0; c < shown.size(); ++c)
-                write (ids[c], (float) shown[c]);
-            // The point at the shape's balance, where every corner sounds.
-            const auto centre = VectorShape::balance (fitted);
-            write ("vec_x", centre.x);
-            write ("vec_y", centre.y);
-        });
-    }
+    void fitShapeToPatch();
 
 private:
-    float readParam (const juce::String& id) const
-    {
-        const auto* value = processorRef.apvts.getRawParameterValue (id);
-        return value != nullptr ? value->load() : 0.0f;
-    }
+    float readParam (const juce::String& id) const;
 
-    void timerCallback() override
-    {
-        // A corner menu names an oscillator the patch hasn't added as such
-        // (the pad's caption says "none"; UI review 9, I9-17).
-        auto shown = 0;
-        for (int osc = 0; osc < OscillatorIds::count; ++osc)
-        {
-            shown |= processorRef.isOscillatorShown (osc) ? 1 << osc : 0;
-            // (A switched-off oscillator is a different menu text: bit 8 up.)
-            shown |= processorRef.isOscillatorShown (osc) && readParam (juce::String (OscillatorIds::prefixes[(size_t) osc]) + "_on") < 0.5f ? 1 << (osc + 8) : 0;
-        }
-
-        // (The shape and the corners' picks: a change relayouts the corner rows.)
-        auto corners = (juce::int64) processorRef.getVectorShape();
-        for (int corner = 0; corner < VectorShape::maxCorners; ++corner)
-            corners = corners * 16 + processorRef.getVectorCorner (corner) + 1;
-        if (corners != cornerKey)
-        {
-            cornerKey = corners;
-            updateCornerControls();
-            resized();
-        }
-
-        if (shown != shownOscillators)
-        {
-            shownOscillators = shown;
-            resized(); // (a corner row with no oscillator folds to its menus)
-            for (auto& corner : cornerMenus)
-            {
-                auto& box = corner->getComboBox();
-                const auto selected = box.getSelectedId();
-                for (int osc = 0; osc < OscillatorIds::count; ++osc)
-                {
-                    // Worded as the pad's corners and every label: "OSC 4: none", "OSC 3: off" (V12-8).
-                    box.changeItemText (osc + 1, "OSC " + juce::String (osc + 1) + ((shown >> osc) & 1 ? ((shown >> (osc + 8)) & 1 ? ": off" : "") : ": none"));
-                    // A corner can't sound an oscillator that isn't there: the
-                    // choice is greyed unless it is already the corner's (V11-25).
-                    box.setItemEnabled (osc + 1, ((shown >> osc) & 1) != 0 || osc + 1 == selected);
-                }
-                box.setSelectedId (selected, juce::dontSendNotification);
-            }
-        }
-
-        for (auto& corner : cornerMenus)
-        {
-            const auto id = corner->getComboBox().getSelectedId();
-            if (id >= 1 && id <= OscillatorIds::count)
-                corner->setTint (IlanaTheme::oscColour (id - 1));
-        }
-
-        const auto active = readParam ("vec_on") > 0.5f;
-        if (const auto alpha = active ? 1.0f : FilterColours::offAlpha; pad.getAlpha() != alpha)
-            pad.setAlpha (alpha);
-        effectRules.apply();
-
-        // The corners' LEVEL rings and switches dim with the card; a LEVEL also while its oscillator is off.
-        for (int c = 0; c < VectorShape::maxCorners; ++c)
-            if (auto* level = cornerLevels[(size_t) c].get(); level != nullptr && cornerSwitches[(size_t) c] != nullptr)
-            {
-                const auto oscOn = readParam (juce::String (OscillatorIds::prefixes[(size_t) cornerOsc[(size_t) c]]) + "_on") > 0.5f;
-                const auto alpha = ! active ? FilterColours::offAlpha : oscOn ? 1.0f : IlanaTheme::dimmedAlpha;
-                if (level->getAlpha() != alpha)
-                    level->setAlpha (alpha);
-                if (const auto switchAlpha = active ? 1.0f : FilterColours::offAlpha; cornerSwitches[(size_t) c]->getAlpha() != switchAlpha)
-                    cornerSwitches[(size_t) c]->setAlpha (switchAlpha);
-            }
-
-        // PATH RATE in Hz, or as a note value while SYNC is on; the shape menu names the path's shape.
-        const auto synced = readParam ("vec_sync") > 0.5f;
-        if (rate.isVisible() == synced)
-        {
-            rate.setVisible (! synced);
-            division.setVisible (synced);
-        }
-        if (const auto matched = matchedPathShape(); pathShapes.getSelectedId() != matched)
-            pathShapes.setSelectedId (matched, juce::dontSendNotification);
-
-        if (shownActive != active)
-        {
-            shownActive = active;
-            repaint (vectorCard);
-        }
-    }
+    void timerCallback() override;
 
     IlanaSynthAudioProcessor& processorRef;
     EffectRules effectRules { processorRef };
@@ -544,5 +98,3 @@ private:
     int shownOscillators = -1;
     juce::int64 cornerKey = -1; // (the shape and the corners' picks: a change relayouts the corner rows)
 };
-
-} // namespace

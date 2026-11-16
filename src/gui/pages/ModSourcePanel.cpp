@@ -1,0 +1,1321 @@
+#include "ModSourcePanel.h"
+
+#include "PageHelpers.h"
+
+OperatorEnvList::OperatorEnvList (IlanaSynthAudioProcessor& p)
+    : processorRef (p)
+{
+    setTooltip ("What plays the Operator Env: each oscillator's OUTPUT, as a bar. Click to open or close the list.");
+    startTimerHz (4);
+}
+
+void OperatorEnvList::paint (juce::Graphics& g)
+{
+    const auto operators = OperatorPool::operatorsOnEnv (processorRef);
+    const auto count = (int) operators.size();
+    auto area = getLocalBounds();
+    auto header = area.removeFromTop (headerHeight);
+    g.setColour (IlanaTheme::Ui::raised);
+    g.fillRoundedRectangle (header.toFloat().reduced (0.5f), 6.0f);
+    g.setColour (IlanaTheme::Ui::text2);
+    g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true));
+    g.drawText (juce::String (count) + (count == 1 ? " OSCILLATOR PLAYS IT  " : " OSCILLATORS PLAY IT  ")
+                    + juce::String::fromUTF8 (open ? "\xe2\x96\xb4" : "\xe2\x96\xbe"),
+                header.reduced (10, 0), juce::Justification::centredLeft); // off-grid
+    if (! open)
+        return;
+
+    area.removeFromTop (Space::s4);
+    for (int i = 0; i < count && area.getHeight() >= rowHeight; ++i)
+    {
+        const auto osc = operators[(size_t) i];
+        const auto* parameter = processorRef.apvts.getParameter (OscRole::prefix (osc) + "_eg_out");
+        if (parameter == nullptr)
+            continue;
+        auto row = area.removeFromTop (rowHeight).reduced (Space::s4, 0);
+        g.setColour (IlanaTheme::oscColour (osc));
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true));
+        g.drawText ("OSC " + juce::String (osc + 1), row.removeFromLeft (52), juce::Justification::centredLeft); // off-grid
+        g.setColour (IlanaTheme::Ui::text2);
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
+        g.drawText (parameter->getCurrentValueAsText(), row.removeFromRight (62), juce::Justification::centredRight); // off-grid
+        const auto bar = row.withSizeKeepingCentre (row.getWidth() - 8, 6).toFloat();
+        g.setColour (juce::Colours::white.withAlpha (0.07f));
+        g.fillRoundedRectangle (bar, 3.0f);
+        g.setColour (IlanaTheme::oscColour (osc).withAlpha (0.85f));
+        g.fillRoundedRectangle (bar.withWidth (juce::jmax (3.0f, bar.getWidth() * parameter->getValue())), 3.0f);
+    }
+}
+
+void OperatorEnvList::mouseUp (const juce::MouseEvent& event)
+{
+    if (event.y < headerHeight && ! event.mouseWasDraggedSinceMouseDown())
+    {
+        open = ! open;
+        if (onToggle != nullptr)
+            onToggle();
+        repaint();
+    }
+}
+
+void OperatorEnvList::timerCallback ()
+{
+    // (The bars follow the OUTPUT knobs: redraw when a parameter moved.)
+    if (open && IlanaAnim::showing (*this) && changeGate.check (processorRef.getUiEpoch()))
+        repaint();
+}
+
+SourceRouteList::SourceRouteList (IlanaSynthAudioProcessor& p)
+    : processorRef (p)
+{
+    setTooltip ("What this source drives. Drag a bar sideways to set that route's depth (shift: fine), double-click "
+                "it for 0 %, click a target to open its row in MATRIX, right-click to bypass or remove it.");
+    startTimerHz (12);
+}
+
+void SourceRouteList::setSource (int newSource, juce::Colour newColour)
+{
+    source = newSource;
+    colour = newColour;
+    refresh (true);
+}
+
+void SourceRouteList::setCollapsed (bool shouldCollapse)
+{
+    if (collapsed != shouldCollapse)
+    {
+        collapsed = shouldCollapse;
+        if (onCollapsedChange != nullptr)
+            onCollapsedChange (collapsed);
+        repaint();
+    }
+}
+
+void SourceRouteList::paint (juce::Graphics& g)
+{
+    const auto bounds = getLocalBounds().toFloat();
+    g.setColour (IlanaTheme::Ui::well);
+    g.fillRoundedRectangle (bounds, 8.0f);
+    g.setColour (IlanaTheme::Ui::line);
+    g.drawRoundedRectangle (bounds.reduced (0.5f), 8.0f, 1.0f);
+
+    auto header = headerArea();
+    g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true).withKerningFactor (0.08f));
+    g.setColour (colour);
+    const auto caret = juce::String::fromUTF8 (collapsed ? "\xe2\x96\xb8  " : "\xe2\x96\xbe  ");
+    g.drawText (caret + "DRIVES", header, juce::Justification::centredLeft);
+    g.setColour (IlanaTheme::Ui::text3);
+    const auto count = (int) slots.size();
+    g.drawText (juce::String (count) + (count == 1 ? " ROUTE" : " ROUTES"), header, juce::Justification::centredRight);
+
+    if (collapsed)
+        return;
+
+    if (slots.empty())
+    {
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
+        g.setColour (IlanaTheme::Ui::text3);
+        // (The compact pop-up is 300 px wide: the short line there, never cut off.)
+        const auto line = rowArea (0);
+        const juce::String full = "Nothing yet. Drag " + ModNames::sourceUpper (source, &processorRef)
+                                  + " onto any knob; its routes and depths show here.";
+        const auto fits = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), full) <= line.getWidth();
+        IlanaTheme::drawFitted (g, fits ? full : juce::String ("Nothing yet. Drag it onto any knob."),
+                                line, juce::Justification::centredLeft, 1);
+        return;
+    }
+
+    for (int row = 0; row < count; ++row)
+    {
+        const auto area = rowArea (row);
+        if (area.getBottom() > getHeight() - 2)
+            break;
+
+        const auto routing = processorRef.readModSlot (slots[(size_t) row]);
+        const auto live = routing.isActive();
+        const auto hot = row == hoverRow || row == dragRow;
+        const auto tint = colour.withAlpha (live ? (hot ? 1.0f : 0.85f) : 0.4f);
+        const auto lfo = Mod::lfoIndexFor ((Mod::Source) source);
+        const auto viaB = lfo >= 0 && routing.source == Mod::lfoBSourceFor (lfo);
+        const auto prefix = viaB ? juce::String ("OUT 2  ") : routing.source != (Mod::Source) source ? juce::String ("VIA  ") : juce::String();
+
+        auto cells = area;
+        const auto name = cells.removeFromLeft (nameWidth (area));
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
+        g.setColour (tint);
+        IlanaTheme::drawFitted (g, prefix + ModNames::destination (routing.destination, processorRef), name.withTrimmedRight (Space::s8),
+                                juce::Justification::centredLeft, 1);
+        if (hot && hoverName)
+            g.fillRect (name.getX(), name.getBottom() - 3, juce::jmin (name.getWidth() - 8, juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), prefix + ModNames::destination (routing.destination, processorRef))), 1);
+
+        const auto depth = juce::roundToInt (routing.depth * 100.0f);
+        g.setColour (live ? IlanaTheme::Ui::text : IlanaTheme::Ui::text3);
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true));
+        g.drawText (routing.bypass ? juce::String ("OFF") : (depth > 0 ? "+" : "") + juce::String (depth) + "%", cells.removeFromRight (valueWidth),
+                    juce::Justification::centredRight);
+
+        // The depth as a bar from the centre: right for positive, left
+        // for negative (as the knob rings swing).
+        const auto bar = barArea (area).toFloat();
+        g.setColour (juce::Colours::white.withAlpha (hot ? 0.1f : 0.06f));
+        g.fillRoundedRectangle (bar, 2.5f);
+        g.setColour (juce::Colours::white.withAlpha (0.18f));
+        g.fillRect (bar.getCentreX() - 0.5f, bar.getY() - 2.0f, 1.0f, bar.getHeight() + 4.0f);
+        const auto half = bar.getWidth() * 0.5f * juce::jlimit (0.0f, 1.0f, std::abs (routing.depth));
+        const auto fill = routing.depth >= 0.0f ? juce::Rectangle<float> (bar.getCentreX(), bar.getY(), half, bar.getHeight())
+                                                : juce::Rectangle<float> (bar.getCentreX() - half, bar.getY(), half, bar.getHeight());
+        g.setColour (colour.withAlpha (live ? (hot ? 0.95f : 0.7f) : 0.3f));
+        g.fillRoundedRectangle (fill, 2.5f);
+    }
+}
+
+void SourceRouteList::mouseDown (const juce::MouseEvent& event)
+{
+    dragRow = -1;
+
+    if (headerArea().expanded (0, 3).contains (event.getPosition())) // off-grid
+    {
+        setCollapsed (! collapsed);
+        if (onUserToggle != nullptr)
+            onUserToggle (collapsed);
+        return;
+    }
+
+    const auto row = rowAt (event.getPosition());
+    if (row < 0)
+        return;
+
+    const auto slot = slots[(size_t) row];
+
+    if (event.mods.isPopupMenu())
+    {
+        showMenu (slot);
+        return;
+    }
+
+    if (event.x < rowArea (row).getX() + nameWidth (rowArea (row)))
+    {
+        if (ModNames::openMatrixRow() != nullptr)
+            ModNames::openMatrixRow() (slot);
+        return;
+    }
+
+    dragRow = row;
+    dragStartDepth = processorRef.readModSlot (slot).depth;
+    processorRef.beginEdit (ModNames::source (source, &processorRef) + " depth");
+    editing = true;
+    repaint();
+}
+
+void SourceRouteList::mouseDrag (const juce::MouseEvent& event)
+{
+    if (dragRow < 0 || ! juce::isPositiveAndBelow (dragRow, (int) slots.size()))
+        return;
+
+    const auto bar = barArea (rowArea (dragRow));
+    const auto scale = (event.mods.isShiftDown() ? 0.25f : 1.0f) * 2.0f / (float) juce::jmax (20, bar.getWidth());
+    const auto depth = juce::jlimit (-1.0f, 1.0f, dragStartDepth + (float) event.getDistanceFromDragStartX() * scale);
+    processorRef.setModSlotValue (slots[(size_t) dragRow], "amt", depth);
+    repaint();
+}
+
+void SourceRouteList::mouseUp (const juce::MouseEvent&)
+{
+    if (editing)
+        processorRef.endEdit();
+    editing = false;
+    dragRow = -1;
+    repaint();
+}
+
+void SourceRouteList::mouseDoubleClick (const juce::MouseEvent& event)
+{
+    const auto row = rowAt (event.getPosition());
+    if (row < 0 || event.x < rowArea (row).getX() + nameWidth (rowArea (row)))
+        return;
+    const auto slot = slots[(size_t) row];
+    processorRef.performEdit ("Zero " + ModNames::source (source, &processorRef) + " depth",
+                              [this, slot] { processorRef.setModSlotValue (slot, "amt", 0.0f); });
+    repaint();
+}
+
+juce::Rectangle<int> SourceRouteList::rowArea (int row) const
+{
+    return { 10, headerHeight + 4 + row * rowHeight, getWidth() - 20, rowHeight };
+}
+
+juce::Rectangle<int> SourceRouteList::barArea (juce::Rectangle<int> row) const
+{
+    row.removeFromLeft (nameWidth (row));
+    row.removeFromRight (valueWidth + 8);
+    return row.withSizeKeepingCentre (row.getWidth(), 6);
+}
+
+int SourceRouteList::rowAt (juce::Point<int> position) const
+{
+    if (collapsed)
+        return -1;
+    for (int row = 0; row < (int) slots.size(); ++row)
+        if (rowArea (row).contains (position))
+            return row;
+    return -1;
+}
+
+void SourceRouteList::updateHover (juce::Point<int> position)
+{
+    const auto row = rowAt (position);
+    const auto onName = row >= 0 && position.x < rowArea (row).getX() + nameWidth (rowArea (row));
+    if (row != hoverRow || onName != hoverName)
+    {
+        hoverRow = row;
+        hoverName = onName;
+        setMouseCursor (headerArea().contains (position) || onName ? juce::MouseCursor::PointingHandCursor
+                        : row >= 0                               ? juce::MouseCursor::LeftRightResizeCursor
+                                                                 : juce::MouseCursor::NormalCursor);
+        repaint();
+    }
+}
+
+void SourceRouteList::showMenu (int slot)
+{
+    const auto routing = processorRef.readModSlot (slot);
+    juce::PopupMenu menu;
+    menu.addSectionHeader (ModNames::destination (routing.destination, processorRef));
+    menu.addItem (1, "Bypass", true, routing.bypass);
+    menu.addItem (2, "Open in MATRIX");
+    menu.addItem (3, "Remove");
+    juce::Component::SafePointer<SourceRouteList> safeThis (this);
+    menu.showMenuAsync (IlanaTheme::menuOptions (this), [safeThis, slot, bypass = routing.bypass] (int result)
+    {
+        if (safeThis == nullptr)
+            return;
+        auto& p = safeThis->processorRef;
+        if (result == 1)
+            p.performEdit (bypass ? "Enable modulation" : "Bypass modulation",
+                           [&p, slot, bypass] { p.setModSlotValue (slot, "byp", bypass ? 0.0f : 1.0f); });
+        else if (result == 2 && ModNames::openMatrixRow() != nullptr)
+            ModNames::openMatrixRow() (slot);
+        else if (result == 3)
+            p.performEdit ("Remove modulation", [&p, slot] { p.clearModSlot (slot); });
+        safeThis->refresh (true);
+    });
+}
+
+void SourceRouteList::refresh (bool force)
+{
+    auto next = modSlotsDrivenBy (processorRef, source);
+    auto signature = (juce::int64) next.size();
+    for (const auto slot : next)
+    {
+        const auto routing = processorRef.readModSlot (slot);
+        signature = signature * 31 + slot * 977 + routing.destination * 13 + juce::roundToInt (routing.depth * 1000.0f) + (routing.bypass ? 7 : 0);
+    }
+    if (force || signature != lastSignature)
+    {
+        lastSignature = signature;
+        const auto countChanged = next.size() != slots.size();
+        slots = std::move (next);
+        longestName = 0;
+        const auto font = juce::Font (IlanaTheme::font (IlanaTheme::TextSize::label));
+        for (const auto slot : slots)
+        {
+            const auto routing = processorRef.readModSlot (slot);
+            const auto lfo = Mod::lfoIndexFor ((Mod::Source) source);
+            const auto prefix = lfo >= 0 && routing.source == Mod::lfoBSourceFor (lfo) ? juce::String ("OUT 2  ")
+                                : routing.source != (Mod::Source) source                  ? juce::String ("VIA  ")
+                                                                                          : juce::String();
+            longestName = juce::jmax (longestName, juce::GlyphArrangement::getStringWidthInt (font, prefix + ModNames::destination (routing.destination, processorRef)));
+        }
+        if (countChanged && onRoutesChanged != nullptr)
+            onRoutesChanged();
+        repaint();
+    }
+}
+
+void SourceRouteList::timerCallback ()
+{
+    if (IlanaAnim::showing (*this) && dragRow < 0)
+        refresh (false);
+}
+
+SourceEditor::SourceEditor (IlanaSynthAudioProcessor& p)
+    : processorRef (p), routes (p), operatorList (p)
+{
+    addAndMakeVisible (routes);
+    addChildComponent (operatorList);
+    operatorList.onToggle = [this] { resized(); };
+    routes.onRoutesChanged = [this] { resized(); };
+    routes.onCollapsedChange = [this] (bool) { resized(); };
+    // An unused AMP ENV on an operator voice: the way to what plays instead.
+    styleJumpLink (opEnvLink, "OP ENV");
+    opEnvLink.setTooltip ("Each operator plays its own copy of the Operator Env; AMP ENV is unused. Opens it on FM.");
+    opEnvLink.onClick = [this] { if (onEditOperatorEnv != nullptr) onEditOperatorEnv(); };
+    addChildComponent (opEnvLink);
+    startTimerHz (20);
+}
+
+int SourceEditor::envelopeOf (int source)
+{
+    for (int env = 0; env < 16; ++env)
+        if ((int) envelopeSource (env) == source)
+            return env;
+    return -1;
+}
+
+juce::String SourceEditor::envelopePrefix (int env)
+{
+    const char* const prefixes[] { "amp", "fe", "f2e", "me", "e4" };
+    return env < 5 ? juce::String (prefixes[juce::jlimit (0, 4, env)]) : "env" + juce::String (env + 1);
+}
+
+void SourceEditor::setSource (int newSource)
+{
+    if (newSource == source && built)
+        return;
+
+    source = newSource;
+    built = true;
+    graph.reset();
+    controls.clear();
+    rate.reset();
+    colour = sourceTabColour (source);
+
+    const auto lfo = Mod::lfoIndexFor ((Mod::Source) source);
+    const auto env = envelopeOf (source);
+    auto& state = processorRef.apvts;
+
+    if (source == opEnvSourceId)
+    {
+        auto overview = std::make_unique<OperatorEnvOverview> (processorRef);
+        overview->onClick = [this] { if (onEditOperatorEnv != nullptr) onEditOperatorEnv(); };
+        graph = std::move (overview);
+        colour = OperatorPool::colour();
+        kind = Kind::opEnv;
+    }
+    else if (lfo >= 0)
+    {
+        const auto prefix = "lfo" + juce::String (lfo + 1);
+        graph = std::make_unique<LfoDisplay> (processorRef, lfo, colour);
+        auto shape = std::make_unique<ComboControl> (state, prefix + "_shape", "SHAPE");
+        LfoShapeMenu::apply (*shape, processorRef);
+        shape->setTint (colour);
+        controls.push_back (std::move (shape));
+        rate = std::make_unique<LfoRateControl> (processorRef, lfo, colour, false);
+        rate->addTo (*this);
+        rate->getRateKnob().setSizeRole (IlanaTheme::KnobSize::compact);
+        rate->getDivisionKnob().setSizeRole (IlanaTheme::KnobSize::compact);
+        auto smooth = std::make_unique<KnobControl> (state, prefix + "_smooth", "SMOOTH", colour, false);
+        smooth->setSizeRole (IlanaTheme::KnobSize::compact);
+        controls.push_back (std::move (smooth));
+        for (const auto& [suffix, label] : { std::pair<const char*, const char*> { "_sync", "SYNC" }, { "_retrig", "RETRIG" } })
+        {
+            auto toggle = std::make_unique<ToggleControl> (state, prefix + suffix, label);
+            toggle->setSwitchColour (colour);
+            controls.push_back (std::move (toggle));
+        }
+        kind = Kind::lfo;
+    }
+    else if (env >= 0)
+    {
+        const auto prefix = envelopePrefix (env);
+        auto display = std::make_unique<EnvelopeDisplay> (processorRef, prefix, colour, false);
+        display->setSlim (true);
+        graph = std::move (display);
+        for (const auto& [suffix, label] : { std::pair<const char*, const char*> { "_attack", "ATTACK" }, { "_decay", "DECAY" },
+                                             { "_sustain", "SUSTAIN" }, { "_release", "RELEASE" } })
+        {
+            auto knob = std::make_unique<KnobControl> (state, prefix + suffix, label, colour, false);
+            knob->setSizeRole (IlanaTheme::KnobSize::compact);
+            controls.push_back (std::move (knob));
+        }
+        kind = Kind::envelope;
+    }
+    else
+    {
+        kind = Kind::other;
+    }
+
+    if (graph != nullptr)
+        addAndMakeVisible (*graph);
+    for (auto& control : controls)
+        addAndMakeVisible (*control);
+    if (rate != nullptr)
+        rate->setShown (true);
+
+    routes.setVisible (kind != Kind::opEnv);
+    operatorList.setVisible (kind == Kind::opEnv);
+    if (kind != Kind::opEnv)
+        routes.setSource (source, colour);
+    history.fill (0.0f);
+    unusedNote = "-"; // (refreshed below)
+    refreshUnused();
+    resized();
+    repaint();
+}
+
+void SourceEditor::setRoutesFolded (bool fold)
+{
+    if (fold != routes.isCollapsed())
+    {
+        routes.setCollapsed (fold);
+        resized();
+    }
+}
+
+void SourceEditor::paint (juce::Graphics& g)
+{
+    if (kind != Kind::other || graphArea.isEmpty())
+        return;
+
+    // No settings to show: what the source is, and its live value as a trace.
+    IlanaTheme::paintWell (g, graphArea.toFloat(), 8.0f);
+    auto area = graphArea.reduced (Space::s12, 10); // off-grid
+    g.setColour (colour);
+    g.setFont (IlanaTheme::font (IlanaTheme::TextSize::title, true));
+    g.drawText (ModNames::sourceUpper (source, &processorRef), area.removeFromTop (20), juce::Justification::centredLeft); // off-grid
+    g.setColour (IlanaTheme::Ui::text2);
+    g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
+    IlanaTheme::drawFitted (g, describeOther(), area.removeFromTop (34), juce::Justification::topLeft, 2); // off-grid
+
+    const auto plot = area.reduced (0, Space::s4).toFloat();
+    if (plot.getHeight() > 12.0f)
+    {
+        juce::Path trace;
+        for (size_t i = 0; i < history.size(); ++i)
+        {
+            const auto x = plot.getX() + plot.getWidth() * (float) i / (float) (history.size() - 1);
+            const auto y = plot.getBottom() - plot.getHeight() * juce::jlimit (0.0f, 1.0f, history[(i + historyPos) % history.size()]);
+            if (i == 0)
+                trace.startNewSubPath (x, y);
+            else
+                trace.lineTo (x, y);
+        }
+        g.setColour (colour.withAlpha (0.85f));
+        g.strokePath (trace, juce::PathStrokeType (2.0f));
+    }
+}
+
+void SourceEditor::resized ()
+{
+    auto area = getLocalBounds();
+
+    if (kind == Kind::opEnv)
+    {
+        // The picture, and under it what plays it (a drop-down).
+        operatorList.setBounds (area.removeFromBottom (juce::jmin (operatorList.getIdealHeight(), area.getHeight() - minGraphHeight)));
+        area.removeFromBottom (gap);
+        graphArea = area;
+        if (graph != nullptr)
+            graph->setBounds (area);
+        return;
+    }
+
+    // The DRIVES list takes what it needs (its whole list, up to half the
+    // height); folded, one line. The graph and controls get the rest.
+    const auto routesHeight = routes.isCollapsed() ? SourceRouteList::headerHeight + 6
+                                                   : juce::jmin (routes.getIdealHeight(), juce::jmax (SourceRouteList::headerHeight + 6, area.getHeight() / 2));
+    routes.setBounds (area.removeFromBottom (routesHeight));
+    area.removeFromBottom (gap);
+
+    // The graph on the left, the controls in a grid of equal cells on the
+    // right, both the same height, so their edges line up.
+    // An LFO's controls on a low area go in one row under SHAPE, which
+    // wants a wider column.
+    const auto lowLfo = kind == Kind::lfo && area.getHeight() < menuHeight + 6 + 2 * knobRowHeight;
+    const auto controlsWidth = kind == Kind::other || kind == Kind::opEnv ? 0
+                               : lowLfo ? juce::jlimit (220, 300, area.getWidth() * 50 / 100)
+                                        : juce::jlimit (180, 280, area.getWidth() * 40 / 100);
+    auto controlArea = area.removeFromRight (controlsWidth);
+    if (controlsWidth > 0)
+        area.removeFromRight (gap);
+    graphArea = area;
+
+    if (graph != nullptr)
+        graph->setBounds (graphArea);
+    opEnvLink.setBounds (graphArea.getRight() - 8 - 104, graphArea.getY() + 8, 104, 20);
+
+    if (kind == Kind::lfo && controls.size() == 4 && rate != nullptr && lowLfo)
+    {
+        // SHAPE across the top; RATE, SMOOTH, SYNC and RETRIG in one row
+        // at the foot, level with the graph's bottom.
+        controls[0]->setBounds (controlArea.removeFromTop (menuHeight));
+        auto row = controlArea.removeFromBottom (knobRowHeight);
+        const auto cell = row.getWidth() / 4;
+        rate->setBounds (row.removeFromLeft (cell));
+        controls[1]->setBounds (row.removeFromLeft (cell));
+        // (The switches' names level with the knobs'.)
+        layoutRow (row.withHeight (13 + 30), { controls[2].get(), controls[3].get() });
+    }
+    else if (kind == Kind::lfo && controls.size() == 4 && rate != nullptr)
+    {
+        // SHAPE across the top; RATE and SMOOTH; SYNC and RETRIG.
+        controls[0]->setBounds (controlArea.removeFromTop (menuHeight));
+        controlArea.removeFromTop (Space::s6);
+        const auto rowHeight = controlArea.getHeight() / 2;
+        auto knobs = controlArea.removeFromTop (rowHeight);
+        auto switches = controlArea;
+        rate->setBounds (knobs.removeFromLeft (knobs.getWidth() / 2));
+        controls[1]->setBounds (knobs);
+        layoutRow (switches.withSizeKeepingCentre (switches.getWidth(), juce::jmin (switches.getHeight(), 13 + 30)),
+                   { controls[2].get(), controls[3].get() });
+    }
+    else if (kind == Kind::envelope && controls.size() == 4)
+    {
+        // ATTACK DECAY over SUSTAIN RELEASE: a 2 x 2 grid.
+        const auto top = controlArea.removeFromTop (controlArea.getHeight() / 2);
+        layoutRow (top, { controls[0].get(), controls[1].get() });
+        layoutRow (controlArea, { controls[2].get(), controls[3].get() });
+    }
+}
+
+juce::String SourceEditor::describe (int source)
+{
+    using S = Mod::Source;
+    const auto s = (S) source;
+    if (s == S::Velocity) return "How hard each note is played, 0 to 1. Set once per note.";
+    if (s == S::KeyTrack) return "The note's pitch: low keys low, high keys high (C3 in the middle).";
+    if (s == S::ModWheel) return "The mod wheel (CC 1), for the whole voice.";
+    if (s == S::Aftertouch) return "Pressure: channel or polyphonic aftertouch, and MPE pressure.";
+    if (s == S::Random) return "A new random value for each note.";
+    if (Mod::macroIndexFor (s) >= 0) return "A macro knob in the dock: one knob that moves every route it drives.";
+    return "A modulation source. Its settings, if it has any, open from its chip in the dock.";
+}
+
+void SourceEditor::paintOverChildren (juce::Graphics& g)
+{
+    if (unusedNote.isEmpty() || graphArea.isEmpty())
+        return;
+    // (Clear of the LFO graph's GRID menu and of EDIT OP ENV.)
+    auto pill = graphArea.reduced (Space::s8).withHeight (20); // off-grid
+    pill.setRight (opEnvLink.isVisible() ? opEnvLink.getX() - 6 : pill.getRight());
+    // An LFO's hint sits along the foot of its graph, where the whole
+    // sentence fits (A16-6: it was cut by the GRID menu's corner) and the
+    // curve rarely runs (P-1: in the middle it cut the sine).
+    if (kind == Kind::lfo)
+        pill = pill.withBottomY (graphArea.getBottom() - 8);
+    const auto font = IlanaTheme::font (IlanaTheme::TextSize::label);
+    // A solid plate hugging the sentence (A17: the old translucent strip let the curve run through
+    // the words); it is never wider than its strip, and the text shrinks before it is cut.
+    const auto wanted = (int) std::ceil (juce::GlyphArrangement::getStringWidth (font, unusedNote)) + 20;
+    if (kind == Kind::lfo && wanted < pill.getWidth())
+        pill = pill.withWidth (wanted);
+    g.setColour (IlanaTheme::Ui::well.withAlpha (0.97f));
+    g.fillRoundedRectangle (pill.toFloat(), 4.0f);
+    g.setColour (IlanaTheme::Ui::line2);
+    g.drawRoundedRectangle (pill.toFloat().reduced (0.5f), 4.0f, 1.0f);
+    g.setColour (IlanaTheme::Ui::text2);
+    g.setFont (font);
+    IlanaTheme::drawFitted (g, unusedNote, pill.reduced (Space::s8, 0), juce::Justification::centred, 1);
+}
+
+void SourceEditor::refreshUnused ()
+{
+    const auto env = kind == Kind::envelope ? envelopeOf (source) : -1;
+    const auto lfo = kind == Kind::lfo ? Mod::lfoIndexFor ((Mod::Source) source) : -1;
+    const auto inUse = env >= 0 ? envelopeInUse (processorRef, env)
+                     : lfo >= 0 ? modSourceRouted (processorRef, Mod::lfoSourceFor (lfo)) || modSourceRouted (processorRef, Mod::lfoBSourceFor (lfo))
+                                : true;
+    const auto ampOnOperators = env == 0 && ! inUse && FmOperatorInfo::anyOperatorEnv (processorRef);
+    const auto note = inUse            ? juce::String()
+                      : ampOnOperators ? juce::String (EnvSection::ampUnusedText())
+                      : lfo >= 0       ? juce::String ("unused: drag it onto a knob to use it")
+                                       : juce::String ("unused: nothing plays this envelope yet");
+    if (note == unusedNote)
+        return;
+    unusedNote = note;
+    const auto alpha = inUse ? 1.0f : IlanaTheme::dimmedAlpha;
+    if (graph != nullptr && (kind == Kind::envelope || kind == Kind::lfo))
+        graph->setAlpha (alpha);
+    for (auto& control : controls)
+        control->setAlpha (alpha);
+    if (rate != nullptr)
+    {
+        rate->getRateKnob().setAlpha (alpha);
+        rate->getDivisionKnob().setAlpha (alpha);
+    }
+    opEnvLink.setVisible (ampOnOperators);
+    repaint();
+}
+
+void SourceEditor::timerCallback ()
+{
+    if ((kind == Kind::envelope || kind == Kind::lfo) && IlanaAnim::showing (*this))
+        refreshUnused();
+    if (kind != Kind::other || ! IlanaAnim::showing (*this))
+        return;
+    history[historyPos] = std::abs (processorRef.getSourceDisplayValue (source));
+    historyPos = (historyPos + 1) % history.size();
+    repaint (graphArea);
+}
+
+void SourceValueBar::setSource (int newSource, juce::Colour newColour)
+{
+    source = newSource;
+    colour = newColour;
+    liveSmoother = {};
+    const auto movable = isMovable();
+    setMouseCursor (movable ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
+    setTooltip (movable ? "Drag to move " + ModNames::sourceUpper (source, &processorRef) + " with the mouse (as the hardware would); "
+                              "double-click for 0.  The next MIDI message takes over."
+                        : juce::String ("Its value now."));
+    repaint();
+}
+
+void SourceValueBar::moveTo (float value)
+{
+    if (! isMovable())
+        return;
+    held = juce::jlimit (0.0f, 1.0f, value);
+    heldUntil = juce::Time::getMillisecondCounterHiRes() + 400.0;
+    if (source == (int) Mod::Source::ModWheel)
+        processorRef.sendUiModWheel (held);
+    else
+        processorRef.sendUiPressure (held);
+    shown = held;
+    repaint();
+}
+
+void SourceValueBar::paint (juce::Graphics& g)
+{
+    const auto area = getLocalBounds().toFloat().reduced (0.5f);
+    IlanaTheme::paintWell (g, area, 5.0f);
+    const auto track = area.reduced (3.0f);
+    const auto fill = track.withWidth (track.getWidth() * juce::jlimit (0.0f, 1.0f, shown));
+    g.setColour (colour.withAlpha (isMouseOverOrDragging() ? 0.95f : 0.75f));
+    g.fillRoundedRectangle (fill, 3.0f);
+    if (isMovable())
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.9f));
+        g.fillRoundedRectangle (juce::Rectangle<float> (3.0f, track.getHeight() + 2.0f).withCentre ({ fill.getRight(), track.getCentreY() }), 1.5f);
+    }
+    g.setColour (IlanaTheme::Ui::text);
+    g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true));
+    g.drawText (juce::String (juce::roundToInt (shown * 100.0f)) + "%", area.reduced (8.0f, 0.0f), juce::Justification::centredRight);
+}
+
+void SourceValueBar::mouseDrag (const juce::MouseEvent& event)
+{
+    moveTo (((float) event.x - 3.0f) / (float) juce::jmax (1, getWidth() - 6));
+}
+
+void SourceValueBar::timerCallback ()
+{
+    if (! IlanaAnim::showing (*this))
+        return;
+    // (While held, the value the mouse sent, until the synth reports it.)
+    // (Glided between audio blocks, so it moves at the display's refresh.)
+    const auto live = juce::jlimit (0.0f, 1.0f, liveSmoother.get (std::abs (processorRef.getSourceDisplayValue (source))));
+    const auto value = juce::Time::getMillisecondCounterHiRes() < heldUntil || isMouseButtonDown() ? held : live;
+    if (std::abs (value - shown) > 0.002f)
+    {
+        shown = value;
+        repaint();
+    }
+}
+
+SourcePopover::SourcePopover (IlanaSynthAudioProcessor& p, juce::PropertiesFile& settingsRef)
+    : processorRef (p), settings (settingsRef), editor (p), routes (p), valueBar (p)
+{
+    addChildComponent (valueBar);
+    // The assignment bars wait behind DRIVES, as on PLAY.
+    editor.setRoutesFolded (true);
+    addAndMakeVisible (editor);
+    routes.setCollapsed (true);
+    routes.onCollapsedChange = [this] (bool) { if (onSizeChanged != nullptr) onSizeChanged(); };
+    routes.onRoutesChanged = [this] { if (! routes.isCollapsed() && onSizeChanged != nullptr) onSizeChanged(); };
+    addChildComponent (routes);
+    closeButton.setButtonText (juce::String (juce::CharPointer_UTF8 ("\xc3\x97")));
+    closeButton.setTooltip ("Close (Escape, or click the source's chip again)");
+    closeButton.onClick = [this] { if (onClose != nullptr) onClose(); };
+    addAndMakeVisible (closeButton);
+    setWantsKeyboardFocus (true);
+}
+
+void SourcePopover::setSource (int newSource)
+{
+    source = newSource;
+    editor.setSource (source);
+
+    const auto s = (Mod::Source) source;
+    const auto lfo = Mod::lfoIndexFor (s);
+    const auto lfoCard = lfo >= 0 ? lfo : s == Mod::Source::Mseg ? LfoSection::msegId : s == Mod::Source::ClockSh ? LfoSection::clockId
+                                            : s == Mod::Source::OpLfo ? LfoSection::opLfoId : -1;
+    // (OP PITCH is the envelope section's Operator Env pitch card.)
+    const auto env = s == Mod::Source::OpPitchEnv ? EnvSection::opPitchId : SourceEditor::envelopeOf (source);
+    kind = lfoCard >= 0 ? Kind::lfo : env >= 0 ? Kind::envelope : Kind::other;
+
+    if (kind == Kind::lfo)
+    {
+        if (lfoSection == nullptr)
+        {
+            lfoSection = std::make_unique<LfoSection> (processorRef, settings);
+            lfoSection->setCompact (true);
+            lfoSection->onCompactSizeChanged = [this]
+            {
+                resized();
+                if (onSizeChanged != nullptr)
+                    onSizeChanged();
+            };
+            addChildComponent (*lfoSection);
+        }
+        lfoSection->select (lfoCard);
+    }
+    else if (kind == Kind::envelope)
+    {
+        if (envSection == nullptr)
+        {
+            envSection = std::make_unique<EnvSection> (processorRef, settings);
+            envSection->setCompact (true);
+            addChildComponent (*envSection);
+        }
+        envSection->select (env);
+    }
+
+    // A performance source or a macro (UI review 31, item 19): a compact
+    // card of its one line, its live value (MOD WHEEL and PRESSURE move
+    // with the mouse there, item 28) and DRIVES open, the reason to open it.
+    editor.setVisible (false);
+    if (lfoSection != nullptr)
+        lfoSection->setVisible (kind == Kind::lfo);
+    if (envSection != nullptr)
+        envSection->setVisible (kind == Kind::envelope);
+    valueBar.setVisible (kind == Kind::other);
+    valueBar.setSource (source, modSourceColour (source));
+    routes.setVisible (true);
+    routes.setSource (source, modSourceColour (source));
+    if (kind == Kind::other)
+        routes.setCollapsed (false);
+    resized();
+    repaint();
+}
+
+juce::Point<int> SourcePopover::preferredSize () const
+{
+    if (kind == Kind::other)
+        return { 2 * padding + preferredWidth,
+                 2 * padding + compactHeader + compactTop + describeHeight + routesGap + SourceValueBar::height + routesGap + routesHeight() + compactInset };
+    const auto opPitch = kind == Kind::envelope && source == (int) Mod::Source::OpPitchEnv;
+    const auto opLfo = source == (int) Mod::Source::OpLfo;
+    const auto editorHeight = opPitch ? OperatorEnvEditor::compactHeight : kind == Kind::lfo ? (lfoSection != nullptr ? lfoSection->compactHeight() : 120) : EnvSection::compactHeight;
+    const auto width = opPitch ? 2 * compactInset + operatorGraphWidth + OperatorEnvEditor::compactGap + OperatorEnvEditor::compactColumn
+                     : opLfo   ? 2 * compactInset + operatorGraphWidth + OperatorLfoEditor::compactGap + OperatorLfoEditor::compactColumn
+                     : kind == Kind::lfo ? lfoCardWidth + (lfoSection != nullptr && lfoSection->compactWantsWideGraph() ? lfoWideExtra : 0) : envCardWidth;
+    return { 2 * padding + width,
+             2 * padding + compactHeader + compactTop + editorHeight + routesGap + routesHeight() + compactInset };
+}
+
+juce::Rectangle<int> SourcePopover::placeIn (juce::Rectangle<int> area, juce::Rectangle<int> chip)
+{
+    pageArea = area;
+    const auto wanted = preferredSize();
+    const auto size = juce::Point<int> (juce::jmin (wanted.x, area.getWidth() - 16), juce::jmin (wanted.y, area.getHeight() - 16));
+    if (! moved)
+        topLeft = { chip.getX() - 6, area.getBottom() - 8 - size.y };
+    return juce::Rectangle<int> (topLeft.x, topLeft.y, size.x, size.y).constrainedWithin (area.reduced (Space::s4));
+}
+
+void SourcePopover::paint (juce::Graphics& g)
+{
+    const auto bounds = getLocalBounds().toFloat().reduced ((float) padding);
+    for (int ring = 5; ring >= 1; --ring)
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.13f));
+        g.fillRoundedRectangle (bounds.expanded ((float) ring).translated (0.0f, 3.0f), 10.0f + (float) ring);
+    }
+    const auto colour = modSourceColour (source);
+    IlanaTheme::paintCard (g, bounds, 10.0f, colour.withAlpha (0.55f));
+
+    auto header = bounds.toNearestInt().reduced (10, 0).removeFromTop (compactHeader); // off-grid
+    const auto count = modRouteCount (processorRef, source);
+    const auto lfo = Mod::lfoIndexFor ((Mod::Source) source);
+    // (Compact, DRIVES counts the routes: the header says what the source is doing.)
+    const auto caption = kind == Kind::envelope ? juce::String ("drag the graph or the knobs")
+                         : kind == Kind::lfo && lfo >= 0 ? LfoShapeMenu::runCaption (processorRef, lfo)
+                         : count == 0 ? juce::String ("drag its chip onto a knob") : juce::String (count) + (count == 1 ? " route" : " routes");
+    IlanaTheme::paintCardHeader (g, header, ModNames::sourceUpper (source, &processorRef), caption, colour,
+                                 kind == Kind::lfo ? 212 : kind == Kind::other ? 30 : 200); // (an LFO's SHAPE sits right of it)
+
+    if (kind == Kind::other && ! describeArea.isEmpty())
+    {
+        g.setColour (IlanaTheme::Ui::text2);
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
+        IlanaTheme::drawFitted (g, SourceEditor::describe (source), describeArea, juce::Justification::centredLeft, 2);
+    }
+}
+
+void SourcePopover::resized ()
+{
+    auto area = getLocalBounds().reduced (padding);
+    // One title (the pop-up's), then the editor and DRIVES as one line under it.
+    const auto header = area.removeFromTop (compactHeader);
+    closeButton.setBounds (juce::Rectangle<int> (18, 18).withCentre ({ header.getRight() - 6 - 9, header.getCentreY() }));
+    auto body = area.reduced (compactInset, 0).withTrimmedBottom (compactInset).withTrimmedTop (compactTop);
+    routes.setBounds (body.removeFromBottom (routesHeight()));
+    body.removeFromBottom (routesGap);
+    describeArea = {};
+    if (kind == Kind::other)
+    {
+        valueBar.setBounds (body.removeFromBottom (SourceValueBar::height));
+        body.removeFromBottom (routesGap);
+        describeArea = body.withTrimmedLeft (Space::s2);
+        return;
+    }
+    // (ilana's layout, 2026-10-29: the LFO's SHAPE sits in the title row, right of the caption; the envelope's
+    // graph starts a little higher than its knobs.)
+    if (kind == Kind::lfo && lfoSection != nullptr)
+    {
+        const auto skip = body.getY() - header.getY();
+        lfoSection->setCompactTitleRow (skip, header.getHeight(), body.getRight() - closeButton.getX() + 6);
+        lfoSection->setBounds (body.withTop (header.getY()));
+    }
+    if (kind == Kind::envelope && envSection != nullptr)
+        envSection->setBounds (body.withTop (body.getY() - EnvSection::compactGraphRise));
+}
+
+void SourcePopover::mouseMove (const juce::MouseEvent& event)
+{
+    setMouseCursor (event.y < headerBottom() ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
+}
+
+void SourcePopover::mouseDown (const juce::MouseEvent& event)
+{
+    dragging = event.y < headerBottom();
+    dragStart = getPosition();
+}
+
+void SourcePopover::mouseDrag (const juce::MouseEvent& event)
+{
+    if (! dragging)
+        return;
+    auto next = getBounds().withPosition (dragStart + event.getOffsetFromDragStart());
+    if (! pageArea.isEmpty())
+        next = next.constrainedWithin (pageArea.reduced (Space::s4));
+    topLeft = next.getPosition();
+    moved = true;
+    setBounds (next);
+}
+
+bool SourcePopover::keyPressed (const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress::escapeKey && onClose != nullptr)
+    {
+        onClose();
+        return true;
+    }
+    return false;
+}
+
+int SourcePopover::routesHeight () const
+{
+    return routes.isCollapsed() ? SourceRouteList::headerHeight + 6 : juce::jmin (200, routes.getIdealHeight());
+}
+
+SourceTab::SourceTab (IlanaSynthAudioProcessor& p, int sourceIndex)
+    : processorRef (p), source (sourceIndex)
+{
+    setTooltip (source == opEnvSourceId
+                    ? juce::String ("OP ENV\nThe Operator Env: the DX7 envelope each oscillator on it plays (its level). It shapes its "
+                                    "operators only, so it isn't a modulation source: nothing to drag.")
+                    : ModNames::source (source, &processorRef) + "\nClick to edit it here; drag it onto any knob to modulate that knob.");
+}
+
+void SourceTab::setSelected (bool shouldSelect)
+{
+    if (selected != shouldSelect)
+    {
+        selected = shouldSelect;
+        repaint();
+    }
+}
+
+void SourceTab::setRouteCount (int count)
+{
+    if (count != routes)
+    {
+        routes = count;
+        repaint();
+    }
+}
+
+void SourceTab::setCompactLabel (const juce::String& text)
+{
+    compactLabel = text;
+    repaint();
+}
+
+void SourceTab::paint (juce::Graphics& g)
+{
+    if (compactLabel.isNotEmpty())
+    {
+        paintCompact (g);
+        return;
+    }
+
+    const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
+    const auto colour = sourceTabColour (source);
+    const auto hot = isMouseOver() || selected;
+    g.setColour (selected ? IlanaTheme::Ui::panel.interpolatedWith (colour, 0.2f) : IlanaTheme::Ui::raised.interpolatedWith (colour, isMouseOver() ? 0.06f : 0.0f));
+    g.fillRoundedRectangle (bounds, 7.0f);
+    g.setColour (selected ? colour.withAlpha (0.8f) : IlanaTheme::Ui::line);
+    g.drawRoundedRectangle (bounds.reduced (0.5f), 7.0f, 1.0f);
+
+    auto area = getLocalBounds().reduced (9, 0); // off-grid
+    // The count badge (or a plain dot while it drives nothing).
+    const auto badge = area.removeFromLeft (18); // off-grid
+    if (routes > 0)
+    {
+        const auto circle = juce::Rectangle<float> (16.0f, 16.0f).withCentre (badge.getCentre().toFloat());
+        g.setColour (colour);
+        g.fillEllipse (circle);
+        g.setColour (IlanaTheme::Ui::header);
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
+        g.drawText (juce::String (routes), circle, juce::Justification::centred);
+    }
+    else
+    {
+        g.setColour (colour);
+        g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre (badge.getCentre().toFloat()));
+    }
+
+    // The grip: two columns of dots, the drag handle (none on OP ENV).
+    const auto grip = area.removeFromRight (10); // off-grid
+    if (source != opEnvSourceId)
+    g.setColour ((hot ? IlanaTheme::Ui::text2 : IlanaTheme::Ui::text3).withAlpha (0.9f));
+    for (int row = 0; row < 3; ++row)
+        for (int column = 0; column < 2; ++column)
+            g.fillEllipse ((float) grip.getX() + 2.0f + (float) column * 4.0f, (float) grip.getCentreY() - 5.0f + (float) row * 4.0f, 2.2f, 2.2f);
+
+    g.setColour (hot ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2);
+    g.setFont (IlanaTheme::font (IlanaTheme::TextSize::minInteractive, true));
+    IlanaTheme::drawFitted (g, sourceTabName (source, processorRef), area.reduced (Space::s6, 0), juce::Justification::centred, 1);
+}
+
+void SourceTab::mouseEnter (const juce::MouseEvent&)
+{
+    if (source != opEnvSourceId)
+        highlightedModSource() = source;
+    repaint();
+}
+
+void SourceTab::mouseExit (const juce::MouseEvent&)
+{
+    if (highlightedModSource() == source)
+        highlightedModSource() = 0;
+    repaint();
+}
+
+void SourceTab::mouseUp (const juce::MouseEvent& event)
+{
+    if (! event.mouseWasDraggedSinceMouseDown() && ! event.mods.isPopupMenu() && onSelect != nullptr)
+        onSelect (source);
+}
+
+void SourceTab::mouseDrag (const juce::MouseEvent&)
+{
+    if (source == opEnvSourceId)
+        return;
+    if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor (this))
+        if (! container->isDragAndDropActive())
+        {
+            container->startDragging ("modsource:" + juce::String (source), this,
+                                      IlanaTheme::dragGhost (*this, getLocalBounds(), 0.75f), true);
+        }
+}
+
+void SourceTab::paintCompact (juce::Graphics& g) const
+{
+    const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
+    const auto colour = sourceTabColour (source);
+    const auto hot = isMouseOver() || selected;
+    const auto radius = bounds.getHeight() * 0.5f;
+    if (selected)
+    {
+        g.setColour (colour);
+        g.fillRoundedRectangle (bounds, radius);
+    }
+    else
+    {
+        g.setColour (IlanaTheme::Ui::raised.interpolatedWith (colour, isMouseOver() ? 0.12f : 0.0f));
+        g.fillRoundedRectangle (bounds, radius);
+        g.setColour (colour.withAlpha (0.55f));
+        g.drawRoundedRectangle (bounds.reduced (0.5f), radius, 1.0f);
+    }
+    g.setColour (selected ? IlanaTheme::Ui::header : (hot ? IlanaTheme::Ui::text : IlanaTheme::Ui::text2));
+    g.setFont (IlanaTheme::font (IlanaTheme::TextSize::packedBody, true));
+    IlanaTheme::drawFitted (g, compactLabel, getLocalBounds().reduced (3, 0), juce::Justification::centred, 1); // off-grid
+}
+
+ModulationCard::ModulationCard (IlanaSynthAudioProcessor& p)
+    : processorRef (p), editor (p)
+{
+    addAndMakeVisible (editor);
+    editor.onEditOperatorEnv = [this] { if (onEditOperatorEnv != nullptr) onEditOperatorEnv(); };
+    editor.getRouteList().onUserToggle = [this] (bool collapsed) { routesOpen = ! collapsed; };
+    addTab.setButtonText ("+");
+    addTab.setTooltip ("Add an LFO or envelope to the patch");
+    addTab.onClick = [this] { showAddMenu(); };
+    addAndMakeVisible (addTab);
+    moreTab.setTooltip ("The sources that don't fit");
+    moreTab.onClick = [this] { showMoreMenu(); };
+    addChildComponent (moreTab);
+    refreshSources();
+    startTimerHz (6);
+}
+
+int ModulationCard::sourceOfTab (const juce::Component& tab) const
+{
+    const auto* sourceTab = dynamic_cast<const SourceTab*> (&tab);
+    return sourceTab != nullptr ? sourceTab->getSource() : 0;
+}
+
+std::vector<juce::Component*> ModulationCard::getSourceTabs () const
+{
+    std::vector<juce::Component*> shown;
+    for (auto* tab : getTabs())
+        shown.push_back (tab);
+    return shown;
+}
+
+std::vector<SourceTab*> ModulationCard::getTabs () const
+{
+    std::vector<SourceTab*> shown;
+    for (auto& tab : tabs)
+        if (tab->isVisible())
+            shown.push_back (tab.get());
+    std::sort (shown.begin(), shown.end(), [] (const SourceTab* a, const SourceTab* b)
+               { return a->getY() != b->getY() ? a->getY() < b->getY() : a->getX() < b->getX(); });
+    return shown;
+}
+
+void ModulationCard::select (int source)
+{
+    selected = source;
+    for (auto& tab : tabs)
+        tab->setSelected (tab->getSource() == selected);
+    editor.setSource (selected);
+    resized(); // (the selected tab comes into view)
+    repaint();
+}
+
+void ModulationCard::paint (juce::Graphics& g)
+{
+    const auto colour = sourceTabColour (selected);
+    IlanaTheme::paintCard (g, getLocalBounds().toFloat(), 6.0f, colour);
+    auto header = getLocalBounds().withHeight (headerHeight).withTrimmedLeft (Space::s12).withTrimmedRight (Space::s12);
+    IlanaTheme::paintCardHeader (g, header, "MODULATION", "drag a tab onto any knob", colour, editWidth + 8);
+
+    const auto link = editLinkArea();
+    g.setColour (hoverEdit ? colour.brighter (0.25f) : colour);
+    g.setFont (IlanaTheme::linkFont());
+    g.drawText (juce::String ("EDIT ") + juce::String::fromUTF8 ("\xe2\x80\xba"), link, juce::Justification::centredRight);
+}
+
+void ModulationCard::resized ()
+{
+    // The tab grid: as many equal columns as fit (the "+" is a cell), on
+    // at most two rows; past that the last cell is "N MORE".
+    auto area = getLocalBounds().withTrimmedTop (headerHeight).reduced (pad, 0).withTrimmedBottom (pad);
+    const auto cells = (int) sources.size() + 1;
+    const auto columns = juce::jlimit (1, cells, (area.getWidth() + tabGap) / (minTabWidth + tabGap));
+    const auto rows = juce::jlimit (1, maxRows, (cells + columns - 1) / columns);
+    const auto capacity = columns * rows;
+    const auto overflow = cells > capacity;
+    const auto shownTabs = overflow ? capacity - 2 : (int) sources.size(); // (room for "N MORE" and "+")
+    const auto cellWidth = (float) (area.getWidth() - (columns - 1) * tabGap) / (float) columns;
+    const auto cell = [&] (int index)
+    {
+        const auto row = index / columns, column = index % columns;
+        return juce::Rectangle<float> ((float) area.getX() + (float) column * (cellWidth + (float) tabGap),
+                                       (float) (area.getY() + row * (tabHeight + tabGap)), cellWidth, (float) tabHeight).toNearestInt();
+    };
+
+    // The selected source always has its tab in view: picked from
+    // "N MORE", it takes the last shown cell.
+    std::vector<SourceTab*> order;
+    for (auto& tab : tabs)
+        order.push_back (tab.get());
+    if (shownTabs > 0)
+        for (size_t i = (size_t) shownTabs; i < order.size(); ++i)
+            if (order[i]->getSource() == selected)
+                std::swap (order[i], order[(size_t) shownTabs - 1]);
+
+    hiddenSources.clear();
+    for (size_t i = 0; i < order.size(); ++i)
+    {
+        const auto shown = (int) i < shownTabs;
+        order[i]->setVisible (shown);
+        if (shown)
+            order[i]->setBounds (cell ((int) i));
+        else
+            hiddenSources.push_back (order[i]->getSource());
+    }
+    auto next = shownTabs;
+    moreTab.setVisible (overflow);
+    if (overflow)
+    {
+        moreTab.setButtonText (juce::String ((int) hiddenSources.size()) + " MORE");
+        moreTab.setBounds (cell (next++));
+    }
+    addTab.setBounds (cell (next));
+    addTab.setVisible (anyToAdd());
+
+    area.removeFromTop (rows * tabHeight + (rows - 1) * tabGap + pad);
+    editorArea = area;
+    layoutEditor();
+}
+
+void ModulationCard::mouseMove (const juce::MouseEvent& event)
+{
+    const auto over = editLinkArea().contains (event.getPosition());
+    if (over != hoverEdit)
+    {
+        hoverEdit = over;
+        setMouseCursor (over ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+        repaint (editLinkArea());
+    }
+}
+
+void ModulationCard::mouseUp (const juce::MouseEvent& event)
+{
+    if (editLinkArea().contains (event.getPosition()))
+        openSelectedInMod();
+}
+
+void ModulationCard::openSelectedInMod ()
+{
+    if (selected == opEnvSourceId)
+    {
+        if (onEditOperatorEnv != nullptr)
+            onEditOperatorEnv();
+    }
+    else if (onOpenInMod != nullptr)
+    {
+        onOpenInMod (selected);
+    }
+}
+
+void ModulationCard::layoutEditor ()
+{
+    editor.setRoutesFolded (! routesOpen || editorArea.getHeight() - editor.getRouteList().getIdealHeight() - 10 < minControlsHeight);
+    editor.setBounds (editorArea);
+}
+
+std::vector<int> ModulationCard::wantedSources () const
+{
+    std::vector<int> wanted;
+    if (operatorPoolShown (processorRef))
+        wanted.push_back (opEnvSourceId);
+    if (operatorSourceShown (processorRef, Mod::Source::OpPitchEnv))
+        wanted.push_back ((int) Mod::Source::OpPitchEnv);
+    for (int env = 0; env < 16; ++env)
+        if (envelopeShown (processorRef, env))
+            wanted.push_back ((int) envelopeSource (env));
+    if (operatorSourceShown (processorRef, Mod::Source::OpLfo))
+        wanted.push_back ((int) Mod::Source::OpLfo);
+    for (int lfo = 0; lfo < IlanaSynthAudioProcessor::numLfos; ++lfo)
+        if (processorRef.isLfoShown (lfo))
+            wanted.push_back ((int) Mod::lfoSourceFor (lfo));
+    if (msegModuleInUse (processorRef))
+        wanted.push_back ((int) Mod::Source::Mseg);
+    return wanted;
+}
+
+bool ModulationCard::anyToAdd () const
+{
+    for (int lfo = 0; lfo < IlanaSynthAudioProcessor::numLfos; ++lfo)
+        if (! processorRef.isLfoShown (lfo))
+            return true;
+    for (int env = 0; env < 16; ++env)
+        if (! envelopeShown (processorRef, env))
+            return true;
+    return false;
+}
+
+void ModulationCard::refreshSources ()
+{
+    auto wanted = wantedSources();
+    if (wanted != sources)
+    {
+        sources = std::move (wanted);
+        tabs.clear();
+        for (const auto source : sources)
+        {
+            auto tab = std::make_unique<SourceTab> (processorRef, source);
+            tab->onSelect = [this] (int picked) { select (picked); };
+            addAndMakeVisible (*tab);
+            tabs.push_back (std::move (tab));
+        }
+        // A selection that left the patch, or a patch that just became an
+        // operator voice: its first LFO, else its first source.
+        const auto opEnvArrived = ! hadOpEnv && ! sources.empty() && sources.front() == opEnvSourceId;
+        hadOpEnv = ! sources.empty() && sources.front() == opEnvSourceId;
+        if (opEnvArrived || std::find (sources.begin(), sources.end(), selected) == sources.end())
+        {
+            // (A DX7 voice opens on OP ENV, as its envelope card did: I8-18.)
+            selected = sources.empty() ? (int) Mod::lfoSourceFor (0) : sources.front();
+            if (selected != opEnvSourceId)
+                for (const auto source : sources)
+                    if (Mod::lfoIndexFor ((Mod::Source) source) >= 0)
+                    {
+                        selected = source;
+                        break;
+                    }
+        }
+        resized();
+        select (selected);
+    }
+
+    for (auto& tab : tabs)
+        tab->setRouteCount (modRouteCount (processorRef, tab->getSource()));
+}
+
+void ModulationCard::showAddMenu ()
+{
+    juce::PopupMenu lfos, envelopes;
+    for (int lfo = 0; lfo < IlanaSynthAudioProcessor::numLfos; ++lfo)
+        if (! processorRef.isLfoShown (lfo))
+            lfos.addItem (1 + lfo, "LFO " + juce::String (lfo + 1));
+    for (int env = 0; env < 16; ++env)
+        if (! envelopeShown (processorRef, env))
+            envelopes.addItem (100 + env, ModNames::source ((int) envelopeSource (env)));
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Add a source");
+    if (lfos.getNumItems() > 0)
+        menu.addSubMenu ("LFOs", lfos);
+    if (envelopes.getNumItems() > 0)
+        menu.addSubMenu ("Envelopes", envelopes);
+    juce::Component::SafePointer<ModulationCard> safeThis (this);
+    menu.showMenuAsync (IlanaTheme::menuOptions (&addTab), [safeThis] (int result)
+    {
+        if (safeThis == nullptr || result <= 0)
+            return;
+        auto& p = safeThis->processorRef;
+        const auto isLfo = result < 100;
+        const auto index = isLfo ? result - 1 : result - 100;
+        p.setRevealed (isLfo ? IlanaSynthAudioProcessor::Module::Lfo : IlanaSynthAudioProcessor::Module::Envelope, index, true);
+        safeThis->refreshSources();
+        safeThis->select (isLfo ? (int) Mod::lfoSourceFor (index) : (int) envelopeSource (index));
+    });
+}
+
+void ModulationCard::showMoreMenu ()
+{
+    juce::PopupMenu menu;
+    for (size_t i = 0; i < hiddenSources.size(); ++i)
+        menu.addItem ((int) i + 1, sourceTabName (hiddenSources[i], processorRef), true, hiddenSources[i] == selected);
+    juce::Component::SafePointer<ModulationCard> safeThis (this);
+    menu.showMenuAsync (IlanaTheme::menuOptions (&moreTab), [safeThis] (int result)
+    {
+        if (safeThis != nullptr && juce::isPositiveAndNotGreaterThan (result, (int) safeThis->hiddenSources.size()) && result > 0)
+            safeThis->select (safeThis->hiddenSources[(size_t) result - 1]);
+    });
+}
+
+void ModulationCard::timerCallback ()
+{
+    // (Visible up the tree: an offscreen editor, as in the UI tests, follows the pool too.)
+    for (auto* c = static_cast<juce::Component*> (this); c->getParentComponent() != nullptr; c = c->getParentComponent())
+        if (! c->isVisible())
+            return;
+    refreshSources();
+}
