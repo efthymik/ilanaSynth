@@ -697,6 +697,20 @@ void SeqPage::layoutGenerate ()
         switches.insert (switches.begin(), nullptr);
     }
     auto x = (float) area.getX();
+    // With no generator card shown (CLIP) the three cards share the row, their controls staying at the standard
+    // pitch from each card's left inset (nothing spread apart).
+    auto extra = 0.0f;
+    if (engineTabs.getSelected() == 3)
+    {
+        auto used = (float) gap * (float) (groups.size() - 1);
+        for (const auto& group : groups)
+        {
+            for (const auto& item : group)
+                used += item.weight * unit;
+            used += (float) padding * 2.0f;
+        }
+        extra = juce::jmax (0.0f, ((float) area.getWidth() - used) / (float) groups.size());
+    }
 
     for (size_t g = 0; g < groups.size(); ++g)
     {
@@ -704,7 +718,7 @@ void SeqPage::layoutGenerate ()
         for (const auto& item : groups[g])
             weight += item.weight;
 
-        const auto width = weight * unit + (float) padding * 2.0f;
+        const auto width = weight * unit + (float) padding * 2.0f + extra;
         auto& box = *boxes[g];
         box = juce::Rectangle<int> (juce::roundToInt (x), area.getY(), juce::roundToInt (width), area.getHeight());
         x += width + (float) gap;
