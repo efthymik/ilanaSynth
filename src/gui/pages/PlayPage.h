@@ -145,6 +145,7 @@ public:
 
     // A click on the dot, left of the pills, opens the pop-up editor too.
     void mouseUp (const juce::MouseEvent& event) override;
+    juce::MouseCursor getMouseCursor() override;
 
     // The sources the card lists: the envelopes (or LFOs) in the patch.
     std::vector<int> wantedSources() const;
@@ -585,6 +586,8 @@ private:
 
     // Starts the dots' clock when a switch moved or notes sound (the 4 Hz page timer asks).
     void wakeDots();
+    bool noiseAudible() const;
+    void updateNoiseSilent();
 
     void tickDots();
 

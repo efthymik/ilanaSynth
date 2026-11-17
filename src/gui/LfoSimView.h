@@ -282,6 +282,16 @@ private:
         g.setColour (juce::Colours::white.withAlpha (0.05f));
         g.fillRoundedRectangle (box, 5.0f);
 
+        // The scene never draws past its well, and a well smaller than the scenes' design size (about 90 x 110 px)
+        // shows the whole scene scaled down to fit (audit 28).
+        juce::Graphics::ScopedSaveState keepInWell (g);
+        g.reduceClipRegion (box.getSmallestIntegerContainer());
+        if (const auto fit = juce::jmin (1.0f, box.getWidth() / 90.0f, box.getHeight() / 110.0f); fit > 0.05f && fit < 1.0f)
+        {
+            g.addTransform (juce::AffineTransform::scale (fit, fit, box.getCentreX(), box.getCentreY()));
+            box = box.withSizeKeepingCentre (box.getWidth() / fit, box.getHeight() / fit);
+        }
+
         switch (s.shape)
         {
             case Lorenz:
