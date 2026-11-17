@@ -2405,7 +2405,7 @@ void OscPage::layoutPhysicalPanels (CardGeometry& card)
             for (auto* knob : toneKnobs)
             {
                 // (19, not 17: a modulated RING TIME's ring and live dot touched the TONE title, UI review 26.)
-                placeKnob (*knob, x, tonePanel.getY() + 20, 46, mainDial);
+                placeKnob (*knob, x, tonePanel.getY() + physDialY, 46, mainDial);
                 x += 46;
             }
             if (! electric)
@@ -2444,15 +2444,16 @@ void OscPage::layoutPhysicalPanels (CardGeometry& card)
             }
         }
 
-        // PITCH: SEMI and FINE centred, CHORD under them.
-        placeKnob (osc.semi, pitchPanel.getX() + 34, pitchPanel.getY() + 19, 46, mainDial);
-        placeKnob (osc.fine, pitchPanel.getX() + 80, pitchPanel.getY() + 19, 46, mainDial);
-        osc.chord.setBounds (inPanel (pitchPanel, 8, 66, pitchPanel.getWidth() - 16, menuH));
+        // PITCH: SEMI and FINE centred, CHORD under them on MIX's FILTER line (2026-11-17, ilana: "some stuff is off
+        // center": the dials sat 2 px under MIX's and the menu 3 px under the FILTER row, 2 px off the panel's foot).
+        placeKnob (osc.semi, pitchPanel.getCentreX() - 46, pitchPanel.getY() + physDialY, 46, mainDial);
+        placeKnob (osc.fine, pitchPanel.getCentreX(), pitchPanel.getY() + physDialY, 46, mainDial);
+        osc.chord.setBounds (inPanel (pitchPanel, 8, physMenuY, pitchPanel.getWidth() - 16, menuH));
 
         // MIX: LEVEL, PAN and the OUT meter in one row of three cells, the FILTER route under them as on the wavetable
         // card (UI reviews 27 and 28).
         {
-            const auto x0 = mixPanel.getX() + (mixPanel.getWidth() - 3 * 48) / 2, y = mixPanel.getY() + 17;
+            const auto x0 = mixPanel.getX() + (mixPanel.getWidth() - 3 * 48) / 2, y = mixPanel.getY() + physDialY;
             placeKnob (osc.level, x0, y, 48, mainDial);
             placeKnob (osc.pan, x0 + 48, y, 48, mainDial);
             pieces.outBar.setBounds ({ x0 + 96, y, 48, mainDial + nameLine + 4 });
@@ -2460,7 +2461,7 @@ void OscPage::layoutPhysicalPanels (CardGeometry& card)
                                         (float) (osc.level.getY() + osc.level.getPackedNameArea().getY() - y));
         }
         {
-            const auto labelW = 28, filterY = mixPanel.getY() + physTopH - filterH - 6;
+            const auto labelW = 28, filterY = mixPanel.getY() + physMenuY + menuH - filterH; // (bottoms on one line with CHORD and the unison mode)
             card.labels.push_back ({ { mixPanel.getX() + 6, filterY, labelW, filterH }, "FILTER" });
             pieces.routeBar.setBounds ({ mixPanel.getX() + 6 + labelW, filterY, mixPanel.getWidth() - 12 - labelW + 3, filterH });
         }
@@ -2471,10 +2472,10 @@ void OscPage::layoutPhysicalPanels (CardGeometry& card)
             auto x = unisonPanel.getX() + (unisonPanel.getWidth() - 4 * 44) / 2;
             for (auto* knob : { &osc.unison, &osc.detune, &osc.uniBlend, &osc.spread })
             {
-                placeKnob (*knob, x, unisonPanel.getY() + 19, 44, mainDial);
+                placeKnob (*knob, x, unisonPanel.getY() + physDialY, 44, mainDial);
                 x += 44;
             }
-            osc.uniMode.setBounds (inPanel (unisonPanel, 8, 66, unisonPanel.getWidth() - 16, menuH));
+            osc.uniMode.setBounds (inPanel (unisonPanel, 8, physMenuY, unisonPanel.getWidth() - 16, menuH));
             pieces.spreadView.setBounds ({});
         }
 

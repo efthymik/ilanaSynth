@@ -1083,6 +1083,9 @@ private:
     int waveContentHeight() const { return wavetableWarpRows * warpRowH() + (wavetableWarpRows - 1); }
 
     static constexpr int physTopH = 84, physBottomH = 57, sampleTopH = 96, sampleBottomH = 65, grainH = 111;
+    // The Physical card's top row: TONE, PITCH, MIX and UNISON dials on one line, CHORD, FILTER and the unison mode on another
+    // (6 px over the panel's foot, as the FILTER row was).
+    static constexpr int physDialY = 19, physMenuY = physTopH - menuH - 6;
 
     int panelCardHeight (int osc) const;
 
