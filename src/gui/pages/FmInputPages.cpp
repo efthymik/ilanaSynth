@@ -622,22 +622,23 @@ void FmPage::layoutPlainOperator (OperatorControls& controls)
     for (auto* knob : { &controls.semi, &controls.fine, &controls.level, &controls.keyLevel, &controls.feedback })
         knobsInRow.push_back (knob);
 
-    constexpr int menuHeight = 40, footHeight = 18, gap = 6;
-    layoutRow (left.removeFromTop (menuHeight), menus);
-    left.removeFromTop (gap);
+    constexpr int menuHeight = 40, gap = 6, ringRowHeight = 112, gridRowHeight = 100;
     const auto count = (int) knobsInRow.size();
-    const auto twoRows = count > 5 && left.getHeight() >= 140;
-    // One row of rings stands under the menus a standard gap; the foot's old height goes to the rings' size.
-    if (! twoRows)
-        left = left.removeFromTop (juce::jmin (112, left.getHeight()));
+    const auto twoRows = count > 5 && left.getHeight() - menuHeight - gap >= 140;
     const auto columns = twoRows ? 3 : count;
     const auto rowsHere = twoRows ? (count + 2) / 3 : 1;
+    // The menus and the dials are one block, centred in the left area (height and width), so the room around it is even.
+    const auto knobsHeight = twoRows ? rowsHere * gridRowHeight : ringRowHeight;
     const auto cellWidth = left.getWidth() / juce::jmax (1, columns);
-    // (A single row stays under the menus a standard gap, not centred in the leftover height.)
-    const auto cellHeight = twoRows ? left.getHeight() / juce::jmax (1, rowsHere) : left.getHeight();
+    const auto blockWidth = cellWidth * columns;
+    auto block = left.withSizeKeepingCentre (left.getWidth(), juce::jmin (left.getHeight(), menuHeight + gap + knobsHeight));
+    layoutRow (block.removeFromTop (menuHeight), menus);
+    block.removeFromTop (gap);
+    block = block.withSizeKeepingCentre (blockWidth, block.getHeight());
+    const auto cellHeight = twoRows ? gridRowHeight : block.getHeight();
     for (int i = 0; i < count; ++i)
         if (auto* knob = dynamic_cast<KnobControl*> (knobsInRow[(size_t) i]))
-            knob->placeAsRing (juce::Rectangle<int> (left.getX() + (i % columns) * cellWidth, left.getY() + (i / columns) * cellHeight,
+            knob->placeAsRing (juce::Rectangle<int> (block.getX() + (i % columns) * cellWidth, block.getY() + (i / columns) * cellHeight,
                                                      cellWidth, cellHeight).reduced (2, 0), twoRows ? 46 : count <= 5 ? 60 : 44);
     // Another type's way to the operator's controls: on the title line, left of the oscillator picker.
     if (makeOperator.isVisible())

@@ -55,7 +55,7 @@
  "src/gui/pages/FmInputPages.cpp": 77,
  "src/gui/pages/FxPage.cpp": 70,
  "src/gui/pages/FxWidgets.h": 14,
- "src/gui/pages/MatrixPage.cpp": 47,
+ "src/gui/pages/MatrixPage.cpp": 56,
  "src/gui/pages/MatrixPage.h": 1,
  "src/gui/pages/ModSourcePanel.cpp": 24,
  "src/gui/pages/ModSourcePanel.h": 1,

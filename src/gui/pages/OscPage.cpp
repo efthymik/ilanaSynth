@@ -2634,18 +2634,20 @@ void OscPage::layoutSamplePanels (CardGeometry& card)
     // WAVE: the picture (its name line, the wave, the keys) and the switches' column at the right.
     {
         const auto panel = addPanel ({ cols.x[0], topY, cols.w[0], sampleTopH + panelGap + sampleBottomH }, "WAVE");
-        const auto toggleW = 136, toggleX = panel.getRight() - 10 - toggleW;
-        waveDisplay (index).setBounds ({ panel.getX() + 8, panel.getY() + 15, toggleX - 11 - (panel.getX() + 8), 143 });
+        // The picture takes the panel's content area, as the wavetable card's WAVE does; the switches stand in one
+        // column at its right, six rows of one height, the first on the picture's top and the last on its bottom.
+        const auto c = panelContent (panel);
+        const auto toggleW = 136, toggleX = c.getRight() - toggleW;
+        waveDisplay (index).setBounds ({ c.getX(), c.getY(), toggleX - 11 - c.getX(), c.getHeight() });
         for (auto& item : scrubbers)
             item.setBounds ({});
-        auto y = panel.getY() + 38;
+        constexpr int rowH = 16, rows = 6;
+        const auto rowY = [&] (int row) { return c.getY() + row * (c.getHeight() - rowH) / (rows - 1); };
+        auto row = 0;
         for (auto* toggle : { &osc.sampleTuned, &osc.sampleLoop, &osc.sampleReverse, &osc.sampleLoopOwn, &osc.sampleSnap })
-        {
-            toggle->setBounds ({ toggleX, y, toggleW, 13 });
-            y += 21;
-        }
+            toggle->setBounds ({ toggleX, rowY (row++), toggleW, rowH });
         osc.sampleLoopXfade.setBounds ({});
-        pieces.xfadeBar.setBounds ({ toggleX, panel.getY() + 144, toggleW, 12 });
+        pieces.xfadeBar.setBounds ({ toggleX, rowY (row), toggleW, rowH });
         pieces.xfadeBar.setAccent (tint);
     }
 

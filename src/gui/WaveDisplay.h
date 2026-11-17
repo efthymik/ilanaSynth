@@ -2014,14 +2014,16 @@ private:
 
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::body));
             // (A hint, so a sentence: UI review 9, I9-22.)
-            const auto hint = well.withSizeKeepingCentre (well.getWidth() - 20.0f, 40.0f).translated (0.0f, -26.0f);
+            // (Hint and button as one group, centred in the zone: 40 + 8 + 28 high.)
+            const auto group = well.withSizeKeepingCentre (well.getWidth(), 76.0f);
+            const auto hint = group.withHeight (40.0f).reduced (10.0f, 0.0f);
             // A patch whose file moved says so, instead of looking like an empty slot.
             const auto lost = processorRef.getMissingSamples();
             const auto lostHere = std::find_if (lost.begin(), lost.end(), [this] (const auto& entry) { return entry.osc == oscIndex; });
             IlanaTheme::drawFitted (g, lostHere != lost.end() ? "Missing file: " + SamplePaths::fileNameOf (lostHere->path)
                                                               : juce::String ("Drop a .wav or .sfz here"),
                                     hint.toNearestInt(), juce::Justification::centred, 2);
-            const auto pill = juce::Rectangle<float> (110.0f, 28.0f).withCentre (well.getCentre().translated (0.0f, 20.0f));
+            const auto pill = juce::Rectangle<float> (110.0f, 28.0f).withCentre ({ well.getCentreX(), group.getBottom() - 14.0f });
             g.setColour (IlanaTheme::Ui::raised);
             g.fillRoundedRectangle (pill, 6.0f);
             g.setColour (IlanaTheme::Ui::text);
@@ -2999,6 +3001,13 @@ private:
     juce::Rectangle<float> wellArea() const
     {
         auto bounds = getLocalBounds().toFloat();
+
+        // (An empty sample has no name line or chips: its drop zone fills the whole picture.)
+        const auto* shown = isSampleMode() && ! isGranularMode() && ! compact ? processorRef.getSampleForOsc (oscIndex) : nullptr;
+        const auto emptySample = isSampleMode() && ! isGranularMode() && ! compact && (shown == nullptr || shown->getNumSamples() < 2);
+
+        if (! compact && emptySample)
+            return bounds;
 
         if (! compact)
         {
