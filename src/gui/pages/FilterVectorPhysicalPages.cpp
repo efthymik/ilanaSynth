@@ -68,6 +68,7 @@ VectorPage::VectorPage (IlanaSynthAudioProcessor& p)
     // Switched on with the pad still as it comes (a square on OSC 1-4), the shape follows the patch: one corner
     // for each oscillator it has, those oscillators at the corners (ilana's idea, UI review 29).
     on.getButton().onClick = [this] { if (on.getButton().getToggleState()) fitShapeToPatch(); };
+    pad.onSwitchedOn = [this] { fitShapeToPatch(); };
 
     // Off, the whole block dims and says why, as every card's controls
     // do (one rule, EffectRules: UI review 7, V7-21).
@@ -239,12 +240,27 @@ void VectorPage::resized ()
         const auto osc = processorRef.getVectorCorner (corner);
         return ! (osc >= 0 && osc < OscillatorIds::count && processorRef.isOscillatorShown (osc));
     };
-    const auto rowHeight = rows.empty() ? 0 : corners.getHeight() / (int) rows.size();
+    // A row of empty corners is one short "+ add OSC n" row (the menu and the add button side by side); the rows with
+    // an oscillator share the height that leaves.
+    constexpr int addRowHeight = 46;
+    std::vector<bool> emptyRow;
+    auto fullRows = 0, shortHeight = 0, firstOfRow = 0;
+    for (const auto inRow : rows)
+    {
+        auto allMissing = true;
+        for (int i = 0; i < inRow; ++i)
+            allMissing = allMissing && missing (firstOfRow + i);
+        firstOfRow += inRow;
+        emptyRow.push_back (allMissing);
+        fullRows += allMissing ? 0 : 1;
+        shortHeight += allMissing ? addRowHeight + Space::s4 : 0;
+    }
+    const auto fullHeight = fullRows > 0 ? (corners.getHeight() - shortHeight) / fullRows : 0;
 
     auto first = 0;
     for (size_t r = 0; r < rows.size(); ++r)
     {
-        auto row = corners.removeFromTop (r + 1 == rows.size() ? corners.getHeight() : rowHeight);
+        auto row = corners.removeFromTop (r + 1 == rows.size() ? corners.getHeight() : emptyRow[r] ? addRowHeight + Space::s4 : fullHeight);
         const auto inRow = rows[r];
         const auto cellWidth = row.getWidth() / inRow;
         for (int i = 0; i < inRow; ++i)
@@ -252,10 +268,6 @@ void VectorPage::resized ()
             auto cell = (i + 1 == inRow ? row : row.removeFromLeft (cellWidth)).reduced (3, 2);
             auto& menu = *cornerMenus[(size_t) (first + i)];
             auto& wave = *cornerWaves[(size_t) (first + i)];
-            menu.setBounds (cell.removeFromTop (46));
-            cell.removeFromTop (2);
-            // The picture at half its height, the corner oscillator's LEVEL ring and on switch under it (UI
-            // review 31, item 18: the pad already shows the wave; balancing the corners needs their levels).
             auto* level = cornerLevels[(size_t) (first + i)].get();
             auto* power = cornerSwitches[(size_t) (first + i)].get();
             const auto controlled = level != nullptr && power != nullptr && ! missing (first + i);
@@ -264,21 +276,29 @@ void VectorPage::resized ()
                 level->setVisible (controlled);
                 power->setVisible (controlled);
             }
-            // LEVEL over ON in a narrow column at the picture's right, so the picture keeps the cell's height; an
-            // empty corner's picture is the same size (its column stays bare).
-            constexpr int columnWidth = 66;
-            auto column = cell.removeFromRight (columnWidth);
-            cell.removeFromRight (4);
+            if (! controlled)
+            {
+                // Empty corner: the menu, and beside it the "+ add OSC n" button, one row.
+                auto top = cell.removeFromTop (addRowHeight);
+                menu.setBounds (top.removeFromLeft (top.getWidth() / 2));
+                top.removeFromLeft (Space::s8);
+                wave.setBounds (top.withSizeKeepingCentre (top.getWidth(), 40));
+                wave.setVisible (true);
+                continue;
+            }
+            menu.setBounds (cell.removeFromTop (addRowHeight));
+            cell.removeFromTop (Space::s2);
+            // The corner oscillator's LEVEL ring and on switch side by side on one row (the switch level with the
+            // ring's middle), the picture the card's full width beneath (the pad already shows the wave; balancing
+            // the corners needs their levels).
+            constexpr int ringColumn = 66, ringRow = 64;
+            auto ringCell = cell.removeFromTop (ringRow);
+            level->placeAsRing (ringCell.removeFromLeft (ringColumn), 40);
+            power->setBounds ({});
+            placeSwitchBeside (*power, *level, ringCell.removeFromLeft (ringColumn));
+            cell.removeFromTop (Space::s4);
             wave.setBounds (cell);
             wave.setVisible (cell.getHeight() > 20);
-            if (controlled)
-            {
-                constexpr int switchHeight = 34;
-                level->placeAsRing (column.removeFromTop (juce::jmax (0, column.getHeight() - switchHeight - 2)), 40);
-                power->setPackedName (ToggleControl::NamePlace::below);
-                power->setBelowNameSize (level->packedNameUnits());
-                power->setBounds (column.removeFromBottom (switchHeight).withSizeKeepingCentre (level->getWidth(), switchHeight));
-            }
         }
         first += inRow;
     }

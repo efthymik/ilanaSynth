@@ -163,6 +163,8 @@ class VectorPadDisplay : public juce::Component,
                          private IlanaAnim::FrameTimer
 {
 public:
+    std::function<void()> onSwitchedOn;
+
     explicit VectorPadDisplay (IlanaSynthAudioProcessor& p)
         : processorRef (p)
     {
@@ -408,12 +410,6 @@ public:
                 g.setGradientFill (glow);
                 g.fillEllipse (juce::Rectangle<float> (area.getWidth() * 0.8f, area.getWidth() * 0.8f).withCentre (corner));
             }
-
-            g.setColour (IlanaTheme::Ui::text2);
-            g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true));
-            g.drawText (juce::String::fromUTF8 ("VECTOR OFF  \xc2\xb7  switch on to mix the corners"),
-                        area.withSizeKeepingCentre (area.getWidth(), 18.0f).withY (area.getBottom() - (squarePad ? 44.0f : 70.0f)),
-                        juce::Justification::centred);
         }
 
         // The path.
@@ -450,6 +446,16 @@ public:
         g.fillEllipse (juce::Rectangle<float> (13.0f, 13.0f).withCentre (now));
         g.setColour (juce::Colours::white);
         g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (now));
+
+        if (! vectorOn)
+        {
+            // The pad is the switch while VECTOR is off: one button-sized pill at its centre; a click anywhere on the pad
+            // turns VECTOR on (mouseDown).
+            const auto text = juce::String ("SWITCH VECTOR ON");
+            const auto width = (float) juce::GlyphArrangement::getStringWidthInt (juce::Font (IlanaTheme::pillFont()), text) + (float) Space::s24 * 2.0f;
+            IlanaTheme::paintPill (g, juce::Rectangle<float> (width, (float) (Space::s24 + Space::s8)).withCentre (area.getCentre()), text,
+                                   accent, 0.0f, hoverOn ? 1.0f : 0.0f);
+        }
     }
 
     // The path point under `position`, or -1 (also -1 while PATH is off).
@@ -475,20 +481,23 @@ public:
     {
         const auto point = pointAt (event.position);
         const auto add = addPillAt (event.position);
+        const auto off = read ("vec_on") < 0.5f;
 
-        if (point != hoverPoint || add != hoverAdd)
+        if (point != hoverPoint || add != hoverAdd || off != hoverOn)
         {
             hoverPoint = point;
             hoverAdd = add;
+            hoverOn = off;
             repaint();
         }
 
-        setMouseCursor (point >= 0 || add >= 0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+        setMouseCursor (point >= 0 || add >= 0 || off ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
     }
 
     void mouseExit (const juce::MouseEvent&) override
     {
         hoverPoint = hoverAdd = -1;
+        hoverOn = false;
         setMouseCursor (juce::MouseCursor::NormalCursor);
         repaint();
     }
@@ -504,6 +513,26 @@ public:
             hoverAdd = -1;
             repaint();
             return;
+        }
+
+        // VECTOR off: the click switches it on (the same parameter as the page's switch, one undo step); no drag follows.
+        if (read ("vec_on") < 0.5f)
+        {
+            if (auto* parameter = processorRef.apvts.getParameter ("vec_on"))
+            {
+                addClick = true;
+                processorRef.performEdit ("Vector on", [parameter]
+                {
+                    parameter->beginChangeGesture();
+                    parameter->setValueNotifyingHost (1.0f);
+                    parameter->endChangeGesture();
+                });
+                hoverOn = false;
+                repaint();
+                if (onSwitchedOn)
+                    onSwitchedOn(); // (what the page's own ON switch does after it)
+                return;
+            }
         }
 
         dragPoint = pointAt (event.position);
@@ -672,7 +701,7 @@ private:
 
     mutable std::array<juce::Rectangle<float>, VectorShape::maxCorners> addPills {};
     int hoverAdd = -1;
-    bool addClick = false;
+    bool addClick = false, hoverOn = false;
     IlanaDrag::Gestures gestures;
     int dragPoint = -1, hoverPoint = -1;
 };

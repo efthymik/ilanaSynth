@@ -195,7 +195,7 @@ void FmPage::paint (juce::Graphics& g)
 
     // The selected operator's settings, the picker on the header line.
     const auto header = operatorCard.reduced (12, 0).withHeight (26);
-    const auto reserve = operatorCard.getRight() - tabsLeft + 8;
+    const auto reserve = operatorCard.getRight() - (makeOperator.isVisible() ? makeOperator.getX() : tabsLeft) + 8;
     const auto colour = FmDiagram::oscColour (selectedOperator);
     IlanaTheme::paintCard (g, operatorCard.toFloat(), 7.0f, colour.withAlpha (0.35f));
     // On the Operator Env the caption says what it is: an operator, after the one name (I12-18, I13-1; the title
@@ -208,17 +208,24 @@ void FmPage::paint (juce::Graphics& g)
     // the operator's own controls (FM / DX7).
     if (! usesOperatorEnv (selectedOperator))
     {
-        g.setColour (IlanaTheme::Ui::text3);
-        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny));
-        // One short hint, the same on every type (I15-11); the longer
-        // sentence is ENVELOPE's tooltip.
+        // One short hint, the same on every type (I15-11); the longer sentence is ENVELOPE's tooltip. It stands on the
+        // title line beside the make-operator button when the line has the room (it never shrinks to fit).
         // (The graph beside it is the envelope itself and takes drags, so the hint says so rather than sending
         // you to PLAY: UI review 29, B2.)
-        IlanaTheme::drawFitted (g, isFmType (selectedOperator) ? (ampGraph != nullptr ? "Drag the points to edit this envelope."
-                                                                                      : "Edit the envelope on PLAY.")
-                                                                : "Ratio and OP ENV are for FM / DX7 oscillators.",
-                                ampHint,
-                                juce::Justification::centredLeft, 3);
+        const juce::String hint = isFmType (selectedOperator) ? (ampGraph != nullptr ? "Drag the points to edit this envelope."
+                                                                                     : "Edit the envelope on PLAY.")
+                                                               : "Ratio and OP ENV are for FM / DX7 oscillators.";
+        const auto hintFont = IlanaTheme::font (IlanaTheme::TextSize::body);
+        const auto hintWidth = juce::GlyphArrangement::getStringWidthInt (juce::Font (hintFont), hint);
+        const auto titleEnd = header.getX() + IlanaTheme::cardTitleWidth ("OSC 0") + 240;
+        const auto right = makeOperator.isVisible() ? makeOperator.getX() - Space::s12 : tabsLeft - Space::s12;
+        if (right - hintWidth >= titleEnd)
+        {
+            g.setColour (IlanaTheme::Ui::text3);
+            g.setFont (hintFont);
+            g.drawText (hint, juce::Rectangle<int> (right - hintWidth, header.getY(), hintWidth, header.getHeight()),
+                        juce::Justification::centredRight, false);
+        }
     }
 
     paintRoutes (g);
@@ -454,7 +461,7 @@ juce::String FmPage::noRoutesText () const
 {
     for (const auto target : shown)
         if (fmIn[(size_t) target] && playing[(size_t) target])
-            return "No FM routes yet: click a cell's + to add one.";
+            return "Drag one oscillator onto another in the picture, or press + ADD ROUTE.";
     return "No FM routes: these oscillators don't take FM in. Switch one to FM / DX7.";
 }
 
@@ -580,7 +587,7 @@ void FmPage::layoutPlainOperator (OperatorControls& controls)
     {
         setOperatorCardStyle (*each, true);
         each->feedbackType.setCompactLayout (false); // (a menu in the menus' row, the same look)
-        each->feedbackType.setLabelText ("FEEDBACK TYPE");
+        each->feedbackType.setLabelText ("FEEDBACK");
         for (auto* knob : { &each->ratio, &each->fixedHz, &each->semi, &each->fine, &each->egOut, &each->feedback })
             knob->setSizeRole (IlanaTheme::KnobSize::main);
     }
@@ -618,21 +625,11 @@ void FmPage::layoutPlainOperator (OperatorControls& controls)
     constexpr int menuHeight = 40, footHeight = 18, gap = 6;
     layoutRow (left.removeFromTop (menuHeight), menus);
     left.removeFromTop (gap);
-    const auto belowMenus = left;
-    ampHint = left.removeFromBottom (footHeight).withTrimmedLeft (2);
-    // (The make-operator button stands on its own line above the hint, so a narrow knob block never wraps the hint.)
-    auto buttonRow = makeOperator.isVisible() ? left.removeFromBottom (26) : juce::Rectangle<int>();
     const auto count = (int) knobsInRow.size();
     const auto twoRows = count > 5 && left.getHeight() >= 140;
+    // One row of rings stands under the menus a standard gap; the foot's old height goes to the rings' size.
     if (! twoRows)
-    {
-        // One row of rings: the button and the hint stand right under it (no band of empty card between them).
-        auto stack = belowMenus;
-        left = stack.removeFromTop (juce::jmin (88, juce::jmax (0, stack.getHeight() - footHeight - (makeOperator.isVisible() ? 26 : 0))));
-        if (makeOperator.isVisible())
-            buttonRow = stack.removeFromTop (Space::s24 + Space::s2);
-        ampHint = stack.removeFromTop (footHeight).withTrimmedLeft (Space::s2);
-    }
+        left = left.removeFromTop (juce::jmin (112, left.getHeight()));
     const auto columns = twoRows ? 3 : count;
     const auto rowsHere = twoRows ? (count + 2) / 3 : 1;
     const auto cellWidth = left.getWidth() / juce::jmax (1, columns);
@@ -641,12 +638,13 @@ void FmPage::layoutPlainOperator (OperatorControls& controls)
     for (int i = 0; i < count; ++i)
         if (auto* knob = dynamic_cast<KnobControl*> (knobsInRow[(size_t) i]))
             knob->placeAsRing (juce::Rectangle<int> (left.getX() + (i % columns) * cellWidth, left.getY() + (i / columns) * cellHeight,
-                                                     cellWidth, cellHeight).reduced (2, 0), twoRows ? 46 : count <= 5 ? 54 : 40);
-    // Another type's way to the operator's controls, at the hint's end.
+                                                     cellWidth, cellHeight).reduced (2, 0), twoRows ? 46 : count <= 5 ? 60 : 44);
+    // Another type's way to the operator's controls: on the title line, left of the oscillator picker.
     if (makeOperator.isVisible())
     {
         const auto width = juce::GlyphArrangement::getStringWidthInt (juce::Font (IlanaTheme::pillFont()), makeOperator.getButtonText()) + 26;
-        makeOperator.setBounds (buttonRow.withWidth (width).withSizeKeepingCentre (width, 22).withX (buttonRow.getX() + 2));
+        const auto line = operatorCard.reduced (12, 0).withHeight (26).withSizeKeepingCentre (operatorCard.getWidth() - 24, 22);
+        makeOperator.setBounds (juce::Rectangle<int> (tabsLeft - Space::s12 - width, line.getY(), width, line.getHeight()));
     }
 }
 
