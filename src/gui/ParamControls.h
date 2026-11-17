@@ -4187,6 +4187,14 @@ public:
         repaint();
     }
 
+    // The right-hand name in the caption style of a knob's name (bold, tracked, dim) at this size.
+    void setRightNameCaption (float size)
+    {
+        rightNameSize = size;
+        rightNameIsCaption = true;
+        repaint();
+    }
+
     // Just the pill, filling the area (a card header's power switch).
     void setBareSwitch (bool shouldBeBare)
     {
@@ -4275,8 +4283,9 @@ public:
             }
             else
             {
-                g.setColour (IlanaTheme::Ui::text.withMultipliedAlpha (on));
-                g.setFont (IlanaTheme::font (rightNameSize));
+                g.setColour ((rightNameIsCaption ? IlanaTheme::Ui::text3 : IlanaTheme::Ui::text).withMultipliedAlpha (on));
+                g.setFont (rightNameIsCaption ? IlanaTheme::font (rightNameSize, true).withKerningFactor (0.07f)
+                                              : IlanaTheme::font (rightNameSize));
                 IlanaTheme::drawFitted (g, button.getButtonText(), juce::Rectangle<int> { b.getRight() + 5, b.getY(), juce::jmax (0, getWidth() - b.getRight() - 5), b.getHeight() }, juce::Justification::centredLeft, 1);
             }
             return;
@@ -4364,6 +4373,7 @@ private:
     bool callGlow = false;
     NamePlace packedPlace = NamePlace::none;
     float rightNameSize = 7.3f, belowNameSize = 0.0f;
+    bool rightNameIsCaption = false;
     juce::Colour groupColour;
     juce::String groupText;
     static constexpr int inlineSwitchWidth = 34;

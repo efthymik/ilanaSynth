@@ -537,6 +537,10 @@ public:
     void easeNextBlock() { easeStep = true; }
     // The whole patch as a state tree, for the editor's A/B slots.
     juce::ValueTree captureWholePatch() { return buildFullState(); }
+    // The editor's A|B slots and which side plays; kept here (not saved in the plugin state)
+    // so they survive the editor closing.
+    juce::ValueTree abSlotA, abSlotB;
+    bool abShowingA = true;
     void restoreWholePatch (const juce::ValueTree& state) { applyFullState (state); }
     float getCpuUsage() const { return cpuUsage.load(); }
 
