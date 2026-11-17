@@ -1198,6 +1198,9 @@ void OscPage::handleAsyncUpdate ()
 {
     updateModeVisibility();
     updateEnabled();
+    // (updateEnabled lights every control its mode uses; the effect rules dim the ones that do nothing
+    // right now. Apply them here too, not only on the next timer tick, so nothing flashes lit.)
+    effectRules.apply();
 }
 
 void OscPage::timerCallback ()
