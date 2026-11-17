@@ -2299,7 +2299,9 @@ void PlayPage::layoutFilterCard ()
         const auto filterCell = [&] (int slot)
         {
             // (A pitch wide, centred on the column, so KEY TRACK reads on one line under the same dial.)
-            return juce::Rectangle<int> (knobsX + (slot < 3 ? slot : slot - 3) * filterPitch - (slot < 3 ? 0 : (filterPitch - cell) / 2), slot < 3 ? filterRow1 : filterRow2,
+            // (Its caption's ink stays a gap clear of the graph: the cell may sit a few px right of CUTOFF's centre.)
+            const auto x = knobsX + (slot < 3 ? slot : slot - 3) * filterPitch - (slot < 3 ? 0 : (filterPitch - cell) / 2);
+            return juce::Rectangle<int> (slot < 3 ? x : juce::jmax (x, graphRight + Space::s6 + KnobControl::packedPadX), slot < 3 ? filterRow1 : filterRow2,
                                          slot < 3 ? cell : filterPitch, (int) dialSize + 10); // off-grid
         };
         for (size_t k = 0; k < filters[0].knobs.size(); ++k)
