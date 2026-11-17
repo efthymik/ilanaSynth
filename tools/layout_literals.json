@@ -53,7 +53,7 @@
  "src/gui/pages/EnvLfoPages.h": 4,
  "src/gui/pages/FilterVectorPhysicalPages.cpp": 12,
  "src/gui/pages/FmInputPages.cpp": 77,
- "src/gui/pages/FxPage.cpp": 69,
+ "src/gui/pages/FxPage.cpp": 70,
  "src/gui/pages/FxWidgets.h": 14,
  "src/gui/pages/MatrixPage.cpp": 47,
  "src/gui/pages/MatrixPage.h": 1,
