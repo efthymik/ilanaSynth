@@ -332,6 +332,25 @@ void SourceCarouselCard::mouseUp (const juce::MouseEvent& event)
 
     if (event.mouseWasClicked() && event.y < headerHeight && event.x < previous.getX() && onEdit != nullptr && ! sources.empty())
         onEdit (selected, edit);
+
+    // The "Drives nothing" / "Cutoff +2" pill does what it says (audit 8): empty, it arms this LFO for
+    // click-to-assign (on mouse-up, so the same press does not disarm it); with routes, it opens the
+    // source's hover card with every target, its depth and remove.
+    if (event.mouseWasClicked() && event.eventComponent == this && kind == Kind::lfo && ! sources.empty() && chipBounds.contains (event.getPosition()))
+    {
+        if (drivesNothing)
+            setArmedModSource (armedModSource() == selected ? 0 : selected);
+        else if (modHoverHooks().showSource != nullptr)
+            modHoverHooks().showSource (*this, selected);
+        refreshSources();
+    }
+}
+
+juce::MouseCursor SourceCarouselCard::getMouseCursor()
+{
+    if (kind == Kind::lfo && ! sources.empty() && chipBounds.contains (getMouseXYRelative()))
+        return juce::MouseCursor::PointingHandCursor;
+    return juce::Component::getMouseCursor();
 }
 
 std::vector<int> SourceCarouselCard::wantedSources () const
@@ -448,12 +467,18 @@ void SourceCarouselCard::refreshSources ()
     if (kind == Kind::lfo && ! sources.empty())
     {
         const auto slots = modSlotsDrivenBy (processorRef, selected);
-        auto text = slots.empty() ? juce::String ("Drives nothing")
+        const auto armed = armedModSource() == selected;
+        auto text = armed ? juce::String ("Click a knob...")
+                  : slots.empty() ? juce::String ("Drives nothing")
                                   : destinationShortName (processorRef.readModSlot (slots.front()).destination)
                                         + (slots.size() > 1 ? " +" + juce::String ((int) slots.size() - 1) : juce::String());
         if (text != chipText)
         {
             chipText = text;
+            repaint();
+        }
+        if (drivesNothing != slots.empty())
+        {
             drivesNothing = slots.empty();
             repaint();
         }
@@ -1536,6 +1561,7 @@ PlayPage::PlayPage (IlanaSynthAudioProcessor& p)
         // SUB and NOISE: each its own card, switch, menu, picture and two knobs.
         subOn = bareSwitch ("subosc_on", subColour(), "SUB on or off: a sine, square or saw an octave or two down");
         noiseOn = bareSwitch ("noise_on", subColour(), "NOISE on or off");
+        updateNoiseSilent();
         subShape = menuFor ("sub_shape", "WAVE", "SUB WAVE\nSine for clean weight, Square or Saw for grit.");
         noiseType = menuFor ("noise_type", "TYPE", "NOISE TYPE\nWhite, pink, brown, blue, violet or grey.");
         subOctave = std::make_unique<PillChoice> (state, "sub_octave", juce::StringArray { "-2", "-1" }, subColour(), "SUB OCTAVE\n-1 or -2 octaves below the note.", std::vector<int> { 1, 0 });
@@ -1910,6 +1936,7 @@ void PlayPage::timerCallback ()
     operatorFilterOff = operatorVoiceFilterOff (processorRef);
     filterDisplay.setVoiceOff (operatorFilterOff);
     effectRules.apply();
+    updateNoiseSilent();
     if (const auto switches = switchesSignature(); switches != lastSwitches)
     {
         lastSwitches = switches;
@@ -2043,10 +2070,26 @@ int PlayPage::readInt (const juce::String& id) const
     return value != nullptr ? (int) value->load() : 0;
 }
 
+// NOISE on at level 0 mixes nothing in: its switch draws in the dim "on but silent" state (display only; audit 26).
+void PlayPage::updateNoiseSilent ()
+{
+    if (auto& properties = noiseOn->getButton().getProperties(); (bool) properties.getWithDefault ("silentOn", false) == noiseAudible())
+    {
+        properties.set ("silentOn", ! noiseAudible());
+        noiseOn->getButton().repaint();
+    }
+}
+
+bool PlayPage::noiseAudible () const
+{
+    const auto* level = processorRef.apvts.getRawParameterValue ("noise_level");
+    return level != nullptr && level->load() > 0.0f;
+}
+
 int PlayPage::switchesSignature () const
 {
     return readInt ("sym_on") + 2 * readInt ("west_on") + 4 * readInt ("res_on") + 8 * readInt ("sb_on")
-           + 16 * readInt ("subosc_on") + 32 * readInt ("noise_on");
+           + 16 * readInt ("subosc_on") + 32 * readInt ("noise_on") + 64 * (noiseAudible() ? 1 : 0);
 }
 
 bool PlayPage::dotTarget (size_t index) const
@@ -2058,7 +2101,7 @@ bool PlayPage::dotTarget (size_t index) const
         case 2: return readInt ("west_on") != 0;
         case 3: return readInt (boardTab.getSelected() == 0 ? "sb_on" : "res_on") != 0;
         case 4: return readInt ("subosc_on") != 0;
-        case 5: return readInt ("noise_on") != 0;
+        case 5: return readInt ("noise_on") != 0 && noiseAudible();
         default: return true;
     }
 }
@@ -2251,17 +2294,19 @@ void PlayPage::layoutFilterCard ()
         filterDisplay.setBounds (juce::Rectangle<int> (card.getX() + Space::s6, body.getY() + 1, graphRight - card.getX() - Space::s6, body.getHeight() - Space::s2));
         // (The rows at the body's top and bottom, as WEST's: ilana liked its spacing, F1 / F2's rows stood too close.)
         const auto filterRow1 = body.getY() + 1, filterRow2 = body.getBottom() - 1 - (int) dialSize - 10; // off-grid
+        // (Audit 25: the second row stands on the first row's columns: KEY TRACK under CUTOFF, MORPH under RESO, and
+        // SLOPE's two buttons span the RESO and DRIVE columns.)
         const auto filterCell = [&] (int slot)
         {
-            return slot < 3 ? juce::Rectangle<int> (knobsX + slot * filterPitch, filterRow1, cell, (int) dialSize + 10) // off-grid
-                            : juce::Rectangle<int> (knobsX + filterPitch / 2 + (slot - 3) * filterPitch - (filterPitch - cell) / 2, filterRow2, filterPitch, // off-grid
-                                                    (int) dialSize + 10); // (a pitch wide: KEY TRACK on one line) (off-grid)
+            // (A pitch wide, centred on the column, so KEY TRACK reads on one line under the same dial.)
+            return juce::Rectangle<int> (knobsX + (slot < 3 ? slot : slot - 3) * filterPitch - (slot < 3 ? 0 : (filterPitch - cell) / 2), slot < 3 ? filterRow1 : filterRow2,
+                                         slot < 3 ? cell : filterPitch, (int) dialSize + 10); // off-grid
         };
         for (size_t k = 0; k < filters[0].knobs.size(); ++k)
             for (auto& other : filters)
                 other.knobs[k]->setBounds (KnobControl::packedBoundsFor (filterCell (juce::jmin (4, (int) k))));
         for (auto& other : filters)
-            other.slope->setBounds (KnobControl::packedBoundsFor (filterCell (4)));
+            other.slope->setBounds (KnobControl::packedBoundsFor (juce::Rectangle<int> (knobsX + filterPitch, filterRow2, filterPitch + cell, (int) dialSize + 10))); // off-grid
 
         // WEST. Header: GATE, PLACE and STRIKE BY as wide as their words, its switch at the right; body: the fold's
         // curve, then seven knobs.
