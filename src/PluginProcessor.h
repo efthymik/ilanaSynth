@@ -120,6 +120,9 @@ public:
     void chooseExciter (int osc, int choice);
     bool saveFxChainToFile (const juce::File& file);
     bool loadFxChainFromFile (const juce::File& file);
+    // The same data in memory (the chain menu's Copy chain / Paste chain).
+    std::unique_ptr<juce::XmlElement> makeFxChainXml();
+    bool applyFxChainXml (const juce::XmlElement& chain);
     void loadReverbIr (const juce::File& file);
     void switchFxChain();
     void copyFxChainToOtherBank();

@@ -462,6 +462,8 @@ public:
                 tip = "Add " + name + " to the first empty slot.";
             if (button->getKind() == FxLibraryButton::Kind::effect && twin >= 0)
                 tip << "\nAIRWINDOWS beside it is its Airwindows model; a card switches between the two.";
+            else if (button->getKind() == FxLibraryButton::Kind::airwindowsModel)
+                tip << "\nAIRWINDOWS beside an effect is its Airwindows version; a card switches between the two.";
             if (isAirwindowsFxType (type))
                 tip << "\n" << airwindowsBadgeTip (type);
             button->setTooltip (tip);
@@ -492,10 +494,7 @@ public:
             g.drawText (heading.text, heading.bounds.withTrimmedLeft (1), juce::Justification::topLeft, false);
         }
 
-        // What the AIRWINDOWS tags are (S10-11).
-        g.setColour (IlanaTheme::Ui::text3);
-        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
-        g.drawText (legendText, legend, juce::Justification::centredRight, false);
+        // (What the AIRWINDOWS tags are: their tooltip, in refresh().)
     }
 
     void resized() override
@@ -551,9 +550,6 @@ public:
             removeButton.setBounds (footer.removeFromRight (136));
             footer.removeFromRight (12);
         }
-        const auto legendFont = juce::Font (IlanaTheme::font (IlanaTheme::TextSize::label));
-        const juce::String longLegend ("AIRWINDOWS beside an effect is its Airwindows version; a card switches between the two.");
-        const juce::String shortLegend ("AIRWINDOWS: the effect's Airwindows version.");
 
         for (const auto& group : fxLibraryGroups())
             if (group.column < 0)
@@ -564,9 +560,6 @@ public:
                     if (more.isVisible())
                         footer.setLeft (more.getRight() + 12);
                 }
-
-        legendText = juce::GlyphArrangement::getStringWidth (legendFont, longLegend) <= (float) footer.getWidth() ? longLegend : shortLegend;
-        legend = footer;
     }
 
 private:
@@ -582,8 +575,6 @@ private:
     std::vector<std::unique_ptr<FxLibraryButton>> buttons;
     juce::TextButton removeButton { "REMOVE EFFECT" };
     std::vector<Heading> headings;
-    juce::Rectangle<int> legend;
-    juce::String legendText;
     juce::BorderSize<int> padding;
     int replacingSlot = -1, replacedType = 0;
 };

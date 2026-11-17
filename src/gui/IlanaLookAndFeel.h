@@ -1112,6 +1112,8 @@ public:
     static constexpr float packedMenuText = 9.0f, packedNameText = 7.5f;
     // A packed menu's text size: its own ("packedMenuSize", the OSC strip's lane menus) or the cards' 9 px.
     static float packedMenuSizeOf (const juce::ComboBox& box) { return (float) box.getProperties().getWithDefault ("packedMenuSize", packedMenuText); }
+    // The name inside a packed menu: its own ("packedNameSize": the FX rack's lone card) or the cards' 7.5 px.
+    static float packedNameSizeOf (const juce::ComboBox& box) { return (float) box.getProperties().getWithDefault ("packedNameSize", packedNameText); }
 
     // A button's corners: 8 px at 30 px high, 6 px at 24 (the sheet's .btn and .btn.sm).
     static float buttonRadius (float height) { return juce::jlimit (3.0f, 8.0f, height * 0.26f); }
@@ -1961,7 +1963,7 @@ public:
             if (prefixW > 0)
             {
                 g.setColour (Ui::text3.withMultipliedAlpha (textOn));
-                g.setFont (font (packedNameText, true).withKerningFactor (0.09f));
+                g.setFont (font (packedNameSizeOf (box), true).withKerningFactor (0.09f));
                 g.drawText (box.getProperties()["textPrefix"].toString(), juce::Rectangle<int> (5, 0, prefixW, height), juce::Justification::centredLeft, false);
             }
             const auto value = box.getText();
@@ -1998,7 +2000,7 @@ public:
         const auto prefix = box.getProperties()["textPrefix"].toString();
         if (prefix.isNotEmpty() && (bool) box.getProperties().getWithDefault ("packedMenu", false))
         {
-            const auto prefixW = juce::GlyphArrangement::getStringWidthInt (IlanaTheme::font (packedNameText, true).withKerningFactor (0.09f), prefix) + 3;
+            const auto prefixW = juce::GlyphArrangement::getStringWidthInt (IlanaTheme::font (packedNameSizeOf (box), true).withKerningFactor (0.09f), prefix) + 3;
             // (The value comes first: a menu with no room for both drops its name, which the tooltip keeps.)
             const auto valueW = juce::GlyphArrangement::getStringWidthInt (IlanaTheme::font (packedMenuSizeOf (box)), box.getText()) + 1;
             return valueW > box.getWidth() - 5 - prefixW - 13 ? 0 : prefixW;

@@ -3522,7 +3522,11 @@ void IlanaSynthAudioProcessorEditor::loadPresetIndex (int index, std::function<v
             self.closeWavetableEditor(); // it works on the old patch's table
             IlanaAnim::armMorphs(); // (the old shapes fade out over the new ones)
             self.processorRef.beginEdit ("Load " + name);
+            // KEEP FX (FX page): the rack as it was goes back over the preset's.
+            const auto keptRack = FxPage::keepRackOnPresetLoad() ? self.processorRef.makeFxChainXml() : nullptr;
             loaded = userFile != juce::File() ? self.processorRef.loadUserPreset (userFile) : self.processorRef.loadPresetByIndex (index);
+            if (loaded && keptRack != nullptr)
+                self.processorRef.applyFxChainXml (*keptRack);
             self.processorRef.endEdit();
 
             if (loaded)
