@@ -227,10 +227,8 @@ private:
     // The parallel ladder's buses, x in the rail (inside the IN / OUT pills).
     static constexpr int parallelInBusX = 13, parallelOutBusX = 43;
     static constexpr int leftMetersHeight = 36, tallCardHeight = 280;
-    // A lone card's two thin level bars (14 px each, a gap, the tick names under).
-    static constexpr int thinMetersHeight = 14 + 14 + 8 + 16;
-    // The least dial columns a lone card reserves, so its picture ends at one x on every card.
-    static constexpr int loneMinColumns = 3;
+    // A lone card: its header row's height, and the level strip's width (two 14 px bars and their dB names).
+    static constexpr int loneHeaderHeight = 28, loneStripWidth = 60;
     static constexpr int railWidth = 56, railGap = 10, rowGap = 10, rowPad = 8, leftWidth = 156;
     static constexpr int rowHeightStandard = 80, rowHeightCompact = 64, rowHeightMost = 88, duplicateHeight = 56;
     // The add row pinned at the page's foot: + ADD EFFECT and the suggested

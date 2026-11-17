@@ -2020,11 +2020,14 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
     // the levels stand as two tall bars under it, the column's height.
     panel.meters = {};
     auto blockArea = bounds;
-    if (! panel.duplicate && bounds.getHeight() >= tallCardHeight && hasCardDisplay (type))
+    // A lone effect's card: one header row across the card (number, name, S, on, engine, and the menus
+    // and switches at its right), then the level strip, the picture and the dial column below it.
+    const auto loneLayout = loneCard && ! panel.duplicate && bounds.getHeight() >= tallCardHeight && hasCardDisplay (type);
+    const auto loneHeader = bounds.reduced (Space::s8, rowPad).removeFromTop (loneHeaderHeight);
+    header.type.setTitle (cardTitle (type), isModuleOff (slot) ? IlanaTheme::Ui::text3 : fxColour (type));
+    if (loneLayout)
     {
-        blockArea = bounds.withHeight (48 + 2 * 16);
-        const auto block = leftBlockFor (blockArea);
-        panel.meters = { block.number.getX(), block.chip.getBottom() + Space::s24, leftWidth - 4, thinMetersHeight };
+        // (A block's worth of pixels is no longer needed under the row: the body starts below it.)
     }
     else if (! panel.duplicate && bounds.getHeight() >= 150 && hasCardDisplay (type))
     {
@@ -2032,11 +2035,21 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
         const auto block = leftBlockFor (blockArea);
         panel.meters = { block.number.getX(), block.chip.getBottom() + 16, leftWidth - 4, leftMetersHeight };
     }
-    const auto left = leftBlockFor (blockArea);
-    panel.number = left.number;
+    auto left = leftBlockFor (blockArea);
     panel.handle = bounds.withWidth (leftWidth + 20);
+    if (loneLayout)
+    {
+        const auto centred = [&] (int x, int width, int height) { return juce::Rectangle<int> (x, loneHeader.getCentreY() - height / 2, width, height); };
+        left.number = centred (loneHeader.getX(), 18, 18); // off-grid
+        const auto nameWidth = header.type.preferredWidth();
+        left.name = centred (left.number.getRight() + Space::s4, nameWidth, loneHeader.getHeight());
+        left.solo = centred (left.name.getRight() + Space::s12, Space::s24, 20); // off-grid
+        left.power = centred (left.solo.getRight() + Space::s6, 36, 20); // off-grid
+        left.chip = centred (left.power.getRight() + Space::s6, 88, 20); // off-grid
+        panel.handle = juce::Rectangle<int>::leftTopRightBottom (bounds.getX(), bounds.getY(), left.name.getRight() + Space::s8, loneHeader.getBottom());
+    }
+    panel.number = left.number;
 
-    header.type.setTitle (cardTitle (type), isModuleOff (slot) ? IlanaTheme::Ui::text3 : fxColour (type));
     header.type.setBounds (left.name.withWidth (juce::jmin (left.name.getWidth(), header.type.preferredWidth())));
     header.type.setVisible (true);
     header.type.setTooltip ("Slot " + juce::String (slot + 1) + ": " + getSlotName (type)
@@ -2063,7 +2076,8 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
         header.chip.setVisible (true);
     }
 
-    auto inner = bounds.reduced (10, rowPad).withTrimmedLeft (leftWidth + 10); // off-grid
+    auto inner = loneLayout ? bounds.reduced (Space::s8, rowPad).withTrimmedTop (loneHeaderHeight + Space::s8)
+                            : bounds.reduced (10, rowPad).withTrimmedLeft (leftWidth + 10); // off-grid
 
     if (panel.duplicate)
     {
@@ -2133,23 +2147,34 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
     }
     if (filterFront && filterFxHasSlope())
         knobs.insert (knobs.begin() + juce::jmin ((int) knobs.size(), 4), &filterSlopePills); // (where MORPH goes on a model that morphs)
-    // A lone effect's card: its menus and switches stand in a row above the dial grid (not in a
-    // column beside it), at the body text size, and the dials' block is as wide on every card.
-    const auto lone = loneCard && ! filterFront;
+    // A lone effect's card (loneLayout): the level strip at the far left, the picture, then the dial
+    // column, top-aligned with the picture and only as wide as its dials need. The menus and switches
+    // go at the right end of the header row, or (too many for it) one under the other above the dials.
     const auto loneItemWidth = 2 * grid.pitch - sideColumnGap, loneItemHeight = Space::s24 + Space::s2;
-    const auto loneReserved = [&] (int knobColumns) { return juce::jmax (knobColumns, loneMinColumns) * grid.pitch; };
-    auto plan = packedPlanFor ((int) knobs.size(), lone ? 0 : (int) sides.size(), inner.getWidth() - minDisplayWidth - 10 - (filterFront ? filterBlockWidth() + sideColumnGap : 0), grid.pitch);
+    auto sidesInHeader = false;
+    auto sidesHeight = 0;
+    if (loneLayout && ! filterFront && ! sides.empty())
+    {
+        const auto need = (int) sides.size() * (loneItemWidth + Space::s8) - Space::s8;
+        sidesInHeader = need <= loneHeader.getRight() - left.chip.getRight() - Space::s16;
+        sidesHeight = sidesInHeader ? 0 : (int) sides.size() * (loneItemHeight + Space::s8);
+    }
+    const auto filterPickerHeight = 26; // off-grid
+    if (loneLayout && filterFront)
+        sidesHeight = filterPickerHeight + Space::s8;
+    if (loneLayout)
+    {
+        panel.meters = inner.removeFromLeft (loneStripWidth);
+        inner.removeFromLeft (Space::s8);
+    }
+    auto plan = packedPlanFor ((int) knobs.size(), loneLayout ? 0 : (int) sides.size(), inner.getWidth() - minDisplayWidth - 10 - (filterFront && ! loneLayout ? filterBlockWidth() + sideColumnGap : 0), grid.pitch);
     // A row grown tall takes its knobs in as many rows as its height holds, so they fill it and
     // the picture widens: four or more knobs in a grid of two columns or more, two or three one under the other
     // (no row of one beside a row of two). The side columns hold as many as the rows' height.
     {
         const auto count = (int) knobs.size();
         // (The last row's air under its name may overhang the card's padding, not the tap grid under it.)
-        const auto loneSidesHeight = lone && ! sides.empty()
-                                         ? (((int) sides.size() + juce::jmax (1, (loneReserved (plan.knobColumns) + Space::s8) / (loneItemWidth + Space::s8)) - 1)
-                                            / juce::jmax (1, (loneReserved (plan.knobColumns) + Space::s8) / (loneItemWidth + Space::s8))) * (loneItemHeight + Space::s8)
-                                         : 0;
-        const auto fit = juce::jmax (plan.knobRows, (inner.getHeight() - loneSidesHeight + (hasTapGrid (panel) ? 0 : 8)) / grid.rowHeight);
+        const auto fit = juce::jmax (plan.knobRows, (inner.getHeight() - sidesHeight + (hasTapGrid (panel) ? 0 : 8)) / grid.rowHeight);
         auto rows = plan.knobRows;
         if (count >= 4)
             rows = juce::jmax (rows, juce::jmin (fit, (count + 1) / 2)); // (two columns at least: no tall single file)
@@ -2162,14 +2187,16 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
             plan.sidePerColumn = juce::jmax (5, (plan.knobRows * grid.rowHeight + sideGap) / (sideRow + sideGap));
             plan.sideColumns = ((int) sides.size() + plan.sidePerColumn - 1) / plan.sidePerColumn;
         }
-        if (lone)
+        if (loneLayout)
             plan.sideColumns = 0;
     }
-    const auto blockWidth = filterFront ? filterBlockWidth() + sideColumnGap : 0;
-    auto knobsArea = lone ? inner.removeFromRight (loneReserved (plan.knobColumns))
-                          : (plan.width() > 0 ? inner.removeFromRight (plan.width() + blockWidth) : juce::Rectangle<int>());
-    if (plan.width() > 0 || lone)
-        inner.removeFromRight (10); // off-grid
+    const auto blockWidth = filterFront && ! loneLayout ? filterBlockWidth() + sideColumnGap : 0;
+    // (The lone card's picker, with its arrows, is as wide as the family tabs' shorter names allow.)
+    const auto loneColumnWidth = juce::jmax (plan.knobColumns * grid.pitch, filterFront ? 3 * grid.pitch : 0);
+    auto knobsArea = loneLayout ? inner.removeFromRight (loneColumnWidth)
+                                : (plan.width() > 0 ? inner.removeFromRight (plan.width() + blockWidth) : juce::Rectangle<int>());
+    if (plan.width() > 0 || loneLayout)
+        inner.removeFromRight (loneLayout ? Space::s12 : 10); // off-grid
 
     panel.well = {};
     if (hasCardPicture (type))
@@ -2193,33 +2220,16 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
             panel.well = displayArea;
     }
 
-    // Side columns: their items from the top of the knob rows' band, one under the other.
-    // (On a tall card the rows stand apart, up to twice the grid, so the
-    // knobs share the card's height rather than sitting in a band of air.)
-    // A tall card's dials grow with the room they have (up to 56), and the rows keep an even, modest pitch.
-    auto dialsArea = knobsArea;
-    auto loneSides = juce::Rectangle<int>();
-    if (lone && ! sides.empty())
-    {
-        const auto perRow = juce::jmax (1, (knobsArea.getWidth() + Space::s8) / (loneItemWidth + Space::s8));
-        const auto rowsOfSides = ((int) sides.size() + perRow - 1) / perRow;
-        loneSides = dialsArea.removeFromTop (rowsOfSides * (loneItemHeight + Space::s8));
-        for (size_t i = 0; i < sides.size(); ++i)
-            sides[i]->setBounds (juce::Rectangle<int> (loneSides.getX() + ((int) i % perRow) * (loneItemWidth + Space::s8),
-                                                       loneSides.getY() + ((int) i / perRow) * (loneItemHeight + Space::s8),
-                                                       loneItemWidth, loneItemHeight));
-    }
-
     // Names at label size or larger and menus at body size on the lone card; the long rack's own sizes elsewhere.
     for (auto* knob : knobs)
         if (auto* k = dynamic_cast<KnobControl*> (knob))
-            k->setPackedNameSize (lone ? IlanaTheme::TextSize::label : 0.0f);
+            k->setPackedNameSize (loneLayout ? IlanaTheme::TextSize::label : 0.0f);
     for (auto* side : sides)
     {
         if (auto* combo = dynamic_cast<ComboControl*> (side))
         {
             auto& properties = combo->getComboBox().getProperties();
-            if (lone)
+            if (loneLayout)
             {
                 properties.set ("packedMenuSize", IlanaTheme::TextSize::body);
                 properties.set ("packedNameSize", IlanaTheme::TextSize::label);
@@ -2232,25 +2242,60 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
             combo->getComboBox().repaint();
         }
         else if (auto* toggle = dynamic_cast<ToggleControl*> (side))
-            toggle->setRightNameSize (lone ? IlanaTheme::TextSize::body : 7.3f);
+            toggle->setRightNameSize (loneLayout ? IlanaTheme::TextSize::body : 7.3f);
     }
 
-    const auto roomPerRow = dialsArea.getHeight() / juce::jmax (1, plan.knobRows);
-    const auto dialSize = loneCard ? juce::jlimit (grid.dial, juce::jmax (grid.dial, 56.0f), grid.dial + (float) (roomPerRow - grid.rowHeight) * 0.5f) : grid.dial;
-    const auto growth = dialSize / grid.dial;
-    const auto scaledRow = juce::roundToInt ((float) grid.rowHeight * growth);
-    const auto rowPitch = juce::jlimit (scaledRow, juce::roundToInt ((float) scaledRow * 1.3f), roomPerRow);
-    if (growth > 1.01f)
-        for (auto* knob : knobs)
-            if (auto* k = dynamic_cast<KnobControl*> (knob))
+    if (loneLayout)
+    {
+        // The dials at the grid's own pitch, from the picture's top; no spreading over the card's height.
+        auto column = knobsArea;
+        if (filterFront)
+        {
+            // The family tabs in the header row's right end, the model picker over the dials.
+            const auto tabs = juce::Rectangle<int> (filterBlockWidth(), Space::s24).withCentre ({ loneHeader.getRight() - filterBlockWidth() / 2, loneHeader.getCentreY() });
+            filterCategories.setBounds (tabs);
+            filterPicker.setBounds (column.removeFromTop (filterPickerHeight));
+            column.removeFromTop (Space::s8);
+            for (juce::Component* part : { (juce::Component*) &filterCategories, (juce::Component*) &filterPicker })
+                part->setVisible (true);
+            filterSlopePills.setVisible (filterFxHasSlope());
+        }
+        else if (! sides.empty())
+        {
+            if (sidesInHeader)
             {
-                k->setPackedDial (dialSize);
-                k->setPackedValueSize (grid.value * growth);
+                auto x = loneHeader.getRight();
+                for (size_t i = sides.size(); i-- > 0;)
+                {
+                    x -= loneItemWidth;
+                    sides[i]->setBounds (juce::Rectangle<int> (x, loneHeader.getCentreY() - loneItemHeight / 2, loneItemWidth, loneItemHeight));
+                    x -= Space::s8;
+                }
             }
-    const auto band = dialsArea.withSizeKeepingCentre (dialsArea.getWidth(), plan.knobRows * rowPitch);
+            else
+                for (size_t i = 0; i < sides.size(); ++i)
+                    sides[i]->setBounds (column.removeFromTop (loneItemHeight).withWidth (juce::jmax (loneItemWidth, column.getWidth())));
+            if (! sidesInHeader)
+                column.removeFromTop (Space::s8);
+        }
+        for (size_t i = 0; i < knobs.size(); ++i)
+        {
+            const auto col = (int) i % juce::jmax (1, plan.knobColumns), row = (int) i / juce::jmax (1, plan.knobColumns);
+            const auto cell = juce::Rectangle<int> (column.getX() + col * grid.pitch, column.getY() + row * grid.rowHeight, grid.pitch, (int) grid.dial + 10 + 17);
+            knobs[i]->setBounds (KnobControl::packedBoundsFor (cell));
+        }
+        stackPanels.push_back (panel);
+        return;
+    }
+
+    // Side columns: their items from the top of the knob rows' band, one under the other.
+    const auto roomPerRow = knobsArea.getHeight() / juce::jmax (1, plan.knobRows);
+    const auto dialSize = grid.dial;
+    const auto rowPitch = juce::jlimit (grid.rowHeight, juce::roundToInt ((float) grid.rowHeight * 1.3f), roomPerRow);
+    const auto band = knobsArea.withSizeKeepingCentre (knobsArea.getWidth(), plan.knobRows * rowPitch);
     auto sideArea = band.withWidth (plan.sideColumns * (sideWidth + sideColumnGap));
     const auto sideHeight = juce::jmin ((int) sides.size(), plan.sidePerColumn) * (sideRow + sideGap) - sideGap;
-    for (size_t i = 0; i < sides.size() && ! lone; ++i)
+    for (size_t i = 0; i < sides.size(); ++i)
     {
         const auto column = (int) i / plan.sidePerColumn, row = (int) i % plan.sidePerColumn;
         const auto top = band.getCentreY() - sideHeight / 2;
@@ -2278,7 +2323,7 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
         const auto column = (int) i % juce::jmax (1, plan.knobColumns), row = (int) i / juce::jmax (1, plan.knobColumns);
         // (Each row's dial and name centred on the row, as the menus beside them are.)
         const auto rowCentre = band.getY() + rowPitch / 2 + row * rowPitch;
-        const auto cell = juce::Rectangle<int> (knobsX + column * grid.pitch, rowCentre - ((int) dialSize + 10) / 2, grid.pitch, (int) dialSize + 10 + (lone ? 17 : 13));
+        const auto cell = juce::Rectangle<int> (knobsX + column * grid.pitch, rowCentre - ((int) dialSize + 10) / 2, grid.pitch, (int) dialSize + 10 + 13);
         knobs[i]->setBounds (KnobControl::packedBoundsFor (cell));
     }
 
@@ -2583,30 +2628,46 @@ void FxPage::paintLevelMeters (juce::Graphics& g, const StackPanel& panel, juce:
 {
     const auto slot = panel.slot;
     const auto in = off ? 0.0f : processorRef.getFxSlotInLevel (slot), out = off ? 0.0f : processorRef.getFxSlotOutLevel (slot);
-    // The slot's levels, -48 .. 0 dB across the bar: the compact bars of a card's left column, or on a
-    // lone card two thin bars with -24 / -12 / 0 ticks and a peak line (the toolbar meter's drawing).
-    const auto thin = meters.getHeight() >= thinMetersHeight;
-    const auto now = juce::Time::getMillisecondCounterHiRes();
     const auto fillOf = [] (float level) { return juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (level, -60.0f) + 48.0f) / 48.0f); };
-    auto ticksArea = juce::Rectangle<int>();
-    if (thin)
-        ticksArea = meters.removeFromBottom (Space::s16);
-    const auto draw = [&] (juce::Rectangle<int> row, const char* name, float level, int channel)
+
+    if (meters.getHeight() <= meters.getWidth())
     {
-        g.setColour (IlanaTheme::Ui::text3);
-        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
-        g.drawText (name, row.removeFromLeft (thin ? 36 : 30), juce::Justification::centredLeft); // off-grid
-        const auto bar = row.toFloat().withSizeKeepingCentre ((float) row.getWidth(), thin ? 14.0f : 6.0f);
-        const auto radius = thin ? 4.0f : 3.0f;
+        // A card's left column: two compact bars, IN over OUT.
+        const auto draw = [&] (juce::Rectangle<int> row, const char* name, float level)
+        {
+            g.setColour (IlanaTheme::Ui::text3);
+            g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
+            g.drawText (name, row.removeFromLeft (30), juce::Justification::centredLeft); // off-grid
+            const auto bar = row.toFloat().withSizeKeepingCentre ((float) row.getWidth(), 6.0f);
+            g.setColour (IlanaTheme::Ui::track);
+            g.fillRoundedRectangle (bar, 3.0f);
+            g.setColour (fxColour (panel.type).withAlpha (0.85f));
+            g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * fillOf (level)), 3.0f);
+        };
+        const auto half = meters.getHeight() / 2;
+        draw (meters.removeFromTop (half), "IN", in);
+        draw (meters, "OUT", out);
+        return;
+    }
+
+    // A lone card's strip: two thin vertical bars the body's height, filled from the foot, with -24 / -12 / 0
+    // ticks across them (named at the right), a peak line on each and IN / OUT under them.
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    auto names = meters.removeFromBottom (Space::s16);
+    auto labels = meters.removeFromRight (22); // off-grid
+    constexpr float barWidth = 14.0f;
+    const auto gap = (float) Space::s6;
+    const auto left = (float) meters.getX() + ((float) meters.getWidth() - (2.0f * barWidth + gap)) * 0.5f;
+    for (int i = 0; i < 2; ++i)
+    {
+        const auto bar = juce::Rectangle<float> (left + (float) i * (barWidth + gap), (float) meters.getY(), barWidth, (float) meters.getHeight());
+        const auto fill = fillOf (i == 0 ? in : out);
         g.setColour (IlanaTheme::Ui::track);
-        g.fillRoundedRectangle (bar, radius);
-        const auto fill = fillOf (level);
+        g.fillRoundedRectangle (bar, 4.0f);
         g.setColour (fxColour (panel.type).withAlpha (0.85f));
-        g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * fill), radius);
-        if (! thin)
-            return;
-        // Peak line: holds a moment, then falls (20 dB a second).
-        auto& hold = peakHolds[(size_t) slot][(size_t) channel];
+        g.fillRoundedRectangle (bar.withTop (bar.getBottom() - bar.getHeight() * fill), 4.0f);
+        // The peak line holds a moment, then falls (20 dB a second).
+        auto& hold = peakHolds[(size_t) slot][(size_t) i];
         const auto dt = (float) juce::jlimit (0.0, 0.2, (now - hold.last) / 1000.0);
         hold.last = now;
         if (fill >= hold.fill)
@@ -2619,27 +2680,21 @@ void FxPage::paintLevelMeters (juce::Graphics& g, const StackPanel& panel, juce:
         if (hold.fill > 0.01f)
         {
             g.setColour (juce::Colours::white.withAlpha (0.8f));
-            g.fillRect (juce::Rectangle<float> (bar.getX() + bar.getWidth() * hold.fill - 1.0f, bar.getY(), 1.5f, bar.getHeight()));
+            g.fillRect (juce::Rectangle<float> (bar.getX(), bar.getBottom() - bar.getHeight() * hold.fill - 1.0f, bar.getWidth(), 1.5f));
         }
-        g.setColour (IlanaTheme::Ui::text3.withAlpha (0.45f));
-        for (const auto db : { -24.0f, -12.0f, 0.0f })
-            g.fillRect (juce::Rectangle<float> (bar.getX() + bar.getWidth() * (db + 48.0f) / 48.0f - 0.5f, bar.getY(), 1.0f, bar.getHeight()));
-    };
-    const auto half = meters.getHeight() / 2;
-    auto first = meters.removeFromTop (half);
-    draw (first, "IN", in, 0);
-    draw (meters, "OUT", out, 1);
-    if (thin)
-    {
-        ticksArea.removeFromLeft (36);
         g.setColour (IlanaTheme::Ui::text3);
-        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny));
-        for (const auto db : { -24, -12, 0 })
-        {
-            const auto x = ticksArea.getX() + (int) ((float) ticksArea.getWidth() * (float) (db + 48) / 48.0f);
-            g.drawText (juce::String (db), juce::Rectangle<int> (40, ticksArea.getHeight()).withCentre ({ x - (db == 0 ? 8 : 0), ticksArea.getCentreY() }),
-                        juce::Justification::centred);
-        }
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
+        g.drawText (i == 0 ? "IN" : "OUT", juce::Rectangle<float> (bar.getCentreX() - 16.0f, (float) names.getY(), 32.0f, (float) names.getHeight()),
+                    juce::Justification::centred);
+    }
+    g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny));
+    for (const auto db : { 0, -12, -24 })
+    {
+        const auto y = (float) meters.getY() + (float) meters.getHeight() * (1.0f - (float) (db + 48) / 48.0f);
+        g.setColour (IlanaTheme::Ui::text3.withAlpha (0.45f));
+        g.fillRect (juce::Rectangle<float> (left, y - 0.5f, 2.0f * barWidth + gap, 1.0f));
+        g.setColour (IlanaTheme::Ui::text3);
+        g.drawText (juce::String (db), juce::Rectangle<float> ((float) labels.getX(), y - 7.0f, (float) labels.getWidth(), 14.0f), juce::Justification::centredRight);
     }
 }
 
