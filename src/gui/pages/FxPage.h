@@ -561,7 +561,7 @@ private:
     KnobControl flangerRate, flangerDepth, flangerFeedback, flangerMix;
     KnobControl dimRate, dimDepth, dimMix;
     ComboControl gateDiv, gatePattern;
-    KnobControl gateSteps, gateSwing, gateSmooth, gateMix;
+    KnobControl gateSteps, gateSwing, gateLength, gateSmooth, gateMix;
     ToggleControl tapeStopTrigger;
     KnobControl tapeStopTime, tapeStopMix;
     KnobControl tiltAmount, tiltLevel;

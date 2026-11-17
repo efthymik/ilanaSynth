@@ -83,6 +83,7 @@ FxPage::FxPage (IlanaSynthAudioProcessor& p)
       gatePattern (p.apvts, "fx_gate_pattern", "PATTERN"),
       gateSteps (p.apvts, "fx_gate_steps", "STEPS"),
       gateSwing (p.apvts, "fx_gate_swing", "SWING"),
+      gateLength (p.apvts, "fx_gate_length", "LENGTH"),
       gateSmooth (p.apvts, "fx_gate_smooth", "SMOOTH"),
       gateMix (p.apvts, "fx_gate_mix", "MIX"),
       tapeStopTrigger (p.apvts, "fx_tape_stop_trigger", "STOP"),
@@ -159,7 +160,7 @@ FxPage::FxPage (IlanaSynthAudioProcessor& p)
             reverbOn, reverbType, reverbSize, reverbDamping, reverbWidth, reverbMix, reverbKeepDry,
             flangerRate, flangerDepth, flangerFeedback, flangerMix,
             dimRate, dimDepth, dimMix,
-            gateDiv, gatePattern, gateSteps, gateSwing, gateSmooth, gateMix,
+            gateDiv, gatePattern, gateSteps, gateSwing, gateLength, gateSmooth, gateMix,
             tapeStopTrigger, tapeStopTime, tapeStopMix,
             tiltAmount, tiltLevel,
             utilGain, utilMono, utilInvert,
@@ -193,7 +194,7 @@ FxPage::FxPage (IlanaSynthAudioProcessor& p)
     slotGroups.push_back ({ &reverbOn, &reverbType, &reverbSize, &reverbDamping, &reverbWidth, &reverbKeepDry, &reverbMix });
     slotGroups.push_back ({ &flangerRate, &flangerDepth, &flangerFeedback, &flangerMix });
     slotGroups.push_back ({ &dimRate, &dimDepth, &dimMix });
-    slotGroups.push_back ({ &gateDiv, &gatePattern, &gateSteps, &gateSwing, &gateSmooth, &gateMix });
+    slotGroups.push_back ({ &gateDiv, &gatePattern, &gateSteps, &gateSwing, &gateLength, &gateSmooth, &gateMix });
     slotGroups.push_back ({ &tapeStopTrigger, &tapeStopTime, &tapeStopMix });
     slotGroups.push_back ({ &tiltAmount, &tiltLevel });
     slotGroups.push_back ({ &utilGain, &utilMono, &utilInvert });
@@ -447,6 +448,23 @@ FxPage::FxPage (IlanaSynthAudioProcessor& p)
             stackContent.addChildComponent (control);
 
     gateGrid = std::make_unique<GateGrid> (p);
+
+    // The classic chops (16ths ... Stutter) only chop with LENGTH under
+    // 100 %: picking one while LENGTH is full opens each step half way.
+    gatePattern.setOnPick ([&p] (int index)
+    {
+        auto* length = p.apvts.getParameter ("fx_gate_length");
+
+        if (index < 9 || length == nullptr || length->convertFrom0to1 (length->getValue()) < 0.999f)
+            return;
+
+        p.performEdit ("Gate length", [length]
+        {
+            length->beginChangeGesture();
+            length->setValueNotifyingHost (length->convertTo0to1 (0.5f));
+            length->endChangeGesture();
+        });
+    });
     stackContent.addChildComponent (*gateGrid);
     stackContent.addChildComponent (tapGrid);
     stackContent.addChildComponent (eqCurve);

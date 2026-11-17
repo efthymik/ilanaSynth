@@ -683,6 +683,9 @@ inline const std::vector<ParamDestination>& getParamDestinations()
             add (prefix + "_modal_size", name + "Modal Size");
             add (prefix + "_modal_scale", name + "Modal Scale");
         }
+
+        // Trance gate LENGTH (append only, 2026-11-17).
+        add ("fx_gate_length", "Gate Length");
         return true;
     }();
     juce::ignoreUnused (extended);

@@ -13030,6 +13030,12 @@ int main (int argc, char** argv)
         fill ({ 9, 16, 29, 4 });
         setParam ("fx_taps_on", 1.0f);
         shot ("taps-gate");
+        // The gate's classic chop with LENGTH 50 %: half-width bars.
+        setParam ("fx_gate_pattern", 12.0f);
+        setParam ("fx_gate_length", 0.5f);
+        shot ("gate-length");
+        setParam ("fx_gate_pattern", 0.0f);
+        setParam ("fx_gate_length", 1.0f);
         fill ({ 12, 22, 19, 21, 31, 25, 17, 10 });
         shot ("plain");
         fill ({ 2, 6, 20, 4 });
