@@ -1799,6 +1799,11 @@ private:
     std::atomic<int> euclidDisplayStep { -1 };
     std::atomic<double> hostPpq { 0.0 };
     std::atomic<bool> hostPlaying { false };
+    // The keys down (heldChordBits) and the chord they were pressed as
+    // (lastChordBits), one bit per note, read by PRINT TO CLIP.
+    std::array<std::atomic<juce::uint64>, 2> heldChordBits {}, lastChordBits {};
+    void trackPrintChord (const juce::MidiBuffer& midi) noexcept;
+    NoteSpray::Settings readSpraySettings();
     std::array<std::atomic<float>, 2> outputPeaks {};
     std::atomic<unsigned> noteOnCount { 0 };
     std::atomic<float> outputLevelDisplay { 0.0f };
@@ -1814,6 +1819,18 @@ public:
 
     // The Euclid rhythm's current step (whichever target plays it), or -1.
     int getEuclidDisplayStep() const { return euclidDisplayStep.load(); }
+
+    // PRINT TO CLIP (SEQ page, message thread). The chord the generators
+    // would play now: the keys held, else the last chord played (lowest
+    // first; empty before any key). It is read from the keys as they reach
+    // the generators, so a held arp chord is the chord, not the arp's notes.
+    std::vector<int> getPrintChord() const;
+
+    // What the chain (KEYS > STRUM > SPRAY > EUCLID > PROB SEQ > ARP, as
+    // switched in this patch) would play for `chord` over `bars` bars at 120
+    // bpm on the host's grid, as a clip. It runs the audio thread's own
+    // stages on a scratch copy of this processor; nothing here is touched.
+    Clip printGeneratorChain (const std::vector<int>& chord, int bars) const;
 
     // Tests only: what the last block sent to the voices.
     const juce::MidiBuffer& getSynthMidiForTest() const { return midiForSynth; }

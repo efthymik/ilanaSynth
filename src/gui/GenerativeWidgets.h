@@ -582,7 +582,7 @@ public:
         for (int lane = 0; lane < numLanes; ++lane)
         {
             g.setColour (laneColour (lane).withAlpha (on ? 0.9f : 0.6f));
-            g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
+            g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true));
             g.drawText (names[lane], labelArea (lanes[(size_t) lane]), juce::Justification::centredLeft);
         }
 
@@ -647,17 +647,22 @@ public:
                     readout (full, cell, value > 0 ? "+" + juce::String (value) : juce::String ("0"), hovered || dragging, alpha);
             }
 
-            // Ratchet: 1-4 dots.
+            // Ratchet: 1-4 ticks stacked from the lane's foot (more ticks, more repeats).
             {
-                const auto cell = columnFor (step, lanes[ratchet]);
+                const auto full = columnFor (step, lanes[ratchet]).reduced (cellInset, 0.0f);
                 const auto value = juce::jlimit (1, 4, juce::roundToInt (read (processorRef, idFor (ratchet, step))));
-                const auto size = juce::jmin (4.0f, cell.getWidth() * 0.22f);
+                const auto hovered = hoverLane == ratchet && hoverStep == step;
+                g.setColour (juce::Colours::white.withAlpha ((hovered ? 0.1f : 0.05f) * alpha));
+                g.fillRoundedRectangle (full, 2.0f);
+
+                const auto tickHeight = 4.0f, tickGap = 2.0f;
+                const auto tickArea = full.reduced (full.getWidth() * 0.18f, tickInset);
 
                 for (int r = 0; r < value; ++r)
                 {
-                    const auto x = cell.getCentreX() + ((float) r - (float) (value - 1) * 0.5f) * (size + 1.5f);
-                    g.setColour (laneColour (ratchet).withAlpha ((value > 1 ? 0.9f : 0.35f) * alpha));
-                    g.fillEllipse (juce::Rectangle<float> (size, size).withCentre ({ x, cell.getCentreY() }));
+                    g.setColour (laneColour (ratchet).withAlpha ((value > 1 ? 0.9f : 0.45f) * (playing ? 1.0f : 0.85f) * alpha));
+                    g.fillRoundedRectangle ({ tickArea.getX(), tickArea.getBottom() - (float) (r + 1) * tickHeight - (float) r * tickGap,
+                                              tickArea.getWidth(), tickHeight }, 1.5f);
                 }
             }
         }
@@ -787,7 +792,8 @@ public:
 
 private:
     static constexpr float labelWidth = 66.0f;
-    static constexpr float rulerHeight = 15.0f, readoutHeight = 14.0f;
+    static constexpr float rulerHeight = 15.0f, readoutHeight = 14.0f, ratchetHeight = 28.0f,
+                                cellInset = 1.5f, tickInset = 3.0f;
 
     static juce::String laneName (int lane) { return lane == chance ? "CHANCE" : lane == range ? "RANGE" : "RATCHET"; }
 
@@ -807,11 +813,12 @@ private:
     {
         auto area = getLocalBounds().toFloat().reduced (6.0f, 4.0f);
         area.removeFromTop (rulerHeight + 2.0f);
-        const auto height = area.getHeight();
         std::array<juce::Rectangle<float>, 3> lanes;
-        lanes[0] = area.removeFromTop (height * 0.5f).withTrimmedBottom (3.0f);
-        lanes[1] = area.removeFromTop (height * 0.3f).withTrimmedBottom (3.0f);
-        lanes[2] = area;
+        // RATCHET is a compact lane of stacked ticks; the height it leaves goes to CHANCE and RANGE (5 : 3).
+        lanes[2] = area.removeFromBottom (ratchetHeight);
+        const auto rest = area.getHeight();
+        lanes[0] = area.removeFromTop (rest * 0.625f).withTrimmedBottom (3.0f);
+        lanes[1] = area.withTrimmedBottom (3.0f);
         return lanes;
     }
 
@@ -1004,7 +1011,12 @@ public:
             // label column: top, centre (GATE's 100 %, PITCH's 0) and foot.
             const auto area = lanes[(size_t) lane];
             g.setColour (laneColour (lane).withAlpha (0.55f + 0.35f * alpha));
-            g.drawText (names[lane], area.withWidth (labelWidth).toNearestInt(), juce::Justification::centredLeft);
+            g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true));
+            // (The name rides in the upper half, between the scale's top and middle marks, which the name's width would touch.)
+            const auto nameRow = barsOf (area).getHeight() >= 44.0f
+                                     ? juce::Rectangle<float> (area.getX(), area.getY(), (float) labelWidth, barsOf (area).getHeight() * 0.5f)
+                                     : area.withWidth (labelWidth);
+            g.drawText (names[lane], nameRow.toNearestInt(), juce::Justification::centredLeft);
 
             const auto ticks = area.withX (area.getX() + labelWidth - 30.0f).withWidth (26.0f);
             const auto tick = [&g, &ticks] (const juce::String& text, float y)
@@ -1324,7 +1336,7 @@ public:
     juce::Rectangle<float> laneArea (int lane) const { return laneBounds()[(size_t) juce::jlimit (0, 2, lane)]; }
 
 private:
-    static constexpr float labelWidth = 86.0f; // the name, then the scale
+    static constexpr float labelWidth = 66.0f; // the name, then the scale (PROB SEQ's gutter: step 1 stays put)
     static constexpr float rulerHeight = 15.0f, readoutHeight = 14.0f;
 
     int numSteps() const { return juce::jlimit (1, 16, juce::roundToInt (GenerativeWidgets::read (processorRef, "arp_steps"))); }

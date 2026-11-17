@@ -1731,6 +1731,16 @@ private:
 };
 
 
+// The clip toolbar's names (GRID, LENGTH, ZOOM) in the style of SLOT and MODE
+// beside them: the parameter menus' bold tracked caps in text3.
+inline void styleToolbarLabel (juce::Label& label)
+{
+    label.setJustificationType (juce::Justification::centredLeft);
+    label.setBorderSize ({ 0, 4, 0, 1 });
+    label.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true).withKerningFactor (0.07f));
+    label.setColour (juce::Label::textColourId, IlanaTheme::Ui::text3);
+}
+
 // GRID: the piano roll's snap, a menu like the parameter combos (a view
 // setting of the roll, not part of the patch).
 class ClipGridControl : public juce::Component,
@@ -1741,9 +1751,7 @@ public:
         : editor (editorIn)
     {
         label.setText (labelText, juce::dontSendNotification);
-        label.setJustificationType (juce::Justification::centredLeft);
-        label.setFont (IlanaTheme::font (IlanaTheme::TextSize::body));
-        label.setColour (juce::Label::textColourId, IlanaTheme::Ui::text2);
+        styleToolbarLabel (label);
         addAndMakeVisible (label);
 
         for (int i = 0; i < ClipEditor::numGrids; ++i)
@@ -1786,9 +1794,7 @@ public:
         : processorRef (processor)
     {
         label.setText (labelText, juce::dontSendNotification);
-        label.setJustificationType (juce::Justification::centredLeft);
-        label.setFont (IlanaTheme::font (IlanaTheme::TextSize::body));
-        label.setColour (juce::Label::textColourId, IlanaTheme::Ui::text2);
+        styleToolbarLabel (label);
         addAndMakeVisible (label);
 
         for (int bars = 1; bars <= ClipState::maxBars; ++bars)
@@ -1855,9 +1861,7 @@ public:
         : editor (editorIn)
     {
         label.setText (labelText, juce::dontSendNotification);
-        label.setJustificationType (juce::Justification::centredLeft);
-        label.setFont (IlanaTheme::font (IlanaTheme::TextSize::body));
-        label.setColour (juce::Label::textColourId, IlanaTheme::Ui::text2);
+        styleToolbarLabel (label);
         addAndMakeVisible (label);
 
         out.setButtonText (juce::CharPointer_UTF8 ("\xe2\x88\x92"));
