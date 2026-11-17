@@ -485,8 +485,23 @@ void PatchPage::paint (juce::Graphics& g)
     const auto refused = juce::Time::getMillisecondCounter() < refusedUntil;
     g.setColour (refused ? Ui::accent2 : Ui::text3);
     g.setFont (font (TextSize::label));
-    g.drawText (refused ? refusal : hintText(), hint, juce::Justification::centredLeft, true);
     paintInspector (g);
+}
+
+void PatchPage::paintOverChildren (juce::Graphics& g)
+{
+    using namespace IlanaTheme;
+    if (! windows.empty() || ! lfoWindows.empty())
+        return; // (an open effect window covers the corner)
+    const auto refused = juce::Time::getMillisecondCounter() < refusedUntil;
+    g.setColour (refused ? Ui::accent2 : Ui::text3);
+    g.setFont (font (TextSize::label));
+    g.drawText (refused ? refusal : hintText(), hint, juce::Justification::centredRight, true);
+}
+
+bool PatchPage::inspectorIsIdle () const
+{
+    return inspectedVoice < 0 && inspectedSlot < 0 && inspectedLfo <= 0 && selectedModCable() == nullptr && selectedLoop() == nullptr;
 }
 
 void PatchPage::resized ()
@@ -494,7 +509,7 @@ void PatchPage::resized ()
     // The FX RACK page's frame: 8 px above and below, a 12 px gutter at the right.
     auto area = getLocalBounds().reduced (0, Space::s8).withTrimmedRight (Space::s12);
     auto toolbar = area.removeFromTop (toolbarHeight);
-    // Left: the hint. Right: + ADD EFFECT, RESET, the zoom and FIT.
+    // Right: + ADD EFFECT, RESET, the zoom and FIT.
     toolbar.removeFromLeft (10); // off-grid
     fitButton.setBounds (toolbar.removeFromRight (70).reduced (0, Space::s2)); // off-grid
     toolbar.removeFromRight (Space::s6);
@@ -515,14 +530,15 @@ void PatchPage::resized ()
     addButton.setBounds (toolbar.removeFromRight (112).reduced (0, Space::s2)); // off-grid
     toolbar.removeFromRight (Space::s6);
     lfoButton.setBounds (toolbar.removeFromRight (70).reduced (0, Space::s2)); // off-grid
-    hint = toolbar.withTrimmedRight (10); // off-grid
     area.removeFromTop (10); // off-grid
-    inspector = area.removeFromBottom (inspectorHeight);
+    inspector = area.removeFromBottom (inspectorIsIdle() ? idleInspectorHeight : inspectorHeight);
     area.removeFromBottom (10); // off-grid
     // The row of effects under the canvas.
     carousel.setBounds (area.removeFromBottom (FxCarousel::stripHeight));
     area.removeFromBottom (10); // off-grid
     view.setBounds (area);
+    // The canvas's hint: in its empty lower-right corner.
+    hint = area.reduced (Space::s8).removeFromBottom (Space::s24).withTrimmedLeft (area.getWidth() / 3);
     if (autoFit)
         fit();
     layoutInspector();
@@ -842,26 +858,9 @@ void PatchPage::paintInspector (juce::Graphics& g)
 
     if (node == nullptr || node->isFixed())
     {
-        // Nothing selected: the patch in one line, and how to start
-        // (left of the stats at the right).
-        text = text.withTrimmedRight (hasVoice ? 520 : 340);
-        juce::String line;
-        if (hasVoice)
-        {
-            line << voiceOrderText();
-            line << (line.isEmpty() ? "" : "  >  ") << "VOICES  >  ";
-        }
-        line << fxSummaryText() << "  >  OUT";
-        g.setColour (Ui::text);
-        g.setFont (font (TextSize::body, true));
-        g.drawText (line, text.removeFromTop (text.getHeight() / 2), juce::Justification::bottomLeft, true);
-        g.setColour (Ui::text3);
-        g.setFont (font (TextSize::label));
-        g.drawText ("Click a box or a loop's tag to set it here; double-click a box to open it. Right-click to add an effect.",
-                    text.withTrimmedTop (Space::s4), juce::Justification::topLeft, true);
-
-        // At the right: how the patch is wired and what its effects cost.
-        auto stats = inspector.reduced (20, 10).removeFromRight (hasVoice ? 510 : 330); // off-grid
+        // Nothing selected: one line. The patch's chain at the left, what it costs and how it is wired at the right
+        // as label-value pairs. (How to start is the canvas's corner hint.)
+        auto line = inspector.reduced (Space::s16, 0);
         auto cpu = 0.0f;
         for (const auto& box : fxShown.nodes())
             if (! box.isFixed() && juce::isPositiveAndBelow (box.ref - 1, IlanaSynthAudioProcessor::numFxSlots))
@@ -882,17 +881,31 @@ void PatchPage::paintInspector (juce::Graphics& g)
         };
         if (hasVoice)
             cells.push_back ({ "SPLIT SOURCES", juce::String (splitSources()) });
+        const auto nameFont = font (TextSize::tiny, true).withKerningFactor (0.08f);
+        const auto valueFont = font (TextSize::body, true, true);
         for (const auto& [name, value] : cells)
         {
-            auto cell = stats.removeFromRight (hasVoice ? 160 : 110);
-            g.setColour (Ui::text3);
-            g.setFont (font (TextSize::tiny, true).withKerningFactor (0.08f));
-            g.drawText (name, cell.removeFromTop (cell.getHeight() / 2), juce::Justification::bottomLeft, false);
+            const auto valueWidth = juce::GlyphArrangement::getStringWidthInt (juce::Font (valueFont), value) + Space::s2;
+            const auto nameWidth = juce::GlyphArrangement::getStringWidthInt (juce::Font (nameFont), name) + Space::s2;
             g.setColour (Ui::text);
-            g.setFont (font (TextSize::body, true, true));
-            g.drawText (value, cell.withTrimmedTop (Space::s4), juce::Justification::topLeft, false);
-            stats.removeFromRight (10); // off-grid
+            g.setFont (valueFont);
+            g.drawText (value, line.removeFromRight (valueWidth), juce::Justification::centredRight, false);
+            line.removeFromRight (Space::s6);
+            g.setColour (Ui::text3);
+            g.setFont (nameFont);
+            g.drawText (name, line.removeFromRight (nameWidth), juce::Justification::centredRight, false);
+            line.removeFromRight (Space::s24);
         }
+        juce::String chain;
+        if (hasVoice)
+        {
+            chain << voiceOrderText();
+            chain << (chain.isEmpty() ? "" : "  >  ") << "VOICES  >  ";
+        }
+        chain << fxSummaryText() << "  >  OUT";
+        g.setColour (Ui::text);
+        g.setFont (font (TextSize::body, true));
+        g.drawText (chain, line, juce::Justification::centredLeft, true);
         return;
     }
 
@@ -954,6 +967,13 @@ void PatchPage::placeStripControl (juce::Component& control, juce::Rectangle<int
 
 void PatchPage::layoutInspector ()
 {
+    // The bar is one line while nothing is selected and a strip of controls when something is.
+    if (! inspector.isEmpty() && inspector.getHeight() != (inspectorIsIdle() ? idleInspectorHeight : inspectorHeight))
+    {
+        resized();
+        repaint();
+        return;
+    }
     auto row = inspector.reduced (20, 10); // off-grid
     inspectorText = row.removeFromLeft (juce::jmin (inspectedVoice >= 0 ? 420 : inspectedLfo > 0 ? 200 : selectedModCable() != nullptr ? 260 : 300,
                                                    row.getWidth() / 3));
