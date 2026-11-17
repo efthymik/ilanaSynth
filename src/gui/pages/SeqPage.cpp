@@ -665,19 +665,7 @@ void SeqPage::layoutGenerate ()
     };
     std::vector<bool> pinned;
     auto unit = solve (groups, pinned);
-    // Natural width (UI audit 17): with ARP hidden the rings don't spread apart (135 px), but they keep a roomy pitch
-    // (ilana, 2026-11-17: the ARP card's unit squeezed SPRAY's rings): at most 60 px a ring cell; the spare width goes
-    // to the cards' right ends (below).
-    if (engineTabs.getSelected() != 0)
-    {
-        auto knobWeight = 0.0f;
-        for (const auto& group : groups)
-            for (const auto& item : group)
-                if (dynamic_cast<KnobControl*> (item.control) != nullptr)
-                    knobWeight = juce::jmax (knobWeight, item.weight);
-        if (knobWeight > 0.0f)
-            unit = juce::jmin (unit, 60.0f / knobWeight);
-    }
+    // (UI audit 17's natural widths were tried and dropped: ilana, 2026-11-17, liked the cards sharing the row.)
     // (Capped, so the boxes stay a group at the left rather than spreading over the card.)
     unit = juce::jmin (118.0f, unit);
     // (What a menu or ring needs stays whole at this unit.)
@@ -693,21 +681,7 @@ void SeqPage::layoutGenerate ()
         switches.insert (switches.begin(), nullptr);
     }
     auto x = (float) area.getX();
-    // With ARP hidden the cards share the row, their controls staying at that pitch from each card's left inset
-    // (nothing spread apart).
-    auto extra = 0.0f;
-    if (engineTabs.getSelected() != 0)
-    {
-        auto used = (float) gap * (float) (groups.size() - 1);
-        for (const auto& group : groups)
-        {
-            for (const auto& item : group)
-                used += item.weight * unit;
-            used += (float) padding * 2.0f;
-        }
-        extra = juce::jmax (0.0f, ((float) area.getWidth() - used) / (float) groups.size());
-    }
-
+    const auto extra = 0.0f;
     for (size_t g = 0; g < groups.size(); ++g)
     {
         auto weight = 0.0f;
