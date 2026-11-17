@@ -25,6 +25,10 @@ class FxPage : public juce::Component,
                private IlanaAnim::FrameTimer
 {
 public:
+    // KEEP FX (the CHAIN menu): while on, loading a preset leaves the rack as it is (the editor
+    // puts the chain back after the load). Editor-side, never saved.
+    static bool& keepRackOnPresetLoad() { static bool on = false; return on; }
+
     explicit FxPage (IlanaSynthAudioProcessor& p);
 
     void paint (juce::Graphics& g) override;
@@ -161,6 +165,8 @@ private:
 
     void saveChain();
 
+    void updateKeepMark();
+
     void loadChain();
 
     // The routing switch: a click is one named undo step; the parameter
@@ -221,6 +227,10 @@ private:
     // The parallel ladder's buses, x in the rail (inside the IN / OUT pills).
     static constexpr int parallelInBusX = 13, parallelOutBusX = 43;
     static constexpr int leftMetersHeight = 36, tallCardHeight = 280;
+    // A lone card's two thin level bars (14 px each, a gap, the tick names under).
+    static constexpr int thinMetersHeight = 14 + 14 + 8 + 16;
+    // The least dial columns a lone card reserves, so its picture ends at one x on every card.
+    static constexpr int loneMinColumns = 3;
     static constexpr int railWidth = 56, railGap = 10, rowGap = 10, rowPad = 8, leftWidth = 156;
     static constexpr int rowHeightStandard = 80, rowHeightCompact = 64, rowHeightMost = 88, duplicateHeight = 56;
     // The add row pinned at the page's foot: + ADD EFFECT and the suggested
@@ -275,6 +285,11 @@ private:
     bool filterFxMorphs() const { return FilterType::usesMorph (filterFxType()); }
     bool filterFxHasSlope() const;
     static constexpr int filterTypeBlockWidth = 4 * knobPitch - sideColumnGap;
+    // The family tabs at the PLAY filter card's tab size need their names' width.
+    static int filterBlockWidth() { return juce::jmax (filterTypeBlockWidth, FilterCategoryTabs::idealWidth()); }
+    // The peak lines of a lone card's thin level bars (per slot, IN and OUT).
+    struct PeakHold { float fill = 0.0f; double heldUntil = 0.0, last = 0.0; };
+    std::array<std::array<PeakHold, 2>, IlanaSynthAudioProcessor::numFxSlots> peakHolds {};
 
     static bool isSideItem (const juce::Component* item) { return dynamic_cast<const KnobControl*> (item) == nullptr; }
 

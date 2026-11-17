@@ -352,6 +352,7 @@ FxPage::FxPage (IlanaSynthAudioProcessor& p)
     }
     fileButton.setTooltip ("This chain as a whole: copy it over the other chain, save it to a file, or load one into it");
     fileButton.onClick = [this] { showFileMenu(); };
+    updateKeepMark();
     // The chain's own actions are quiet.
     for (auto* quiet : { &copyChainButton, &fileButton })
     {
@@ -642,14 +643,11 @@ void FxPage::paintOutput (juce::Graphics& g)
 
     if (library->isVisible())
     {
-        auto heading = emptyHeading;
-        g.setColour (IlanaTheme::Ui::text);
-        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::large, true));
-        g.drawText ("The rack is empty", heading.removeFromTop (26), juce::Justification::centredLeft); // off-grid
+        // One hint line (the heading and its sentence were a 60 px band above the tiles).
         g.setColour (IlanaTheme::Ui::text2);
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::body));
-        g.drawText ("Pick an effect to start the chain. Each one goes into the next slot; drag a row's name to reorder them.",
-                    heading.removeFromTop (20), juce::Justification::centredLeft); // off-grid
+        g.drawText ("The rack is empty. Pick an effect to start the chain; drag a row's name to reorder it.",
+                    emptyHeading, juce::Justification::centredLeft, true);
     }
 }
 
@@ -738,7 +736,7 @@ void FxPage::resized ()
     if (empty)
     {
         auto box = stackArea.reduced (Space::s12, 0);
-        emptyHeading = box.removeFromTop (60).withTrimmedTop (Space::s6); // off-grid
+        emptyHeading = box.removeFromTop (Space::s24);
         library->setBounds (box.withHeight (juce::jmin (box.getHeight(), FxLibraryView::preferredHeight() + 170)));
     }
 
@@ -1092,16 +1090,53 @@ void FxPage::showLibrary (juce::Component& target, juce::Rectangle<int> area, in
     box.updatePosition (pointAt, host->getLocalBounds()); // (with the picker's border)
 }
 
+namespace
+{
+// Copy chain / Paste chain: the same data Save chain writes, held in memory
+// (shared by every editor of the process, so it carries to another patch).
+juce::String& fxChainClipboard()
+{
+    static juce::String text;
+    return text;
+}
+} // namespace
+
+// The CHAIN button wears a dot while KEEP FX is on (loading a preset leaves the rack alone).
+void FxPage::updateKeepMark ()
+{
+    fileButton.setButtonText (juce::String::fromUTF8 (keepRackOnPresetLoad() ? "CHAIN \xe2\x80\xa2 \xe2\x96\xbe" : "CHAIN \xe2\x96\xbe"));
+    fileButton.setTooltip (keepRackOnPresetLoad() ? "This chain as a whole. KEEP FX is on: loading a preset leaves this rack as it is."
+                                                  : "This chain as a whole: copy it, save it to a file, or load one into it");
+}
+
 void FxPage::showFileMenu ()
 {
+    const auto directory = processorRef.getUserPresetDirectory();
+    const auto saved = directory.findChildFiles (juce::File::findFiles, false, "*.ilanafxchain");
+    juce::Array<juce::File> files (saved);
+    files.sort();
+
     juce::PopupMenu menu;
     menu.addItem (3, processorRef.isShowingChainA() ? "Copy to chain 2..." : "Copy to chain 1...");
     menu.addSeparator();
+    menu.addItem (4, "Copy chain");
+    menu.addItem (5, "Paste chain", fxChainClipboard().isNotEmpty());
+    menu.addSeparator();
     menu.addItem (1, "Save chain...");
     menu.addItem (2, "Load chain...");
+    menu.addSeparator();
+    menu.addItem (6, "Keep this FX rack when loading presets", true, keepRackOnPresetLoad());
+
+    if (! files.isEmpty())
+    {
+        menu.addSeparator();
+        for (int i = 0; i < files.size() && i < 64; ++i)
+            menu.addItem (100 + i, files[i].getFileNameWithoutExtension());
+    }
+
     juce::Component::SafePointer<FxPage> safeThis (this);
     menu.showMenuAsync (IlanaTheme::menuOptions (&fileButton),
-                        [safeThis] (int result)
+                        [safeThis, files] (int result)
                         {
                             if (safeThis == nullptr)
                                 return;
@@ -1111,6 +1146,33 @@ void FxPage::showFileMenu ()
                                 safeThis->loadChain();
                             else if (result == 3 && safeThis->copyChainButton.onClick != nullptr)
                                 safeThis->copyChainButton.onClick();
+                            else if (result == 6)
+                            {
+                                keepRackOnPresetLoad() = ! keepRackOnPresetLoad();
+                                safeThis->updateKeepMark();
+                            }
+                            else if (result == 4)
+                            {
+                                if (const auto xml = safeThis->processorRef.makeFxChainXml())
+                                    fxChainClipboard() = xml->toString (juce::XmlElement::TextFormat().singleLine());
+                            }
+                            else if (result == 5)
+                            {
+                                if (const auto xml = juce::XmlDocument::parse (fxChainClipboard()))
+                                {
+                                    safeThis->processorRef.getUndoManager().beginNewTransaction ("Paste FX chain");
+                                    safeThis->processorRef.applyFxChainXml (*xml);
+                                    safeThis->updateVisibility();
+                                    safeThis->repaint();
+                                }
+                            }
+                            else if (result >= 100 && result - 100 < files.size())
+                            {
+                                safeThis->processorRef.getUndoManager().beginNewTransaction ("Load FX chain");
+                                safeThis->processorRef.loadFxChainFromFile (files[result - 100]);
+                                safeThis->updateVisibility();
+                                safeThis->repaint();
+                            }
                         });
 }
 
@@ -1962,8 +2024,7 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
     {
         blockArea = bounds.withHeight (48 + 2 * 16);
         const auto block = leftBlockFor (blockArea);
-        panel.meters = juce::Rectangle<int>::leftTopRightBottom (block.number.getX(), block.chip.getBottom() + 24,
-                                                                 block.number.getX() + leftWidth - 4, bounds.getBottom() - 16);
+        panel.meters = { block.number.getX(), block.chip.getBottom() + Space::s24, leftWidth - 4, thinMetersHeight };
     }
     else if (! panel.duplicate && bounds.getHeight() >= 150 && hasCardDisplay (type))
     {
@@ -2072,14 +2133,23 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
     }
     if (filterFront && filterFxHasSlope())
         knobs.insert (knobs.begin() + juce::jmin ((int) knobs.size(), 4), &filterSlopePills); // (where MORPH goes on a model that morphs)
-    auto plan = packedPlanFor ((int) knobs.size(), (int) sides.size(), inner.getWidth() - minDisplayWidth - 10 - (filterFront ? filterTypeBlockWidth + sideColumnGap : 0), grid.pitch);
+    // A lone effect's card: its menus and switches stand in a row above the dial grid (not in a
+    // column beside it), at the body text size, and the dials' block is as wide on every card.
+    const auto lone = loneCard && ! filterFront;
+    const auto loneItemWidth = 2 * grid.pitch - sideColumnGap, loneItemHeight = Space::s24 + Space::s2;
+    const auto loneReserved = [&] (int knobColumns) { return juce::jmax (knobColumns, loneMinColumns) * grid.pitch; };
+    auto plan = packedPlanFor ((int) knobs.size(), lone ? 0 : (int) sides.size(), inner.getWidth() - minDisplayWidth - 10 - (filterFront ? filterBlockWidth() + sideColumnGap : 0), grid.pitch);
     // A row grown tall takes its knobs in as many rows as its height holds, so they fill it and
     // the picture widens: four or more knobs in a grid of two columns or more, two or three one under the other
     // (no row of one beside a row of two). The side columns hold as many as the rows' height.
     {
         const auto count = (int) knobs.size();
         // (The last row's air under its name may overhang the card's padding, not the tap grid under it.)
-        const auto fit = juce::jmax (plan.knobRows, (inner.getHeight() + (hasTapGrid (panel) ? 0 : 8)) / grid.rowHeight);
+        const auto loneSidesHeight = lone && ! sides.empty()
+                                         ? (((int) sides.size() + juce::jmax (1, (loneReserved (plan.knobColumns) + Space::s8) / (loneItemWidth + Space::s8)) - 1)
+                                            / juce::jmax (1, (loneReserved (plan.knobColumns) + Space::s8) / (loneItemWidth + Space::s8))) * (loneItemHeight + Space::s8)
+                                         : 0;
+        const auto fit = juce::jmax (plan.knobRows, (inner.getHeight() - loneSidesHeight + (hasTapGrid (panel) ? 0 : 8)) / grid.rowHeight);
         auto rows = plan.knobRows;
         if (count >= 4)
             rows = juce::jmax (rows, juce::jmin (fit, (count + 1) / 2)); // (two columns at least: no tall single file)
@@ -2092,10 +2162,13 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
             plan.sidePerColumn = juce::jmax (5, (plan.knobRows * grid.rowHeight + sideGap) / (sideRow + sideGap));
             plan.sideColumns = ((int) sides.size() + plan.sidePerColumn - 1) / plan.sidePerColumn;
         }
+        if (lone)
+            plan.sideColumns = 0;
     }
-    const auto blockWidth = filterFront ? filterTypeBlockWidth + sideColumnGap : 0;
-    auto knobsArea = plan.width() > 0 ? inner.removeFromRight (plan.width() + blockWidth) : juce::Rectangle<int>();
-    if (plan.width() > 0)
+    const auto blockWidth = filterFront ? filterBlockWidth() + sideColumnGap : 0;
+    auto knobsArea = lone ? inner.removeFromRight (loneReserved (plan.knobColumns))
+                          : (plan.width() > 0 ? inner.removeFromRight (plan.width() + blockWidth) : juce::Rectangle<int>());
+    if (plan.width() > 0 || lone)
         inner.removeFromRight (10); // off-grid
 
     panel.well = {};
@@ -2124,7 +2197,45 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
     // (On a tall card the rows stand apart, up to twice the grid, so the
     // knobs share the card's height rather than sitting in a band of air.)
     // A tall card's dials grow with the room they have (up to 56), and the rows keep an even, modest pitch.
-    const auto roomPerRow = knobsArea.getHeight() / juce::jmax (1, plan.knobRows);
+    auto dialsArea = knobsArea;
+    auto loneSides = juce::Rectangle<int>();
+    if (lone && ! sides.empty())
+    {
+        const auto perRow = juce::jmax (1, (knobsArea.getWidth() + Space::s8) / (loneItemWidth + Space::s8));
+        const auto rowsOfSides = ((int) sides.size() + perRow - 1) / perRow;
+        loneSides = dialsArea.removeFromTop (rowsOfSides * (loneItemHeight + Space::s8));
+        for (size_t i = 0; i < sides.size(); ++i)
+            sides[i]->setBounds (juce::Rectangle<int> (loneSides.getX() + ((int) i % perRow) * (loneItemWidth + Space::s8),
+                                                       loneSides.getY() + ((int) i / perRow) * (loneItemHeight + Space::s8),
+                                                       loneItemWidth, loneItemHeight));
+    }
+
+    // Names at label size or larger and menus at body size on the lone card; the long rack's own sizes elsewhere.
+    for (auto* knob : knobs)
+        if (auto* k = dynamic_cast<KnobControl*> (knob))
+            k->setPackedNameSize (lone ? IlanaTheme::TextSize::label : 0.0f);
+    for (auto* side : sides)
+    {
+        if (auto* combo = dynamic_cast<ComboControl*> (side))
+        {
+            auto& properties = combo->getComboBox().getProperties();
+            if (lone)
+            {
+                properties.set ("packedMenuSize", IlanaTheme::TextSize::body);
+                properties.set ("packedNameSize", IlanaTheme::TextSize::label);
+            }
+            else
+            {
+                properties.remove ("packedMenuSize");
+                properties.remove ("packedNameSize");
+            }
+            combo->getComboBox().repaint();
+        }
+        else if (auto* toggle = dynamic_cast<ToggleControl*> (side))
+            toggle->setRightNameSize (lone ? IlanaTheme::TextSize::body : 7.3f);
+    }
+
+    const auto roomPerRow = dialsArea.getHeight() / juce::jmax (1, plan.knobRows);
     const auto dialSize = loneCard ? juce::jlimit (grid.dial, juce::jmax (grid.dial, 56.0f), grid.dial + (float) (roomPerRow - grid.rowHeight) * 0.5f) : grid.dial;
     const auto growth = dialSize / grid.dial;
     const auto scaledRow = juce::roundToInt ((float) grid.rowHeight * growth);
@@ -2136,10 +2247,10 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
                 k->setPackedDial (dialSize);
                 k->setPackedValueSize (grid.value * growth);
             }
-    const auto band = knobsArea.withSizeKeepingCentre (knobsArea.getWidth(), plan.knobRows * rowPitch);
+    const auto band = dialsArea.withSizeKeepingCentre (dialsArea.getWidth(), plan.knobRows * rowPitch);
     auto sideArea = band.withWidth (plan.sideColumns * (sideWidth + sideColumnGap));
     const auto sideHeight = juce::jmin ((int) sides.size(), plan.sidePerColumn) * (sideRow + sideGap) - sideGap;
-    for (size_t i = 0; i < sides.size(); ++i)
+    for (size_t i = 0; i < sides.size() && ! lone; ++i)
     {
         const auto column = (int) i / plan.sidePerColumn, row = (int) i % plan.sidePerColumn;
         const auto top = band.getCentreY() - sideHeight / 2;
@@ -2150,9 +2261,10 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
     if (filterFront)
     {
         // The categories over the picker, centred on the knobs' band.
-        const auto block = juce::Rectangle<int> (sideArea.getRight(), band.getCentreY() - (sideRow + sideGap + 22) / 2, filterTypeBlockWidth, sideRow + sideGap + 22);
-        filterCategories.setBounds (block.withHeight (sideRow));
-        filterPicker.setBounds (block.withTrimmedTop (sideRow + sideGap));
+        const auto tabsHeight = Space::s24, blockHeight = tabsHeight + sideGap + 22;
+        const auto block = juce::Rectangle<int> (sideArea.getRight(), band.getCentreY() - blockHeight / 2, filterBlockWidth(), blockHeight);
+        filterCategories.setBounds (block.withHeight (tabsHeight));
+        filterPicker.setBounds (block.withTrimmedTop (tabsHeight + sideGap));
         for (juce::Component* part : { (juce::Component*) &filterCategories, (juce::Component*) &filterPicker })
             part->setVisible (true);
         filterSlopePills.setVisible (filterFxHasSlope());
@@ -2166,7 +2278,7 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
         const auto column = (int) i % juce::jmax (1, plan.knobColumns), row = (int) i / juce::jmax (1, plan.knobColumns);
         // (Each row's dial and name centred on the row, as the menus beside them are.)
         const auto rowCentre = band.getY() + rowPitch / 2 + row * rowPitch;
-        const auto cell = juce::Rectangle<int> (knobsX + column * grid.pitch, rowCentre - ((int) dialSize + 10) / 2, grid.pitch, (int) dialSize + 10 + 13);
+        const auto cell = juce::Rectangle<int> (knobsX + column * grid.pitch, rowCentre - ((int) dialSize + 10) / 2, grid.pitch, (int) dialSize + 10 + (lone ? 17 : 13));
         knobs[i]->setBounds (KnobControl::packedBoundsFor (cell));
     }
 
@@ -2471,46 +2583,63 @@ void FxPage::paintLevelMeters (juce::Graphics& g, const StackPanel& panel, juce:
 {
     const auto slot = panel.slot;
     const auto in = off ? 0.0f : processorRef.getFxSlotInLevel (slot), out = off ? 0.0f : processorRef.getFxSlotOutLevel (slot);
-    const auto draw = [&] (juce::Rectangle<int> row, const char* name, float level)
+    // The slot's levels, -48 .. 0 dB across the bar: the compact bars of a card's left column, or on a
+    // lone card two thin bars with -24 / -12 / 0 ticks and a peak line (the toolbar meter's drawing).
+    const auto thin = meters.getHeight() >= thinMetersHeight;
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const auto fillOf = [] (float level) { return juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (level, -60.0f) + 48.0f) / 48.0f); };
+    auto ticksArea = juce::Rectangle<int>();
+    if (thin)
+        ticksArea = meters.removeFromBottom (Space::s16);
+    const auto draw = [&] (juce::Rectangle<int> row, const char* name, float level, int channel)
     {
         g.setColour (IlanaTheme::Ui::text3);
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
-        g.drawText (name, row.removeFromLeft (30), juce::Justification::centredLeft); // off-grid
-        const auto bar = row.toFloat().withSizeKeepingCentre ((float) row.getWidth(), 6.0f);
+        g.drawText (name, row.removeFromLeft (thin ? 36 : 30), juce::Justification::centredLeft); // off-grid
+        const auto bar = row.toFloat().withSizeKeepingCentre ((float) row.getWidth(), thin ? 14.0f : 6.0f);
+        const auto radius = thin ? 4.0f : 3.0f;
         g.setColour (IlanaTheme::Ui::track);
-        g.fillRoundedRectangle (bar, 3.0f);
-        const auto fill = juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (level, -60.0f) + 48.0f) / 48.0f);
+        g.fillRoundedRectangle (bar, radius);
+        const auto fill = fillOf (level);
         g.setColour (fxColour (panel.type).withAlpha (0.85f));
-        g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * fill), 3.0f);
+        g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * fill), radius);
+        if (! thin)
+            return;
+        // Peak line: holds a moment, then falls (20 dB a second).
+        auto& hold = peakHolds[(size_t) slot][(size_t) channel];
+        const auto dt = (float) juce::jlimit (0.0, 0.2, (now - hold.last) / 1000.0);
+        hold.last = now;
+        if (fill >= hold.fill)
+        {
+            hold.fill = fill;
+            hold.heldUntil = now + 700.0;
+        }
+        else if (now > hold.heldUntil)
+            hold.fill = juce::jmax (fill, hold.fill - dt * 20.0f / 48.0f);
+        if (hold.fill > 0.01f)
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.8f));
+            g.fillRect (juce::Rectangle<float> (bar.getX() + bar.getWidth() * hold.fill - 1.0f, bar.getY(), 1.5f, bar.getHeight()));
+        }
+        g.setColour (IlanaTheme::Ui::text3.withAlpha (0.45f));
+        for (const auto db : { -24.0f, -12.0f, 0.0f })
+            g.fillRect (juce::Rectangle<float> (bar.getX() + bar.getWidth() * (db + 48.0f) / 48.0f - 0.5f, bar.getY(), 1.0f, bar.getHeight()));
     };
-    if (meters.getHeight() <= meters.getWidth())
+    const auto half = meters.getHeight() / 2;
+    auto first = meters.removeFromTop (half);
+    draw (first, "IN", in, 0);
+    draw (meters, "OUT", out, 1);
+    if (thin)
     {
-        const auto half = meters.getHeight() / 2;
-        draw (meters.removeFromTop (half), "IN", in);
-        draw (meters, "OUT", out);
-        return;
-    }
-
-    // Standing: IN and OUT side by side, filled from the foot, with
-    // lines at -12, -24 and -36 dB and the names under them.
-    auto area = meters;
-    auto names = area.removeFromBottom (18); // off-grid
-    constexpr int gap = 14; // off-grid
-    const auto each = (area.getWidth() - gap) / 2;
-    for (int i = 0; i < 2; ++i)
-    {
-        const auto bar = area.withX (area.getX() + i * (each + gap)).withWidth (each).toFloat();
-        g.setColour (IlanaTheme::Ui::track);
-        g.fillRoundedRectangle (bar, 5.0f);
-        const auto fill = juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (i == 0 ? in : out, -60.0f) + 48.0f) / 48.0f);
-        g.setColour (fxColour (panel.type).withAlpha (0.85f));
-        g.fillRoundedRectangle (bar.withTop (bar.getBottom() - bar.getHeight() * fill), 5.0f);
-        g.setColour (IlanaTheme::Ui::text3.withAlpha (0.35f));
-        for (const auto db : { 12.0f, 24.0f, 36.0f })
-            g.fillRect (bar.getX() + 4.0f, bar.getY() + bar.getHeight() * db / 48.0f, bar.getWidth() - 8.0f, 1.0f);
+        ticksArea.removeFromLeft (36);
         g.setColour (IlanaTheme::Ui::text3);
-        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
-        g.drawText (i == 0 ? "IN" : "OUT", names.withX ((int) bar.getX()).withWidth (each), juce::Justification::centredBottom);
+        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny));
+        for (const auto db : { -24, -12, 0 })
+        {
+            const auto x = ticksArea.getX() + (int) ((float) ticksArea.getWidth() * (float) (db + 48) / 48.0f);
+            g.drawText (juce::String (db), juce::Rectangle<int> (40, ticksArea.getHeight()).withCentre ({ x - (db == 0 ? 8 : 0), ticksArea.getCentreY() }),
+                        juce::Justification::centred);
+        }
     }
 }
 

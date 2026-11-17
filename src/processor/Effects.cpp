@@ -2347,7 +2347,13 @@ void IlanaSynthAudioProcessor::randomizeFxChain()
 
 bool IlanaSynthAudioProcessor::saveFxChainToFile (const juce::File& file)
 {
-    juce::XmlElement xml ("ilanafxchain");
+    return makeFxChainXml()->writeTo (file);
+}
+
+std::unique_ptr<juce::XmlElement> IlanaSynthAudioProcessor::makeFxChainXml()
+{
+    auto root = std::make_unique<juce::XmlElement> ("ilanafxchain");
+    auto& xml = *root;
     const auto tree = apvts.copyState();
 
     for (int i = 0; i < tree.getNumChildren(); ++i)
@@ -2368,7 +2374,7 @@ bool IlanaSynthAudioProcessor::saveFxChainToFile (const juce::File& file)
     if (const auto fx = getFxPatch(); ! fx.isDefault())
         xml.addChildElement (FxPatchData::toValueTree (fx).createXml().release());
 
-    return xml.writeTo (file);
+    return root;
 }
 
 void IlanaSynthAudioProcessor::FxEngine::loadReverbIr (const juce::File& file)
@@ -2388,7 +2394,14 @@ bool IlanaSynthAudioProcessor::loadFxChainFromFile (const juce::File& file)
 {
     std::unique_ptr<juce::XmlElement> xml (SafeXml::parse (file));
 
-    if (xml == nullptr || ! xml->hasTagName ("ilanafxchain"))
+    return xml != nullptr && applyFxChainXml (*xml);
+}
+
+bool IlanaSynthAudioProcessor::applyFxChainXml (const juce::XmlElement& chain)
+{
+    const auto* xml = &chain;
+
+    if (! xml->hasTagName ("ilanafxchain"))
         return false;
 
     // A chain file saved before the rack had a routing switch is series.
