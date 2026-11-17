@@ -182,8 +182,8 @@ private:
     float lastValue = 0.0f;
 };
 
-// Trance gate steps: bar height is each step's level, the playing step
-// lights up. Editing a built-in pattern copies it into Custom first.
+// Trance gate steps: bar height is each step's level, bar width its LENGTH,
+// the playing step lights up. Editing a built-in pattern copies it into Custom first.
 class GateGrid : public juce::Component,
                  public juce::SettableTooltipClient,
                  private IlanaAnim::FrameTimer
@@ -205,6 +205,7 @@ public:
         const auto playing = processorRef.getGateDisplayStep();
         auto bars = getBarBounds().toFloat();
         const auto columnWidth = bars.getWidth() / 16.0f;
+        const auto open = gateLength();
 
         g.setColour (IlanaTheme::Ui::text3);
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
@@ -222,8 +223,10 @@ public:
 
             if (active && value > 0.001f)
             {
+                // LENGTH under 100 % draws the open part of the step only.
+                const auto bar = cell.withTop (cell.getBottom() - cell.getHeight() * value);
                 g.setColour (colour.withAlpha (step == playing ? 1.0f : (step == hoverStep ? 0.85f : 0.6f)));
-                g.fillRoundedRectangle (cell.withTop (cell.getBottom() - cell.getHeight() * value), 2.0f);
+                g.fillRoundedRectangle (bar.withWidth (juce::jmax (2.0f, bar.getWidth() * open)), 2.0f);
             }
 
             if (active && step == playing)
@@ -311,6 +314,7 @@ private:
 
     int numSteps() const { return (int) processorRef.apvts.getRawParameterValue ("fx_gate_steps")->load(); }
     int pattern() const { return (int) processorRef.apvts.getRawParameterValue ("fx_gate_pattern")->load(); }
+    float gateLength() const { return juce::jlimit (0.05f, 1.0f, processorRef.apvts.getRawParameterValue ("fx_gate_length")->load()); }
 
     float level (int step) const
     {

@@ -1535,15 +1535,23 @@ void IlanaSynthAudioProcessor::FxEngine::processDimension (juce::AudioBuffer<flo
 
 float IlanaSynthAudioProcessor::gatePatternLevel (int pattern, int step)
 {
-    static constexpr juce::uint16 gatePatterns[8] = {
-        0xFFFF, 0xAAAA, 0x9249, 0xEEEE, 0x0000, 0x3333, 0xF0F0, 0x0F0F
+    // Bit n is step n + 1. 8 is Custom (drawn levels, never read here).
+    // 9-15 are the classic trance chops (appended 2026-11-17; patches store
+    // the index): 16ths, 8ths, Offbeat 8ths, Classic 1101, Trance x.xx,
+    // 3-3-2 and Stutter. They are meant to be heard with LENGTH under 100 %
+    // so hits next to each other open one by one.
+    static constexpr juce::uint16 gatePatterns[16] = {
+        0xFFFF, 0xAAAA, 0x9249, 0xEEEE, 0x0000, 0x3333, 0xF0F0, 0x0F0F, 0x0000,
+        0xFFFF, 0x5555, 0x4444, 0xBBBB, 0xDDDD, 0x4949, 0x1B5F
     };
 
-    return (gatePatterns[juce::jlimit (0, 7, pattern)] & (1u << (step & 15))) != 0 ? 1.0f : 0.0f;
+    return (gatePatterns[juce::jlimit (0, 15, pattern)] & (1u << (step & 15))) != 0 ? 1.0f : 0.0f;
 }
 
 // Trance gate. DIV is the length of one step; STEPS the pattern length; the
 // pattern is one of the built-ins or Custom (16 drawable step levels).
+// LENGTH is how much of each step is open: under 100 % every step is its own
+// hit, so steps next to each other no longer blend into one long note.
 // Locked to the host's beat position while it plays.
 void IlanaSynthAudioProcessor::FxEngine::processGate (juce::AudioBuffer<float>& buffer)
 {
@@ -1554,7 +1562,11 @@ void IlanaSynthAudioProcessor::FxEngine::processGate (juce::AudioBuffer<float>& 
     const auto euclid = getParam ("euc_on") > 0.5f && (int) getParam ("euc_target") == 2;
     const auto stepBeats = juce::jmax (0.001, getSyncDivisionBeats ((int) getParam (euclid ? "euc_div" : "fx_gate_div")));
     const auto stepsPerSample = (currentBpm.load() / 60.0) / stepBeats / currentSampleRate;
-    const auto pattern = juce::jlimit (0, 8, (int) getParam ("fx_gate_pattern"));
+    const auto pattern = juce::jlimit (0, 15, (int) getParam ("fx_gate_pattern"));
+    // 100 % (the default and every patch before LENGTH) skips the cut, so
+    // older patches play exactly as before.
+    const auto length = (double) juce::jlimit (0.05f, 1.0f, getParam ("fx_gate_length"));
+    const auto cutSteps = length < 0.999;
     const auto steps = euclid ? juce::jlimit (2, 32, (int) getParam ("euc_steps"))
                               : juce::jlimit (2, 16, (int) getParam ("fx_gate_steps"));
     const auto euclidHits = juce::jlimit (0, 32, (int) getParam ("euc_hits"));
@@ -1596,7 +1608,8 @@ void IlanaSynthAudioProcessor::FxEngine::processGate (juce::AudioBuffer<float>& 
         // (floor-based, so hosts that report negative pre-roll positions work)
         const auto pairStart = 2.0 * std::floor (position * 0.5);
         const auto pair = position - pairStart;
-        const auto stepCount = (long long) pairStart + (pair < 1.0 + swing ? 0 : 1);
+        const auto firstOfPair = pair < 1.0 + swing;
+        const auto stepCount = (long long) pairStart + (firstOfPair ? 0 : 1);
         const auto step = (int) (((stepCount % steps) + steps) % steps);
 
         if (step != gateLastStep)
@@ -1620,6 +1633,17 @@ void IlanaSynthAudioProcessor::FxEngine::processGate (juce::AudioBuffer<float>& 
             level = step <= gateCycleCount % steps ? 1.0f : 0.0f;
         else if (! euclid && pattern == 7)
             level = step >= gateCycleCount % steps ? 1.0f : 0.0f;
+
+        if (cutSteps)
+        {
+            // Where we are inside this step (swing makes the pair's two
+            // steps 1 + SWING and 1 - SWING long).
+            const auto within = firstOfPair ? pair / (1.0 + swing)
+                                            : (pair - 1.0 - swing) / juce::jmax (1.0e-6, 1.0 - swing);
+
+            if (within >= length)
+                level = 0.0f;
+        }
 
         gateEnvelope += (level - gateEnvelope) * (level > gateEnvelope ? attackCoeff : releaseCoeff);
         const auto applied = 1.0f - (1.0f - gateEnvelope) * mixRamp.at (i);

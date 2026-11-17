@@ -550,6 +550,7 @@ inline const ValueRow valueRows[] {
 
     { is ("vec_drift"), Unit::percent },
     { is ("fx_gate_swing"), Unit::percent },
+    { is ("fx_gate_length"), Unit::percent },
     { starts ("fx_gate_step").butNot (is ("fx_gate_steps")), Unit::percent },
     { is ("fx_gate_steps"), Unit::whole, " steps" },
 
@@ -948,6 +949,7 @@ inline const HelpRow helpRows[] {
     { is ("arp_chance"), "Chance that each arp step plays; lower it for gaps and generative patterns." },
     { is ("fx_gate_steps"), "Trance gate pattern length. DIV sets the length of each step." },
     { is ("fx_gate_swing"), "Pushes every second step later for a shuffled gate." },
+    { is ("fx_gate_length"), "How much of each step is open. Under 100 % every step is its own hit, so steps next to each other chop instead of blending." },
     { is ("filter_balance"), "Parallel mode: fades between Filter 1 and Filter 2. Centre plays both." },
     { is ("filters_parallel"), "Serial: F1 into F2. Parallel: both filters summed." },
     // Envelopes
