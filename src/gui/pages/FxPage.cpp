@@ -2077,7 +2077,7 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
     }
     if (filterFront && filterFxHasSlope())
         knobs.insert (knobs.begin() + juce::jmin ((int) knobs.size(), 4), &filterSlopePills); // (where MORPH goes on a model that morphs)
-    auto plan = packedPlanFor ((int) knobs.size(), (int) sides.size(), inner.getWidth() - minDisplayWidth - 10 - (filterFront ? filterBlockWidth() + sideColumnGap : 0), grid.pitch);
+    auto plan = packedPlanFor ((int) knobs.size(), (int) sides.size(), inner.getWidth() - minDisplayWidth - 10 - (filterFront ? filterTypeBlockWidth + sideColumnGap : 0), grid.pitch);
     // A row grown tall takes its knobs in as many rows as its height holds, so they fill it and
     // the picture widens: four or more knobs in a grid of two columns or more, two or three one under the other
     // (no row of one beside a row of two). The side columns hold as many as the rows' height.
@@ -2098,7 +2098,7 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
             plan.sideColumns = ((int) sides.size() + plan.sidePerColumn - 1) / plan.sidePerColumn;
         }
     }
-    const auto blockWidth = filterFront ? filterBlockWidth() + sideColumnGap : 0;
+    const auto blockWidth = filterFront ? filterTypeBlockWidth + sideColumnGap : 0;
     auto knobsArea = plan.width() > 0 ? inner.removeFromRight (plan.width() + blockWidth) : juce::Rectangle<int>();
     if (plan.width() > 0)
         inner.removeFromRight (10); // off-grid
@@ -2144,10 +2144,9 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
     if (filterFront)
     {
         // The categories over the picker, centred on the knobs' band.
-        const auto tabsHeight = Space::s24, blockHeight = tabsHeight + sideGap + 22;
-        const auto block = juce::Rectangle<int> (sideArea.getRight(), band.getCentreY() - blockHeight / 2, filterBlockWidth(), blockHeight);
-        filterCategories.setBounds (block.withHeight (tabsHeight));
-        filterPicker.setBounds (block.withTrimmedTop (tabsHeight + sideGap));
+        const auto block = juce::Rectangle<int> (sideArea.getRight(), band.getCentreY() - (sideRow + sideGap + 22) / 2, filterTypeBlockWidth, sideRow + sideGap + 22);
+        filterCategories.setBounds (block.withHeight (sideRow));
+        filterPicker.setBounds (block.withTrimmedTop (sideRow + sideGap));
         for (juce::Component* part : { (juce::Component*) &filterCategories, (juce::Component*) &filterPicker })
             part->setVisible (true);
         filterSlopePills.setVisible (filterFxHasSlope());

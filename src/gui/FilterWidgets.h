@@ -372,15 +372,6 @@ public:
         repaint();
     }
 
-    // The width at which every name has its pill padding (as CardTabs' ideal width).
-    static int idealWidth()
-    {
-        auto total = 0.0f;
-        for (int p = 0; p < FilterTypes::getNumPages(); ++p)
-            total += juce::GlyphArrangement::getStringWidth (font(), FilterTypes::getPageName (p)) + 2.0f * 8.0f + 3.0f;
-        return (int) std::ceil (total);
-    }
-
     void paint (juce::Graphics& g) override
     {
         const auto lit = FilterTypes::pageOf (current);
@@ -440,8 +431,7 @@ public:
     }
 
 private:
-    // The size of the PLAY filter card's CardTabs (the pill font).
-    static juce::Font font() { return juce::Font (IlanaTheme::pillFont()); }
+    static juce::Font font() { return IlanaTheme::font (IlanaTheme::TextSize::packedBody, true); }
 
     // Pills as wide as their names, the spare width shared out, so the row fills its bounds.
     juce::Rectangle<float> pillBounds (int page) const

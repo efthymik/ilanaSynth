@@ -277,8 +277,6 @@ private:
     bool filterFxMorphs() const { return FilterType::usesMorph (filterFxType()); }
     bool filterFxHasSlope() const;
     static constexpr int filterTypeBlockWidth = 4 * knobPitch - sideColumnGap;
-    // (The family tabs at the PLAY pill size need more than four knob pitches: the block is as wide as they are.)
-    static int filterBlockWidth() { return juce::jmax (filterTypeBlockWidth, FilterCategoryTabs::idealWidth()); }
 
     static bool isSideItem (const juce::Component* item) { return dynamic_cast<const KnobControl*> (item) == nullptr; }
 
