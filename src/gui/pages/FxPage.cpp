@@ -2159,7 +2159,12 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
         sidesInHeader = need <= loneHeader.getRight() - left.chip.getRight() - Space::s16;
         sidesHeight = sidesInHeader ? 0 : (int) sides.size() * (loneItemHeight + Space::s8);
     }
-    const auto filterPickerHeight = 26; // off-grid
+    const auto filterPickerHeight = 32; // off-grid
+    // The lone card's dials are big (56, her approved size) at the pitch that goes with them.
+    constexpr float loneDial = 56.0f;
+    const auto loneGrow = loneDial / grid.dial;
+    const auto dialRowHeight = loneLayout ? juce::roundToInt ((float) grid.rowHeight * loneGrow) : grid.rowHeight;
+    const auto dialPitch = loneLayout ? (int) loneDial + Space::s24 + Space::s4 : grid.pitch;
     if (loneLayout && filterFront)
         sidesHeight = filterPickerHeight + Space::s8;
     if (loneLayout)
@@ -2174,7 +2179,7 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
     {
         const auto count = (int) knobs.size();
         // (The last row's air under its name may overhang the card's padding, not the tap grid under it.)
-        const auto fit = juce::jmax (plan.knobRows, (inner.getHeight() - sidesHeight + (hasTapGrid (panel) ? 0 : 8)) / grid.rowHeight);
+        const auto fit = juce::jmax (plan.knobRows, (inner.getHeight() - sidesHeight + (hasTapGrid (panel) ? 0 : 8)) / dialRowHeight);
         auto rows = plan.knobRows;
         if (count >= 4)
             rows = juce::jmax (rows, juce::jmin (fit, (count + 1) / 2)); // (two columns at least: no tall single file)
@@ -2192,7 +2197,7 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
     }
     const auto blockWidth = filterFront && ! loneLayout ? filterBlockWidth() + sideColumnGap : 0;
     // (The lone card's picker, with its arrows, is as wide as the family tabs' shorter names allow.)
-    const auto loneColumnWidth = juce::jmax (plan.knobColumns * grid.pitch, filterFront ? 3 * grid.pitch : 0);
+    const auto loneColumnWidth = juce::jmax (plan.knobColumns * dialPitch, filterFront ? 3 * dialPitch : 0);
     auto knobsArea = loneLayout ? inner.removeFromRight (loneColumnWidth)
                                 : (plan.width() > 0 ? inner.removeFromRight (plan.width() + blockWidth) : juce::Rectangle<int>());
     if (plan.width() > 0 || loneLayout)
@@ -2281,7 +2286,18 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
         for (size_t i = 0; i < knobs.size(); ++i)
         {
             const auto col = (int) i % juce::jmax (1, plan.knobColumns), row = (int) i / juce::jmax (1, plan.knobColumns);
-            const auto cell = juce::Rectangle<int> (column.getX() + col * grid.pitch, column.getY() + row * grid.rowHeight, grid.pitch, (int) grid.dial + 10 + 17);
+            if (auto* k = dynamic_cast<KnobControl*> (knobs[i]))
+            {
+                k->setPackedDial (loneDial);
+                k->setPackedValueSize (grid.value * loneGrow);
+            }
+            const auto cell = juce::Rectangle<int> (column.getX() + col * dialPitch, column.getY() + row * dialRowHeight, dialPitch, (int) loneDial + 10 + 17);
+            if (knobs[i] == &filterSlopePills)
+            {
+                // (The 12 / 24 dB pills grow with the dials: two 22 px pills in the dial's height.)
+                knobs[i]->setBounds (cell.withTrimmedLeft (Space::s4).withTrimmedRight (Space::s4).withHeight (2 * 22 + 17)); // off-grid
+                continue;
+            }
             knobs[i]->setBounds (KnobControl::packedBoundsFor (cell));
         }
         stackPanels.push_back (panel);
