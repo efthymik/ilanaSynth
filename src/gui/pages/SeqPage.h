@@ -141,6 +141,10 @@ private:
     // Writes the chosen clip to a .mid file (EXPORT MIDI).
     void exportMidiFile();
 
+    // PRINT TO CLIP: what the generators play for the held (or last) chord, into the chosen clip.
+    void printToClip();
+    static juce::String printTooltip (bool hasChord);
+
     Part part;
     StepEditor step1, step2;
     IlanaSynthAudioProcessor& processorRef;
@@ -165,6 +169,7 @@ private:
     ClipGridControl clipGrid;
     juce::TextButton clipImport;
     ClipDragButton clipExport;
+    juce::TextButton clipPrint;
     KnobControl arpSteps;
     NoteChainView noteChain;
     ChoiceSwitch scaleSwitch, strumSwitch;

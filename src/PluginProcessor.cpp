@@ -1127,6 +1127,78 @@ bool IlanaSynthAudioProcessor::isBusesLayoutSupported (const BusesLayout& layout
     return output == juce::AudioChannelSet::stereo() || output == juce::AudioChannelSet::mono();
 }
 
+NoteSpray::Settings IlanaSynthAudioProcessor::readSpraySettings()
+{
+    NoteSpray::Settings spray;
+    spray.scale = (int) getParam ("gen_scale");
+    spray.root = (int) getParam ("gen_root");
+    spray.snapInput = getParam ("gen_snap") > 0.5f;
+    spray.sprayOn = getParam ("spray_on") > 0.5f;
+    spray.count = (int) getParam ("spray_count");
+    spray.range = (int) getParam ("spray_range");
+    spray.direction = (int) getParam ("spray_direction");
+    spray.spreadSamples = (int) (getParam ("spray_spread") * 0.001 * currentSampleRate);
+    spray.chance = getParam ("spray_chance");
+    spray.velocityRandom = getParam ("spray_velocity");
+    spray.strum = juce::jlimit (0, 2, (int) getParam ("spray_strum"));
+    spray.strumSamples = (int) (getParam ("spray_strum_time") * 0.001 * currentSampleRate);
+    return spray;
+}
+
+// The keys as they reach the generators: which are down, and the chord the
+// last gesture pressed (kept after release, for PRINT TO CLIP).
+void IlanaSynthAudioProcessor::trackPrintChord (const juce::MidiBuffer& midi) noexcept
+{
+    auto held = std::array<juce::uint64, 2> { heldChordBits[0].load (std::memory_order_relaxed), heldChordBits[1].load (std::memory_order_relaxed) };
+    auto last = std::array<juce::uint64, 2> { lastChordBits[0].load (std::memory_order_relaxed), lastChordBits[1].load (std::memory_order_relaxed) };
+    const auto before = held;
+
+    for (const auto metadata : midi)
+    {
+        const auto message = metadata.getMessage();
+
+        if (message.isNoteOn())
+        {
+            const auto note = (size_t) message.getNoteNumber();
+
+            if (held[0] == 0 && held[1] == 0)
+                last = { 0, 0 };
+
+            held[note >> 6] |= juce::uint64 (1) << (note & 63);
+            last[note >> 6] |= juce::uint64 (1) << (note & 63);
+        }
+        else if (message.isNoteOff())
+        {
+            const auto note = (size_t) message.getNoteNumber();
+            held[note >> 6] &= ~(juce::uint64 (1) << (note & 63));
+        }
+        else if (message.isAllNotesOff() || message.isAllSoundOff())
+        {
+            held = { 0, 0 };
+        }
+    }
+
+    if (held != before)
+        for (size_t i = 0; i < 2; ++i)
+        {
+            heldChordBits[i].store (held[i], std::memory_order_relaxed);
+            lastChordBits[i].store (last[i], std::memory_order_relaxed);
+        }
+}
+
+std::vector<int> IlanaSynthAudioProcessor::getPrintChord() const
+{
+    const auto held = heldChordBits[0].load() != 0 || heldChordBits[1].load() != 0;
+    const auto& bits = held ? heldChordBits : lastChordBits;
+    std::vector<int> chord;
+
+    for (int note = 0; note < 128; ++note)
+        if ((bits[(size_t) (note >> 6)].load() >> (note & 63)) & 1)
+            chord.push_back (note);
+
+    return chord;
+}
+
 void IlanaSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     ILANA_AUDIO_THREAD_SCOPE(); // debug and test builds only (src/ThreadChecks.h)
@@ -2154,19 +2226,8 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
 
     // Generative stage (scale snap, note spray) feeds the arpeggiator.
     {
-        NoteSpray::Settings spray;
-        spray.scale = (int) getParam ("gen_scale");
-        spray.root = (int) getParam ("gen_root");
-        spray.snapInput = getParam ("gen_snap") > 0.5f;
-        spray.sprayOn = getParam ("spray_on") > 0.5f;
-        spray.count = (int) getParam ("spray_count");
-        spray.range = (int) getParam ("spray_range");
-        spray.direction = (int) getParam ("spray_direction");
-        spray.spreadSamples = (int) (getParam ("spray_spread") * 0.001 * currentSampleRate);
-        spray.chance = getParam ("spray_chance");
-        spray.velocityRandom = getParam ("spray_velocity");
-        spray.strum = juce::jlimit (0, 2, (int) getParam ("spray_strum"));
-        spray.strumSamples = (int) (getParam ("spray_strum_time") * 0.001 * currentSampleRate);
+        trackPrintChord (midiMessages);
+        const auto spray = readSpraySettings();
         noteSpray.process (midiMessages, generatedMidi, buffer.getNumSamples(), spray);
     }
 

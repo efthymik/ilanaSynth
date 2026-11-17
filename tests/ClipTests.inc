@@ -392,4 +392,36 @@ void runClipTests()
         check (bad.notes.size() == 2 && bad.notes[0].length > 0.0f && bad.notes[1].length > 0.0f,
                "clip: a loaded patch's NaN note is refused and a negative length is made positive");
     }
+
+    // PRINT TO CLIP: an Up arp over a C major chord prints C E G C E G... on
+    // an even grid; with the chain off, the chord itself, held the clip long.
+    {
+        IlanaSynthAudioProcessor processor;
+        const std::vector<int> chord { 60, 64, 67 };
+
+        const auto held = processor.printGeneratorChain (chord, 1);
+        check (held.bars == 1 && held.notes.size() == 3 && held.notes[0].start == 0.0f && held.notes[0].length == 4.0f,
+               "print: with every generator off the chord is held for the whole clip");
+
+        set (processor, "arp_on", 1.0f);
+        set (processor, "arp_mode", 0.0f);
+        const auto printed = processor.printGeneratorChain (chord, 2);
+        const auto count = (int) printed.notes.size();
+        const auto step = count > 1 ? printed.notes[1].start - printed.notes[0].start : 0.0f;
+        auto pattern = count >= 6 && step > 0.0f;
+        const int expected[] { 60, 64, 67 };
+
+        for (int i = 0; i < count && pattern; ++i)
+            pattern = printed.notes[(size_t) i].note == expected[i % 3]
+                      && std::abs (printed.notes[(size_t) i].start - (float) i * step) < 0.002f
+                      && printed.notes[(size_t) i].length < step;
+
+        check (printed.bars == 2 && pattern && std::abs ((float) count * step - 8.0f) < 0.002f,
+               "print: an Up arp prints C E G repeating on an even grid over the clip (" + juce::String (count) + " notes)");
+
+        // The live processor was not run: its own held chord and arp state are as they were.
+        check (processor.getPrintChord().empty(), "print: a processor that never saw a key has no chord to print");
+        processor.getClipState().setClip (0, printed);
+        check (processor.getClipState().getClip (0).notes.size() == printed.notes.size(), "print: the printed notes store as a clip");
+    }
 }
