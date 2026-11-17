@@ -2301,14 +2301,21 @@ void PlayPage::layoutFilterCard ()
             // (A pitch wide, centred on the column, so KEY TRACK reads on one line under the same dial.)
             // (Its caption's ink stays a gap clear of the graph: the cell may sit a few px right of CUTOFF's centre.)
             const auto x = knobsX + (slot < 3 ? slot : slot - 3) * filterPitch - (slot < 3 ? 0 : (filterPitch - cell) / 2);
-            return juce::Rectangle<int> (slot < 3 ? x : juce::jmax (x, graphRight + Space::s6 + KnobControl::packedPadX), slot < 3 ? filterRow1 : filterRow2,
-                                         slot < 3 ? cell : filterPitch, (int) dialSize + 10); // off-grid
+            if (slot < 3)
+                return juce::Rectangle<int> (x, filterRow1, cell, (int) dialSize + 10); // off-grid
+            // (Its right edge stays where it was, clear of SLOPE; only its left edge moves in off the graph.)
+            const auto left = juce::jmax (x, graphRight + Space::s6 + KnobControl::packedPadX);
+            return juce::Rectangle<int> (left, filterRow2, x + filterPitch - left, (int) dialSize + 10); // off-grid
         };
         for (size_t k = 0; k < filters[0].knobs.size(); ++k)
             for (auto& other : filters)
                 other.knobs[k]->setBounds (KnobControl::packedBoundsFor (filterCell (juce::jmin (4, (int) k))));
         for (auto& other : filters)
-            other.slope->setBounds (KnobControl::packedBoundsFor (juce::Rectangle<int> (knobsX + filterPitch, filterRow2, filterPitch + cell, (int) dialSize + 10))); // off-grid
+        {
+            // (SLOPE starts a gap after KEY TRACK's cell and ends at the DRIVE column's right edge.)
+            const auto slopeLeft = juce::jmax (knobsX + filterPitch, filterCell (3).getRight() + 2 * KnobControl::packedPadX + Space::s4);
+            other.slope->setBounds (KnobControl::packedBoundsFor (juce::Rectangle<int> (slopeLeft, filterRow2, knobsX + 2 * filterPitch + cell - slopeLeft, (int) dialSize + 10))); // off-grid
+        }
 
         // WEST. Header: GATE, PLACE and STRIKE BY as wide as their words, its switch at the right; body: the fold's
         // curve, then seven knobs.

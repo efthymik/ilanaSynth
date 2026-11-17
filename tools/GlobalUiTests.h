@@ -297,11 +297,15 @@ void runGlobalReview8Tests (IlanaSynthAudioProcessor& processor, IlanaSynthAudio
         settle (300);
         std::vector<VectorCornerWave*> corners;
         findAll<VectorCornerWave> (editor, corners);
-        auto shownCorners = 0;
+        auto shownCorners = 0, bigPictures = 0;
         for (auto* corner : corners)
-            shownCorners += visibleInTree (corner) && corner->getHeight() > 40 ? 1 : 0;
-        // (UI review 31, item 18: the pictures at half their height, each corner's LEVEL and on switch under them.)
-        expect (shownCorners == 4, "VECTOR, off: the four corners show a picture of their oscillator (V14-2)");
+        {
+            shownCorners += visibleInTree (corner) ? 1 : 0;
+            bigPictures += visibleInTree (corner) && corner->getHeight() > 40 ? 1 : 0;
+        }
+        // (UI audit 22: a corner with no oscillator is one short "+ add OSC n" row; the corners that play keep a
+        // full-width picture.)
+        expect (shownCorners == 4 && bigPictures >= 2, "VECTOR, off: the four corners show (a picture of their oscillator, or + add OSC n) (V14-2)");
 
         // V14-1: the rack has no card-sized hole: + ADD is one row at the page's
         // foot, the suggested effects as chips beside it (UI review 31).
