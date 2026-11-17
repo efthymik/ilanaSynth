@@ -635,7 +635,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout IlanaSynthAudioProcessor::cr
 
     addChoice ("fx_gate_div", "Gate Div", getSyncDivisionNames(), 4);
     addChoice ("fx_gate_pattern", "Gate Pattern",
-               { "Straight", "Offbeat", "Triplet", "Gallop", "Random", "Dual", "Build", "Break", "Custom" }, 0);
+               { "Straight", "Offbeat", "Triplet", "Gallop", "Random", "Dual", "Build", "Break", "Custom",
+                 // Appended 2026-11-17 (patches store the index).
+                 "16ths", "8ths", "Offbeat 8ths", "Classic 1101", "Trance x.xx", "3-3-2", "Stutter" }, 0);
     addInt ("fx_gate_steps", "Gate Steps", 2, 16, 16);
     addFloat ("fx_gate_swing", "Gate Swing", 0.0f, 0.5f, 0.0f);
 
@@ -643,6 +645,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout IlanaSynthAudioProcessor::cr
         addFloat ("fx_gate_step" + juce::String (step), "Gate Step " + juce::String (step), 0.0f, 1.0f, 1.0f);
     addFloat ("fx_gate_smooth", "Gate Smooth", 0.0f, 1.0f, 0.2f);
     addFloat ("fx_gate_mix", "Gate Mix", 0.0f, 1.0f, 1.0f);
+    // How much of each step is open (2026-11-17). 100 % keeps the old gate.
+    addFloat ("fx_gate_length", "Gate Length", 0.05f, 1.0f, 1.0f);
 
     addBool ("fx_tape_stop_trigger", "Tape Stop", false);
     addFloat ("fx_tape_stop_time", "Stop Time", 0.05f, 4.0f, 0.6f, 0.5f);

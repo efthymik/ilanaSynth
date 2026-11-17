@@ -833,6 +833,7 @@ int main()
     timedRun ("runFactoryLibraryTest", [] { runFactoryLibraryTest(); });
     timedRun ("runTapeStopLatencyTest", [] { runTapeStopLatencyTest(); });
     timedRun ("runTranceGateTest", [] { runTranceGateTest(); });
+    timedRun ("runTranceGateLengthTest", [] { runTranceGateLengthTest(); });
     timedRun ("runGenerativeTests", [] { runGenerativeTests(); });
     timedRun ("runOsc3MigrationTest", [] { runOsc3MigrationTest(); });
     timedRun ("runFmMatrixTests", [] { runFmMatrixTests(); });

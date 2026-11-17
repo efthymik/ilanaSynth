@@ -903,6 +903,89 @@ void runTranceGateTest()
     check (worstRatio > 30.0, "trance gate opens and closes on 1/16 steps (open/closed ratio " + juce::String (worstRatio, 1) + ")");
 }
 
+// Trance gate LENGTH (2026-11-17): the classic patterns read as written, and
+// with LENGTH 50 % the "16ths" pattern opens the first half of every step and
+// closes the second, so steps next to each other no longer blend. At 100 %
+// the gate plays exactly as before (16ths = Straight, no chop).
+void runTranceGateLengthTest()
+{
+    const auto patternText = [] (int pattern)
+    {
+        juce::String text;
+        for (int step = 0; step < 16; ++step)
+            text << (IlanaSynthAudioProcessor::gatePatternLevel (pattern, step) > 0.5f ? "x" : ".");
+        return text;
+    };
+
+    check (patternText (9) == "xxxxxxxxxxxxxxxx" && patternText (10) == "x.x.x.x.x.x.x.x."
+               && patternText (11) == "..x...x...x...x." && patternText (12) == "xx.xxx.xxx.xxx.x"
+               && patternText (13) == "x.xxx.xxx.xxx.xx" && patternText (14) == "x..x..x.x..x..x."
+               && patternText (15) == "xxxxx.x.xx.xx...",
+           "trance gate classic patterns read as written (Classic 1101 " + patternText (12) + ", Stutter " + patternText (15) + ")");
+
+    const auto render = [] (float length)
+    {
+        IlanaSynthAudioProcessor processor;
+        processor.prepareToPlay (48000.0, 500);
+        processor.loadFactoryPreset (0);
+        processor.assignFxSlot (1, 16);
+
+        const auto set = [&processor] (const juce::String& id, float value)
+        {
+            if (auto* parameter = processor.apvts.getParameter (id))
+                parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
+        };
+
+        set ("fx_gate_div", 4.0f);      // 1/16 at 120 BPM = 6000 samples
+        set ("fx_gate_pattern", 9.0f);  // 16ths
+        set ("fx_gate_smooth", 0.0f);
+        set ("fx_gate_mix", 1.0f);
+        set ("fx_gate_length", length);
+
+        std::vector<float> out;
+        juce::AudioBuffer<float> buffer (2, 500);
+
+        for (int block = 0; block < 96; ++block)
+        {
+            buffer.clear();
+            juce::MidiBuffer midi;
+
+            if (block == 0)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+
+            processor.processBlock (buffer, midi);
+
+            for (int i = 0; i < 500; ++i)
+                out.push_back (buffer.getSample (0, i));
+        }
+
+        return out;
+    };
+
+    const auto rmsOf = [] (const std::vector<float>& out, int start, int count)
+    {
+        auto sum = 0.0;
+        for (int i = start; i < start + count; ++i)
+            sum += (double) out[(size_t) i] * out[(size_t) i];
+        return std::sqrt (sum / count);
+    };
+
+    constexpr int stepLength = 6000;
+    const auto half = render (0.5f);
+    const auto full = render (1.0f);
+    auto worstHalf = 1.0e9, worstFull = 1.0e9;
+
+    for (int step = 1; step < 7; ++step)
+    {
+        const auto start = step * stepLength;
+        worstHalf = juce::jmin (worstHalf, rmsOf (half, start + 750, 1500) / juce::jmax (1.0e-9, rmsOf (half, start + 3750, 1500)));
+        worstFull = juce::jmin (worstFull, rmsOf (full, start + 3750, 1500) / juce::jmax (1.0e-9, rmsOf (full, start + 750, 1500)));
+    }
+
+    check (worstHalf > 30.0, "trance gate LENGTH 50 % chops every 16th (open/closed " + juce::String (worstHalf, 1) + ")");
+    check (worstFull > 0.5, "trance gate LENGTH 100 % keeps 16ths open (second half / first half " + juce::String (worstFull, 2) + ")");
+}
+
 void runGenerativeTests()
 {
     // Scale snapping.
