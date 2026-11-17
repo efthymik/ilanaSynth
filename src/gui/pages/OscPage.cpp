@@ -3677,7 +3677,9 @@ void OscPage::applyCardStyle (int index)
     osc.tune.setLabelText ("TUNING");
     // (These two say what they are by their value alone.)
     osc.scaleRoot.getComboBox().getProperties().set ("textPrefix", juce::String());
-    osc.uniMode.getComboBox().getProperties().set ("textPrefix", juce::String());
+    // (The Physical card's mode menu spans the UNISON panel under the dials, as CHORD does under PITCH's: it is
+    // named like CHORD, 2026-11-17 ilana.)
+    osc.uniMode.getComboBox().getProperties().set ("textPrefix", kind == Kind::physical ? juce::String ("MODE") : juce::String());
     osc.scaleRoot.getComboBox().repaint();
     osc.uniMode.getComboBox().repaint();
 
