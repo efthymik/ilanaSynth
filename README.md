@@ -11,9 +11,9 @@
   <img alt="Built with JUCE C++" src="https://img.shields.io/badge/JUCE-C%2B%2B20-2b2f36">
 </p>
 
-A physical-hybrid synthesizer: strings, bows, hammers, electric pianos and resonant bodies you can break, wired into wavetable, FM / DX7, granular and sample engines, through two routable filters and a 41-type effects rack. VST3, CLAP, AU and standalone, built with [JUCE](https://juce.com).
+A physical-hybrid synthesizer: a grand piano, a nylon guitar and a violin, viola and cello rebuilt mode by mode from real recordings, with bodies you can stretch from a toy to a cistern, plus plucked, bowed and hammered strings, electric pianos and resonant bodies you can break, all wired into wavetable, FM / DX7, granular and sample engines, through two routable filters and a 42-type effects rack. VST3, CLAP, AU and standalone, built with [JUCE](https://juce.com).
 
-**This is beta 1.4**, the build that gets ilanaSynth ready for **RC 1.0**. Everything from v1.3.0 is in it, plus a whole new one-page PLAY screen, frame blending, full-range modulation, a guitar-fitted string model, hundreds of new wavetables and a library of presets voted in by ear. The features are frozen apart from interface work; what is left before RC 1.0 is polish, listening rounds and the checklist in [docs/RC-1.0-CHECKLIST.md](docs/RC-1.0-CHECKLIST.md). See [What's new in beta 1.4](#whats-new-in-beta-14).
+**This is beta 1.4**, the build that gets ilanaSynth ready for **RC 1.0**, as of **17 November 2026**. Since the last update of this page it gained the **modal instruments** (Modal Piano, Modal Guitar, Modal Bowed), a six-way exciter picker, per-voice modulation into every engine knob, a Vulkan-drawn interface, a trance gate that chops like the classics, and five rounds of polish, hardening and bug hunting. What is left before RC 1.0 is polish, listening rounds and the checklist in [docs/RC-1.0-CHECKLIST.md](docs/RC-1.0-CHECKLIST.md). See [What's new](#whats-new-late-october-to-17-november).
 
 <p align="center"><img src="docs/img/play.png" alt="The PLAY page in beta 1.4: oscillator cards, the FILTER, STRINGS and WEST COAST band, the ENVELOPE, LFO and BODY band, and the dock" width="920"></p>
 
@@ -28,15 +28,17 @@ A complete sound design machine on one page, and the same engine as an effect pl
 - **Oscillators:** six full oscillators, each in wavetable, FM / DX7, physical-model, sample, granular or live-input mode, plus a dedicated sub and noise layer. New patches open with two; OSC 3–6 are one click away. Sample mode also plays SoundFont (SF2) and SFZ multisamples.
 - **Wavetables:** 447 built in (120 factory tables and 327 hand-made tables from Surge XT's third-party packs), a built-in wavetable editor (draw, harmonics, formulas, morphs, Serum / Vital-compatible import and export), a LIBRARY menu for your own folders and 256 patch tables saved inside the patch. **FRAME BLEND** moves between frames by crossfade, by spectral glide or in steps. Eleven spectral warps, classic warp modes (Sync, Bend, PWM, Mirror, Asym, Quantize, FM, Ring, FM from Noise) and the Casio CZ's phase distortion.
 - **Unison:** up to 16 voices per oscillator, detune up to 200 cents, with eleven stack modes (Classic, Hypersaw, Octaves, Fifths, Center Drop, 2x Octaves, Power Chord, Major, Minor, Harmonics, Odd Harmonics).
-- **Physical models:** plucked, bowed and hammered strings, a nylon string fitted to real guitar recordings (with a second string direction for its beating and a CLICK knob for a clean or slappy pluck), a felt-hammer piano exciter on a dense soundboard, Rhodes- and Wurlitzer-style electric pianos (Tine, Reed), a feedback-guitar exciter, material and guitar bodies tuned to semitones, sympathetic strings, a west-coast wavefolder with a vactrol low-pass gate, and a live picture of the string, hammer or bow.
+- **Modal instruments:** a grand piano (from a Spitfire grand, every key at three dynamics), a nylon guitar and a bowed violin, viola and cello, each played back as its measured partials and body modes, not as samples. **SIZE** and **SCALE** reshape the body and neck physically, snapping to real instruments (ukulele to guitarrón, pochette to double bass, upright to concert grand) and going past them into giant ringing bodies.
+- **Physical models:** plucked, bowed and hammered strings, a nylon string fitted to real guitar recordings (with a second string direction for its beating and a CLICK knob for a clean or slappy pluck), a felt-hammer piano exciter on a dense soundboard, Rhodes- and Wurlitzer-style electric pianos (Tine, Reed), a feedback-guitar exciter, material and guitar bodies tuned to semitones, sympathetic strings, a west-coast wavefolder with a vactrol low-pass gate, and a live picture of the string, hammer or bow. Six exciter types (PIANO, GUITAR, BOWED, E-PIANO, DRIVEN, FEEDBACK) on an icon picker, each with a MODAL or classic engine switch.
 - **FM and DX7:** a 6×6 operator matrix with 16 one-click algorithms and all 32 DX7 algorithms, three FM styles, the DX7's own Operator Envelope, key scaling, a pitch EG and LFO, a noise operator, 288 DX7 ROM and Dexed voices built in and `.syx` import for the rest.
 - **Filters:** two routable filters (serial or parallel) with 39 models: zero-delay ladders, diode, OTA, SEM, MS-20, Steiner-Parker, 303 Acid, combs, vowel filters, Airwindows' Y filters and nine Airwindows character filters, and a tuneable Disperser.
-- **Modulation:** 16 LFOs (including chaos and physics shapes), 16 tension envelopes, a step sequencer, an MSEG, 8 macros and a 64-slot matrix with per-route response curves. Drag any source onto any knob; at 100 % a route sweeps that knob's whole range.
-- **Effects:** a 10-slot rack with 41 module types in series or parallel, including a trance gate, a channel vocoder and 54 Airwindows algorithms (their delays tempo-synced). Any slot can work on one band (low, mid, high, mid or side). The PATCH page cables oscillators, filters, BODY, WEST and effects in any order.
+- **Modulation:** 16 LFOs (including chaos and physics shapes), 16 tension envelopes, a step sequencer, an MSEG, 8 macros and a 64-slot matrix with per-route response curves. Drag any source onto any knob; at 100 % a route sweeps that knob's whole range. Per-note sources (velocity, key, RANDOM, envelopes) drive each voice's own engine knobs, so every note of a chord can have its own body size or bow.
+- **Effects:** a 10-slot rack with 42 module types in series or parallel, including a trance gate with classic chop patterns, a filter with all 39 models, a channel vocoder and 54 Airwindows algorithms (their delays tempo-synced). Any slot can work on one band (low, mid, high, mid or side). The PATCH page cables oscillators, filters, BODY, WEST and effects in any order.
 - **Generative tools:** an arpeggiator, a Euclidean sequencer, a probability sequencer, a clip sequencer with a piano roll and MIDI import / export, note spray, strum and scale snapping.
-- **Presets:** 703 factory presets (415 sound-design presets and 288 DX7 voices), near-duplicates left out, plus ilana's own, in a tagged and searchable browser with favourites and a dockable side panel.
+- **Presets:** 730 factory presets (442 sound-design presets and 288 DX7 voices), near-duplicates left out, plus ilana's own, in a tagged and searchable browser with favourites and a dockable side panel.
 - **ilanaSynth FX:** a second plugin built from the same sources. Audio coming in rings the bodies and strings, is granulated live, or plays as an oscillator through the filters and effects.
-- **Efficient:** SIMD in the hot paths, control-rate modulation and optional multi-core voice rendering; the heaviest presets run in roughly half the CPU they once did.
+- **Efficient:** SIMD in the hot paths, control-rate modulation and real-time multi-core voice rendering; the heaviest presets run in roughly half the CPU they once did, and a modal note costs about 1 % of a core.
+- **Drawn with Vulkan** on Windows and Linux (Direct2D or OpenGL as fallback), with scopes and live displays at the screen's refresh rate.
 
 ---
 
@@ -47,7 +49,7 @@ A complete sound design machine on one page, and the same engine as an effect pl
 | ![PLAY, other views](docs/img/play-views.png) | ![The compact EDIT pop-up](docs/img/popup.png) |
 | **PLAY, other views**: the band's view pills swap FILTER 1 / 2 (here two in parallel on Vowel Morph), STRINGS / KEYS and BODY / BOARD in place. | **EDIT pop-ups**: any LFO or envelope opens as a compact floating editor holding every setting, here a simulated Pendulum LFO. |
 | ![PLAY engines](docs/img/engines.png) | ![FM](docs/img/fm.png) |
-| **One card per oscillator**: a physical string with its live picture, a sample and a granular cloud, the same cards at any oscillator count. | **FM**: the operator matrix with thin, sagging cables, DX7 algorithms and the Operator Envelope. |
+| **One card per oscillator**: a Physical card with the six-type exciter picker and its engine switch, and a Sample card, the same cards at any oscillator count. | **FM**: the operator matrix with thin, sagging cables, DX7 algorithms and the Operator Envelope. |
 | ![MATRIX](docs/img/matrix.png) | ![FX](docs/img/fx.png) |
 | **MATRIX**: 64 numbered, sortable slots with curves, Via sources and stereo amounts. | **FX**: a vertical signal rail with a live row and display per effect. |
 | ![PATCH](docs/img/patch.png) | ![SEQ](docs/img/seq.png) |
@@ -55,7 +57,52 @@ A complete sound design machine on one page, and the same engine as an effect pl
 
 ---
 
-## What's new in beta 1.4
+## What's new (late October to 17 November)
+
+Everything merged since this page was last updated (#170 to #284). Old patches and presets load and sound as before: parameter IDs and choice indices are only ever appended, and each sound change is checked against the fingerprints of all 769 presets the tests render.
+
+### Highlights
+- **Modal Piano.** A Physical exciter that plays a grand piano as its measured partials: every key from A0 to C8 at three dynamics, each partial's pitch and level over time, the board's resonances, the noise between them and the hammer's first moments. Rebuilt from a Spitfire grand render, in stereo as its microphones heard it, and it stacks in UNISON into detuned, spread pianos.
+- **Modal Guitar.** The same engine on a nylon guitar: a modelled pluck, steady transients, clean tails, and a guitar body you hear on every note.
+- **Modal Bowed: violin, viola, cello.** Up to 64 string modes, a friction bow and a 36-resonator body per instrument, refitted over fifteen rounds against Spitfire's string quartet: vibrato across the body's fine ripple, slow wander, bow lift on release, chords that share their bow noise, WOLF and PIZZ. Three new presets: **Modal Violin**, **Modal Viola** and **Modal Cello**.
+- **SIZE and SCALE, physically.** Every modal engine has a body SIZE and a neck SCALE that move the body's modes the way a real bigger or smaller instrument would. The knobs snap to real instruments (soprano ukulele to guitarrón, pochette to double bass, upright to concert grand; hold Alt to move freely), the string picture names the one you are on, and past x2 the body leaves physics for a dense, reverb-like giant (up to x4, the "cistern").
+- **Six exciter types.** The Physical card's icon picker shows PIANO, GUITAR, BOWED, E-PIANO, DRIVEN and FEEDBACK, with a minilogue-style switch for each type's engine (MODAL or the classic hammer, pluck, bow, tine, reed or saw).
+- **Per-voice knobs everywhere.** A route from velocity, key, RANDOM, an envelope or a retriggered LFO into any of about 220 engine knobs (string, bow, hammer, pickup, SIZE, SCALE, WOLF, grain, sample fades, WARP 2, BODY, WEST and more) is worked out by each voice at note-on, so every note of a chord gets its own value and a held note keeps its RANDOM.
+- **Trance gate that chops.** A **LENGTH** knob opens only the first part of each step, so steps next to each other retrigger, and seven classic patterns: 16ths, 8ths, Offbeat 8ths, Classic 1101, Trance x.xx, 3-3-2 and Stutter. The gate grid draws LENGTH as bar width.
+- **Vulkan interface** on Windows and Linux, checked page by page against the software renderer, with Direct2D or OpenGL as the fallback (Settings > Vulkan rendering). Game overlays (Steam, OBS, Fossilize) are kept out of its device so menus stay open.
+
+<p align="center"><img src="docs/img/modal.png" alt="Modal Cello on PLAY: the Physical card with the BOWED exciter on MODAL, SIZE x2.1, and the string picture naming CELLO, body x2.1, neck x1.0" width="920"></p>
+
+### Interface
+- **FX cards are one size,** whatever the rack holds: the size they have at four or five effects. Long racks scroll instead of squeezing.
+- **UI review 30 and 31 (50 items):** FX cards with Duplicate / Copy / Paste / Reset, OUTPUT in the FX top bar; a MATRIX laid out around the dock with click-to-assign and Alt-drag to create routes; bend and mod wheels on the keyboard strip; menus in the STRINGS, BODY and BOARD headers; draggable SUB, NOISE, STRINGS, KEYS, BODY and BOARD pictures; FX chain chips in the tab row; a CPU bar; keyboard shortcuts Ctrl+F / B / N / L / R; a fifth skin, **Neon to Ice**; the body and neck of the string picture drawn from SIZE and SCALE.
+- **Usability flair:** tab badges show where a hovered source routes; undo names what it changed ("Undid RESO 60 % -> 65 %", with SHOW for a closed tab); a notch marks each knob's default; FINE lights during a fine drag; a mod ring shows its depth and source while hovered; tabs get a dot when their knobs moved; A|B marks every knob that differs; the arc flashes at a knob's end; typed values read in the knob's own unit (99000 on CUTOFF sets 20 kHz).
+- **Polarity from the knob:** a knob's right-click menu lists each route into it, with Unipolar / Negative / Bipolar, Stereo, a typed amount, Bypass and Remove, so the matrix is not needed for that.
+- **MATRIX:** a click anywhere on a row shows its curve.
+- **Workflow:** A|B slots survive closing the editor; in the preset browser Space plays and Ctrl+L marks a favourite straight from the search box, and its details list the macros and route count; **PRINT TO CLIP** renders the arp / generator chain for the held chord into a clip; the FX chain menu copies, pastes and saves whole chains, and **KEEP FX** keeps the rack while you browse presets.
+- **WARP on the wave display:** every warp of both stages is drawn on the wave, frame trace, waterfall and spectrum; WARP 2 gained FM, Ring and FM Noise.
+- **VECTOR** follows the oscillator count (slider, triangle, square, pentagon, hexagon), with PATH shapes and tempo sync.
+- **Smoother:** animations and folds slide on the frame clock instead of stepping at 20 fps; scopes, FX meters and live pictures redraw every frame; knobs no longer jump back a frame in Live, and the filter graph follows the knob you hold instead of stuttering.
+- **Polish passes:** a UI / UX audit (26 of 29 items) and three visual passes from 175 % pictures of every page: even gaps, labels off the curves, nothing clipped, natural widths.
+
+### Sound
+- **Modal engines** as above, plus a faster first load (the bowed tables build on several cores, the noise filters once per sample rate) at bit-identical output.
+- **GLIDE** takes the knob's time (it was 16 times longer; old patches keep theirs), drift, strings and the resonator stay the same at every sample rate, Diode and 303 Acid open to the top.
+- **Dense soundboard MIX** reaches as far as Classic's, and MIX at 0 % leaves the sound untouched on both boards.
+- **Bodies:** the Guitar body is heard on every note, COUPLE 0 no longer mutes a string's body, and plucks keep their level at high DECAY.
+- **Stereo physical strings** (a twin string per side, computed together so they cost little more than one) and **stereo modulation amounts** everywhere.
+- **Spectral warp sweeps glide** instead of stepping.
+- **Presets:** Deep Grit 808 (ilana's own), seven from ilana's recipe pack, fourteen showcase presets, Solo Cello and the three modal strings.
+
+### Fixes and hardening
+- Bug-hunt rounds: held notes that went silent, a spectral fade crash, a preset voicing use-after-free, Filter 2 clicks, presets that droned after release, a mono Operator EG that did not restart, the Granular / Sample SOURCE box that stopped opening, and more.
+- Hostile files are refused safely (oversized or deeply nested XML, runaway wavetable formulas, huge `.kbm`, SFZ, SF2 and `.syx` files); host quirks are handled (over-long blocks, bypass releasing notes, MIDI dropped under a busy lock replayed, a per-voice LFO rate that could hang the audio thread).
+- Real-time priority for the multi-core voice workers, an oversampling lock and a bounce renderer race fixed, saved sets kept safe when they cannot be read.
+
+<details>
+<summary><b>Beta 1.4, first half: the one-tab PLAY</b> (to 26 October)</summary>
+
+### What's new in beta 1.4
 
 Everything since the v1.3.0 release. Old patches and presets load and sound as before: every change is appended, parameter IDs and choice indices are never renumbered, and each sound change was checked against the fingerprints of all 703 factory presets.
 
@@ -134,6 +181,8 @@ Earlier beta 1.4 work, from before the one-tab PLAY. Some of it has since been r
 - **CPU:** SSE2 / AVX paths for the wavefolder, Y filters, unison strings, soundboard and reverb; Vital-style control-rate modulation; release-silence freeing; block-wise FM operators; and optional **multi-core voice rendering** (`multi_core`, on by default). Output is byte-identical to single-threaded rendering.
 - **GPU UI** (OpenGL) on macOS and Linux; Windows keeps Direct2D.
 - **Self-hosted CI runner** for the Windows PC (`docs/SELF-HOSTED-RUNNER.md`); `tools/verify.sh` and `tools/verify.ps1` run the whole gate locally.
+
+</details>
 
 </details>
 
@@ -259,7 +308,9 @@ Oscillators work like Phase Plant modules, one full-size card each on PLAY. A ne
     - Drop a mod source on the wave picture to route FRAME; each route shows as a band with a handle that sets its depth.
     - Load your own `.wav` with LOAD (as frames, or resynthesised from any recording), or drop audio onto the wave picture. Tables from Serum, Vital and other tools load with their frame size.
     - **EDIT** opens the wavetable editor (see the v1.3 notes). Editing a factory table copies it into a free patch table first; factory tables never change.
-  - **Physical**: plucked, bowed, hammered or oscillator-driven string with adjustable stiffness (sharp upper partials), damping, pickup and excitation positions, pick hardness and a slap attack. Every knob is tuned so a sweep is easy to hear. The exciter is chosen from an icon picker.
+  - **Physical**: plucked, bowed, hammered or oscillator-driven string with adjustable stiffness (sharp upper partials), damping, pickup and excitation positions, pick hardness and a slap attack. Every knob is tuned so a sweep is easy to hear.
+    - **Exciter picker**: six types, PIANO, GUITAR, BOWED, E-PIANO, DRIVEN and FEEDBACK, and a position switch above them for each type's engine: PIANO is MODAL, HAMMER or BRIGHT; GUITAR is MODAL, BURST or NOISE; BOWED is MODAL or LEGACY; E-PIANO is TINE or REED; DRIVEN is SAW, PULSE or OSC IN.
+    - **Modal Piano, Modal Guitar and Modal Bowed**: real instruments played as their measured partials and body modes (a grand from a Spitfire render, a nylon guitar, a violin / viola / cello fitted to Spitfire's string quartet). The card's string knobs shape them (on the piano DECAY, DAMP, STIFF, HAMMER and DAMPER); aftertouch is the bow's grip, and Modal Bowed has WOLF and PIZZ. **SIZE** (x0.25 to x4) and **SCALE** move the body and neck physically, snap to real instruments with a named tick for each (hold Alt for in-betweens), and past x2 turn the body into a dense, ringing giant.
     - **CLICK** (plucked exciters, after PICKUP): 1 is the classic pluck with its slap of noise, 0 a clean pluck. Nylon String, fitted to real guitar recordings, uses 0 and a second string direction for its slow beating.
     - **Bow**: a stick-slip friction bow (two waveguides either side of the bow) with pressure and speed; MPE pressure and channel aftertouch increase bow pressure.
     - **Hammer**: a felt hammer whose contact gets shorter (brighter) with velocity and HAMMER hardness. EXCITE POS is the strike point (1/8 by default).
@@ -279,8 +330,8 @@ Oscillators work like Phase Plant modules, one full-size card each on PLAY. A ne
   - **Live** (ilanaSynth FX): the incoming audio, with LEVEL and PAN, into the filters, FM and effects.
 - **Spectral warp** (wavetable mode): Stretch, Shift, Odd/Even, Formant, Smear, Harmonic Cut, Low Pass, High Pass, Phase Disperse, Random Amps or Skew, with an amount. The display shows the warped wave.
 - **Warp modes**: Sync, Bend +, Bend −, PWM, Mirror, Asym, Quantize, Formant, Squeeze, FM, Ring and **FM from Noise** (the NOISE card's generator as the modulator), and the Casio CZ's phase distortion: PD Saw, PD Square, PD Pulse and the resonant PD Res I–III (try them on the Sine table).
-  - The **WARP 2** row is a second warp stage after the first; route an envelope to both for the CZ's DCW.
-  - The display draws the warped wave.
+  - The **WARP 2** row is a second warp stage after the first (it also has FM, Ring and FM Noise); route an envelope to both for the CZ's DCW.
+  - The wave display, frame trace, waterfall and spectrum draw every warp of both stages.
 - **Unison** up to 16 voices (8 in physical, sample and granular modes), with detune up to 200 cents, stereo spread, stack mode (Classic, Hypersaw, Octaves, Fifths, Center Drop, 2x Octaves, Power, Major and Minor Chord, Harmonics, Odd Harmonics) and blend.
 - **Per-oscillator controls**: level, pan, semitone and fine tuning, a filter route, chord modes, and an amp envelope picker (ENV 1–16, or the MSEG as a one-shot envelope).
 - **SUB** and **NOISE**: a dedicated sub oscillator (sine, square or saw, −1 or −2 octaves, with COLOUR) and a noise layer in six colours (White, Pink, Brown, Blue, Violet, Grey), each with its own switch, sharing a filter route.
@@ -377,31 +428,32 @@ Oscillators work like Phase Plant modules, one full-size card each on PLAY. A ne
 - **Drag a source chip or card onto any knob** to assign it.
   - Drag the coloured dot next to the knob to set the depth, or double-click the dot to remove the routing.
   - Hovering a source highlights everything it modulates.
-- **Right-click any knob** for quick modulation, reset, copy/paste and MIDI learn.
+- **Right-click any knob** for quick modulation, reset, copy/paste and MIDI learn. Each route into the knob has its own submenu: Unipolar, Negative, Bipolar, Stereo, a typed amount, Bypass or Remove.
+- **Per-voice routes**: a per-note source (velocity, key track, random, an envelope or a retriggered LFO) on an engine knob (string, bow, hammer, pickup, SIZE, SCALE, grain, sample fades, WARP 2, BODY, WEST and the rest) gives each voice its own value, set at note-on.
 - **Eight macros** with editable names (double-click a name), in the dock as two pages of four (a dot marks a page with a macro in use). Every factory preset names its macros for what they do, and EVOLVE can drift them.
 
-### Effects rack (10 slots, 41 module types)
+### Effects rack (10 slots, 42 module types)
 **Modules:**
 - **Drive and dynamics**: Drive (tube / fuzz / clean), Bit Crusher, Amp, Compressor, OTT, Limiter, Utility
 - **Modulation**: Chorus, Phaser, Flanger, Dimension, Tremolo, Comb
 - **Delay and time**: Delay (with tape pitch and wow), Multi-Tap delay with a drawable tap grid, Feedback, Tape Stop
 - **Space and texture**: Reverb (Room, Hall, Plate, Shimmer, Spring, Gated, and user IR loading), Smear, Freeze, Granular Stutter (reverse and pitch)
 - **Vocoder**: a channel vocoder (8–24 bands) driven by the audio input or a built-in Talk modulator
-- **Trance Gate**: patterns or up to 16 custom steps, with swing
-- **Tone**: Tilt EQ, 3-band parametric EQ
+- **Trance Gate**: up to 16 custom steps or patterns, among them seven classic chops (16ths, 8ths, Offbeat 8ths, Classic 1101, Trance x.xx, 3-3-2, Stutter), with swing and **LENGTH**, how much of each step stays open so neighbouring steps retrigger
+- **Tone**: Tilt EQ, 3-band parametric EQ, and **Filter**: any of the 39 filter models on the rack, so a PATCH loop can run through one
 - **Stereo and pitch**: Haas, Stereo Width, Frequency Shifter, Ring Mod, Octaver, Vowel filter
 - **Airwindows**: 54 of Chris Johnson's Airwindows algorithms (MIT), in one all-in-one module and in ten category modules (Tape, Saturation, Reverb, Delay, Modulation, Dynamics, EQ, Console, Lo-Fi, Stereo), picked from a menu by family: tape and saturation (ToTape6, IronOxide5, Density, Spiral2, Tube2, Mojo...), consoles (Console7, Channel9), EQ (Air, Capacitor2, Baxandall2, Isolator2, Holt2), dynamics (Pressure5, ButterComp2, Logical4, Pop2), space (Galactic, kCathedral, Verbity2, Chamber, MatrixVerb), stereo (Wider, Srsly2, ToVinyl4), lo-fi (DeRez2, Deckwrecka, BitShiftGain) and character (DrumSlam, Inflamer, Flutter, ChorusEnsemble); the knobs take each algorithm's own names
 
 **Rack controls:**
-- Modules are coloured by family and stacked in a scrollable view.
+- Modules are coloured by family, every card the same size, stacked in a scrollable view. Cards can be duplicated, copied, pasted and reset.
 - Every slot has bypass, blend, solo and a per-slot CPU readout.
 - Drag rows to reorder them; bypass, solo and blend move with the effect.
 - An empty rack offers one-click Reverb, Delay, Chorus, Drive, OTT, Trance Gate, Phaser and EQ.
-- **A/B chains**, with copy A to B and save/load of whole chains.
+- **A/B chains**, with copy A to B, copy and paste of whole chains, saved chains in the CHAIN menu, and **KEEP FX** to keep the rack while you load presets.
 - The OUTPUT strip has the soft clipper and clip gain.
 
 ### Voice & global
-- **Voices**: 32-voice polyphony with a voice limit, Poly, Mono and Legato modes, and optional multi-core rendering (settings menu) that is byte-identical to single-threaded.
+- **Voices**: 32-voice polyphony with a voice limit, Poly, Mono and Legato modes, and multi-core rendering on real-time threads (settings menu) that is byte-identical to single-threaded.
 - **VOICE in the dock**: voice mode, voices, pitch-bend range, glide and LEGATO (glide only between held notes).
 - **MPE mode** in the settings menu.
 - **Microtuning**: Scala scales (.scl) with optional keyboard mappings (.kbm) from the settings menu (Tuning); saved inside the patch, STRETCH still applies on top.
@@ -414,7 +466,7 @@ Oscillators work like Phase Plant modules, one full-size card each on PLAY. A ne
 - Stereo meters with click-to-solo.
 
 ### Interface
-- **Design**: calm flat graphite with one accent colour (4 themes), Manrope type with fixed-width digits, and glowing, animated controls: knob arcs flare as they move, switches slide, lit buttons breathe. Resize it from the corner (75–200%) or from the settings menu.
+- **Design**: calm flat graphite with one accent colour (5 skins: Ember, Ice, Acid, Neon and Neon to Ice), Manrope type with fixed-width digits, and glowing, animated controls: knob arcs flare as they move, switches slide, lit buttons breathe. Resize it from the corner (75–200%) or from the settings menu. On Windows and Linux it is drawn with **Vulkan** (Settings > Vulkan rendering), falling back to Direct2D or OpenGL.
 - **Tabs**: **PLAY** (oscillators, filters, strings and keys, WEST COAST, envelopes, LFOs, BODY, sub and noise on one page, plus the VECTOR pad), **MATRIX**, **FM**, **SEQ**, **FX** and **PATCH**; tabs with several pages switch them at the right of the tab row. Ctrl / Cmd + 1–6 switch tabs. Switched-off oscillators are dimmed, and the FX rack lists only the slots in use plus one to add to.
 - **Header**:
   - preset name with category and an EDITED marker
@@ -427,7 +479,7 @@ Oscillators work like Phase Plant modules, one full-size card each on PLAY. A ne
 - **The dock**: the modulation source chips (each shows its route count and a live trace; click one to open its editor, drag it onto a knob), VOICE, STEREO, the macros in two pages of four, master and an output meter (it lights red after a clip; click to reset). The on-screen keyboard opens with KEYS.
   - A source chip glows with its source's live value while that source modulates something.
 - **Help**: tooltips on hover, and a welcome tour (re-open it with the `?` button).
-- **Presets**: 703 factory presets: 415 sound-design presets in Bass, Lead, Pluck, Pad, Keys, Chords, Arp, Drone, Drums, Generative and FX, and 288 DX7 voices (the ROM banks and Dexed) filed by bank. The browser has search (names, categories and tags), favourites, user presets (including `.syx` import) and can dock as a side panel.
+- **Presets**: 730 factory presets: 442 sound-design presets in Bass, Lead, Pluck, Pad, Keys, Chords, Arp, Drone, Drums, Generative and FX, and 288 DX7 voices (the ROM banks and Dexed) filed by bank. The browser has search (names, categories and tags), favourites, user presets (including `.syx` import) and can dock as a side panel.
 
 ---
 
@@ -574,4 +626,4 @@ Third-party parts keep their own licences:
 
 ---
 
-*ilanaSynth beta 1.4: El Sinte de Big Ilana Da GOAT. Para un sonido más bruto.*
+*ilanaSynth beta 1.4, page updated 17 November 2026: El Sinte de Big Ilana Da GOAT. Para un sonido más bruto.*
