@@ -213,8 +213,8 @@ private:
     void showHistoryMenu();
     bool isFavourite (const juce::String& presetName) const;
     void toggleFavourite();
-    void toggleAB();
 public:
+    void toggleAB(); // (public for the UI test)
     // The A|B button's right-click: copy one side to the other (item 24; public for the UI test).
     void copyAB (bool aToB);
     bool isShowingA() const { return showingA; }
@@ -509,8 +509,10 @@ private:
     void rememberLoadedFingerprint();
     void adoptLoadedFingerprint();
 
-    juce::ValueTree slotA, slotB;
-    bool showingA = true;
+    // The A|B slots live in the processor so they outlive this editor.
+    juce::ValueTree& slotA;
+    juce::ValueTree& slotB;
+    bool& showingA;
     int currentPresetIndex = -1;
     juce::String shownPresetName;
     int themeIndex = 0;

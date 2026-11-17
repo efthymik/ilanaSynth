@@ -25,6 +25,10 @@ class FxPage : public juce::Component,
                private IlanaAnim::FrameTimer
 {
 public:
+    // KEEP FX (the CHAIN menu): while on, loading a preset leaves the rack as it is (the editor
+    // puts the chain back after the load). Editor-side, never saved.
+    static bool& keepRackOnPresetLoad() { static bool on = false; return on; }
+
     explicit FxPage (IlanaSynthAudioProcessor& p);
 
     void paint (juce::Graphics& g) override;
@@ -160,6 +164,8 @@ private:
     SettingsClip settingsClip;
 
     void saveChain();
+
+    void updateKeepMark();
 
     void loadChain();
 

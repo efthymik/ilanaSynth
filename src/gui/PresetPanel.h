@@ -469,7 +469,7 @@ public:
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
         const auto count = juce::String (filtered.size()) + " of " + juce::String (names.size() - repeatCount());
         // The same keys docked and floating (review 7).
-        const auto keys = juce::String (juce::CharPointer_UTF8 ("Up/Down browse  \xc2\xb7  Space play  \xc2\xb7  Enter keep  \xc2\xb7  Esc close"));
+        const auto keys = juce::String (juce::CharPointer_UTF8 ("Up/Down browse  \xc2\xb7  Space play  \xc2\xb7  Ctrl+L favourite  \xc2\xb7  Enter keep  \xc2\xb7  Esc close"));
 
         // One layout floating and docked: the count after the title, the keys
         // centred (review 11, S11-15).
@@ -626,7 +626,7 @@ public:
 
     bool isAuditioning() const { return auditioning; }
     bool isPlayLit() const { return playButton.getToggleState(); } // (PLAY lights while the note sounds; the UI test reads it)
-    juce::String getAuditionCaption() const { return deleteButton.isEnabled() ? juce::String() : deleteReason(); }
+    juce::String getAuditionCaption() const { return {}; }
     juce::Rectangle<int> getPlayBounds() const { return playButton.isVisible() ? playButton.getBounds() : juce::Rectangle<int>(); }
     juce::Rectangle<int> getDockBounds() const { return dockButton.getBounds(); }
     juce::Rectangle<int> getFooterButtonBounds() const { return surpriseButton.getBounds(); }
@@ -689,7 +689,7 @@ private:
        #endif
     }
 
-    static constexpr int rowHeight = 28, wideWidth = 900;
+    static constexpr int rowHeight = 22, wideWidth = 900;
 
     // The list sits in a recessed frame; its height is a whole number of
     // rows, so the last row is never cut in half (the frame keeps the
@@ -748,20 +748,8 @@ private:
 
         auto area = detailsArea.reduced (14, Space::s12); // off-grid
 
-        // The foot: PLAY, with the reason DELETE is off above it.
+        // The foot: PLAY and AUTO-PLAY.
         area.removeFromBottom (28 + 8);
-        {
-            const auto reason = deleteReason();
-
-            if (reason.isNotEmpty())
-            {
-                const auto caption = area.removeFromBottom (32); // off-grid
-                area.removeFromBottom (Space::s4);
-                g.setColour (IlanaTheme::Ui::text3);
-                g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
-                IlanaTheme::drawFitted (g, reason, caption, juce::Justification::bottomLeft, 2);
-            }
-        }
 
         if (! juce::isPositiveAndBelow (index, names.size()))
         {
@@ -901,6 +889,14 @@ private:
             }
         }
 
+        if (named == 0 && area.getHeight() >= 16 + 10 + 18)
+        {
+            heading ("MACROS");
+            g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label));
+            g.setColour (IlanaTheme::Ui::text3);
+            g.drawText ("None named", area.removeFromTop (18), juce::Justification::centredLeft); // off-grid
+        }
+
         if (named > 0 && area.getHeight() >= 16 + 10 + 18)
         {
             heading ("MACROS");
@@ -967,6 +963,11 @@ private:
                                  + (value (id + "_bypass") > 0.5f ? dot + "Bypassed" : juce::String()));
             }
             rows ("EFFECTS", effects.isEmpty() ? juce::StringArray { "|None" } : effects);
+
+            auto routeCount = 0;
+            for (int slot = 0; slot < Mod::maxSlots; ++slot)
+                routeCount += processorRef.readModSlot (slot).source != Mod::Source::None ? 1 : 0;
+            rows ("MODULATION", { "|" + juce::String (routeCount) + (routeCount == 1 ? " route" : " routes") });
         }
     }
 
@@ -984,13 +985,6 @@ private:
         autoPlayButton.setBounds (foot.removeFromRight (juce::jmin (112, foot.getWidth() / 2)));
         foot.removeFromRight (Space::s6);
         playButton.setBounds (foot);
-    }
-
-    juce::String deleteReason() const
-    {
-        return juce::isPositiveAndBelow (selectedPreset, names.size()) && ! isUserPreset (selectedPreset)
-                   ? juce::String ("DELETE is for your own presets; factory presets can't be deleted.")
-                   : juce::String();
     }
 
     static constexpr int auditionNote = 60, auditionMs = 1000;
@@ -1186,7 +1180,7 @@ private:
 
             // The DX7 pack and its banks are a source filter, not a tag
             // (S15-11): named, and ruled off from the tags under them.
-            if (hasSourceRow())
+            if (hasSourceLabel())
             {
                 g.setColour (IlanaTheme::Ui::text3);
                 g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
@@ -1257,6 +1251,19 @@ private:
         static constexpr int chipHeight = 22, gap = 5, groupGap = 13, sourceLabelWidth = 56, sourceRuleGap = 10;
 
         bool hasSourceRow() const { return ! entries.empty() && entries.front().kind == source; }
+        // The lone DX7 chip (no banks showing) starts the tag row instead of a row of its own.
+        bool sourceJoinsTags() const
+        {
+            if (! hasSourceRow())
+                return false;
+
+            for (const auto& entry : entries)
+                if (entry.kind == bank)
+                    return false;
+
+            return true;
+        }
+        bool hasSourceLabel() const { return hasSourceRow() && ! sourceJoinsTags(); }
 
         static juce::Font font() { return juce::Font (IlanaTheme::font (IlanaTheme::TextSize::minInteractive, true)); }
 
@@ -1278,7 +1285,7 @@ private:
             };
 
             // "SOURCE" before the pack chip: the first row is not tags.
-            auto x = hasSourceRow() ? sourceLabelWidth - gap : 0, y = 0;
+            auto x = hasSourceLabel() ? sourceLabelWidth - gap : 0, y = 0;
             auto previousKind = -1;
             auto tagCount = 0;
 
@@ -1325,10 +1332,10 @@ private:
 
                 // The tags get a line of their own under the DX7 and bank
                 // chips (review 7: one row mixed the two).
-                if (entry.kind == tag && newGroup && x > 0)
+                if (entry.kind == tag && newGroup && x > 0 && ! sourceJoinsTags())
                 {
                     x = 0;
-                    y += chipHeight + (hasSourceRow() ? sourceRuleGap : gap);
+                    y += chipHeight + (hasSourceLabel() ? sourceRuleGap : gap);
                 }
 
                 auto startX = x + (x > 0 ? (newGroup ? groupGap : gap) : 0);
@@ -1908,7 +1915,17 @@ private:
             return true;
         }
 
-        if (key == juce::KeyPress::spaceKey && origin == &list)
+        if (key.getModifiers().isCommandDown() && ! key.getModifiers().isShiftDown() && key.getKeyCode() == 'L')
+        {
+            const auto row = list.getSelectedRow();
+
+            if (juce::isPositiveAndBelow (row, filtered.size()))
+                toggleFavourite (filtered[row]);
+
+            return true;
+        }
+
+        if (key == juce::KeyPress::spaceKey && (origin == &list || (origin == &search && search.isEmpty())))
         {
             startAudition();
             return true;
@@ -2590,7 +2607,7 @@ private:
         const auto canDelete = juce::isPositiveAndBelow (selectedPreset, names.size()) && isUserPreset (selectedPreset);
         deleteButton.setEnabled (canDelete);
         deleteButton.setTooltip (canDelete ? "Move '" + names[selectedPreset] + "' to the " + binName()
-                                           : juce::String ("Delete\nFactory presets can't be deleted: select one of your own (User) to delete it."));
+                                           : juce::String ("Delete\nDELETE is for your own presets; factory presets can't be deleted. Select one of your own (User) to delete it."));
         repaint (detailsArea);
     }
 

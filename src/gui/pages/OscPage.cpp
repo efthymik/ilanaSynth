@@ -1781,7 +1781,6 @@ std::vector<IconPicker::Item> OscPage::tintedExciterIcons ()
 {
     const auto engines = exciterIcons();
     static const int glyphOf[] { 9, 12, 13, 7, 2, 10 }; // piano, guitar, bowed, e-piano, driven, feedback
-    static const juce::uint32 tints[] { 0xffff7a5c, 0xffe9b45c, 0xffb48cff, 0xff5fc6e8, 0xff7fd68a, 0xffff6fae };
     static const char* const tips[] {
         "MODAL a measured grand, partial by partial; HAMMER the waveguide piano; BRIGHT its first, harder hammer.",
         "MODAL a measured nylon guitar (SIZE the box, SCALE the neck); BURST and NOISE pluck the waveguide string.",
@@ -1796,7 +1795,9 @@ std::vector<IconPicker::Item> OscPage::tintedExciterIcons ()
         item.name = juce::String (Exciters::types()[(size_t) t].name).toLowerCase();
         item.name = item.name.substring (0, 1).toUpperCase() + item.name.substring (1);
         item.tip = tips[t];
-        item.tint = juce::Colour (tints[t]);
+        // (No family tints: the icons stand in the label grey and only the chosen one takes the oscillator's colour, audit 29.
+        // Hovering one names it in the tooltip.)
+        item.tint = {};
         items.push_back (item);
     }
     return items;
@@ -3366,6 +3367,7 @@ void OscPage::updateCardPictures ()
         aux[(size_t) index]->octDown.setEnabled (canStepOctave (index, -1));
         aux[(size_t) index]->octUp.setEnabled (canStepOctave (index, 1));
         updateStatus (index);
+        dimSampleButtons (index);
 
         const auto* sample = processorRef.getSampleForOsc (index);
         aux[(size_t) index]->sampleNameButton.setCaptionAndName (kindOf (index) == Kind::grain ? "SOURCE" : "SAMPLE",
@@ -3933,6 +3935,21 @@ void OscPage::updateEnabled ()
         for (auto* knob : { &osc.warpAmt, &osc.warp2Amt, &osc.spectralAmt, &osc.uniBlend, &osc.uniFrame, &osc.uniWarp, &osc.spread })
             knob->refreshValueText();
 
+        // At one voice the unison rings carry no meaning: draw their value arcs in the idle grey (still draggable), so
+        // raising VOICES is what lights the row (audit 13).
+        {
+            const auto oneVoice = juce::roundToInt (readFloat (prefix + "_unison")) <= 1;
+            for (auto* knob : { &osc.detune, &osc.uniBlend, &osc.uniFrame, &osc.uniWarp, &osc.spread })
+            {
+                auto& properties = knob->getSlider().getProperties();
+                if (oneVoice != (bool) properties.getWithDefault ("idleArc", false))
+                {
+                    properties.set ("idleArc", oneVoice);
+                    knob->getSlider().repaint();
+                }
+            }
+        }
+
         // A switched-off oscillator dims in place, the same size.
         const auto alpha = enabled ? 1.0f : 0.55f;
         auto& pieces = *aux[(size_t) index];
@@ -3956,6 +3973,7 @@ void OscPage::updateEnabled ()
         pieces.sampleExportButton.setAlpha (alpha);
         pieces.sampleZonesButton.setAlpha (alpha);
         pieces.sampleDetectButton.setAlpha (alpha);
+        dimSampleButtons (index);
         // The FILTER choice, the OUT bar and the remove cross dim too, so an
         // off card reads as off at a glance (Impeccable audit, P1).
         pieces.routeBar.setAlpha (alpha);
@@ -3968,6 +3986,21 @@ void OscPage::updateEnabled ()
     }
 
     effectRules.apply();
+}
+
+// With no sample loaded, EXPORT, SLICE, ZONES and DETECT have nothing to act on:
+// dim and disable them so LOAD... and RESAMPLE are the lit ones (audit 6).
+void OscPage::dimSampleButtons (int index)
+{
+    auto& pieces = *aux[(size_t) index];
+    const auto* sample = processorRef.getSampleForOsc (index);
+    const auto loaded = sample != nullptr && sample->getNumSamples() >= 2;
+    const auto baseAlpha = pieces.sampleLoadButton.getAlpha(); // 1 or the off-card dim
+    for (auto* button : { &pieces.sampleExportButton, &pieces.sampleSliceButton, &pieces.sampleZonesButton, &pieces.sampleDetectButton })
+    {
+        button->setEnabled (loaded);
+        button->setAlpha (loaded ? baseAlpha : juce::jmin (baseAlpha, IlanaTheme::dimmedAlpha * 0.6f));
+    }
 }
 
 juce::String OscPage::voiceModeName () const

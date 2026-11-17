@@ -1404,6 +1404,7 @@ private:
     static void setGroupEnabled (std::initializer_list<juce::Component*> controls, bool enabled);
 
     void updateEnabled();
+    void dimSampleButtons (int index);
 
     // The VOICE group's quiet state: the mode, so the tab says what lives in it.
     juce::String voiceModeName() const;

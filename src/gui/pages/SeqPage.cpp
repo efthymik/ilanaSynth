@@ -94,7 +94,7 @@ SeqPage::SeqPage (IlanaSynthAudioProcessor& p, Part partIn)
     // The Generative card: ARP, EUCLID and PROB SEQ share one card.
     addAll (*this, engineTabs, euclidDisplay, eucTarget, eucDiv, eucSteps, eucHits, eucRotate, eucGate,
             pseqEditor, pseqDiv, pseqLength, pseqGate, clipEditor, clipIndex, clipMode, clipBars,
-            clipGrid, clipImport, clipExport, clipDraw);
+            clipGrid, clipImport, clipExport, clipPrint, clipDraw);
     // One gate for SNAP TO KEY and STRUM: their switches do "off", so
     // the menus beside them list only what is on (review 9, S9-9).
     for (auto* control : { &genScale, &sprayStrum })
@@ -129,6 +129,9 @@ SeqPage::SeqPage (IlanaSynthAudioProcessor& p, Part partIn)
             exportMidiFile();
     };
     clipExport.makeFile = [this] { return writeClipForDrag(); };
+    clipPrint.setButtonText ("PRINT TO CLIP");
+    clipPrint.setTooltip (printTooltip (true));
+    clipPrint.onClick = [this] { printToClip(); };
     clipQuantise.setButtonText ("QUANTISE");
     clipQuantise.setTooltip ("Quantise\nMoves the selected notes' starts (every note's, with none selected) to the nearest "
                              "GRID line, in one undo step. Q in the roll does the same.");
@@ -211,7 +214,7 @@ SeqPage::SeqPage (IlanaSynthAudioProcessor& p, Part partIn)
         for (auto* control : std::initializer_list<juce::Component*> {
                  &engineTabs, &euclidDisplay, &eucTarget, &eucDiv, &eucSteps, &eucHits, &eucRotate, &eucGate,
                  &pseqEditor, &pseqDiv, &pseqLength, &pseqGate, &clipEditor, &clipIndex, &clipMode, &clipBars,
-                 &clipGrid, &clipImport, &clipExport, &clipDraw, &arpLanes, &arpMode, &arpDiv,
+                 &clipGrid, &clipImport, &clipExport, &clipPrint, &clipDraw, &arpLanes, &arpMode, &arpDiv,
                  &arpOctaves, &arpGate, &arpChance, &genScale, &genRoot, &genSnap, &sprayOn, &sprayDirection, &sprayStrum,
                  sprayCount.get(), sprayRange.get(), spraySpread.get(), sprayChance.get(), sprayVelocity.get(), strumTime.get(),
                  &arpSteps, &noteChain, &scaleSwitch, &strumSwitch, &clipZoom, &clipQuantise, &clipExpand })
@@ -509,15 +512,15 @@ void SeqPage::layoutNotes (juce::Rectangle<int> right)
         clipEditor.setBounds (rowDisplay.withBottom (clipRow.getY() - 6));
         // Three groups with a gap between them (review 12, S12-3): what
         // plays (SLOT, MODE, LENGTH), how you edit (GRID, ZOOM, DRAW,
-        // QUANTISE), the files (IMPORT, EXPORT). COLLAPSE is in the title.
+        // QUANTISE), the files (IMPORT, EXPORT, PRINT). COLLAPSE is in the title.
         constexpr int groupGap = 22;
-        const auto column = (clipRow.getWidth() - 2 * groupGap) / 9;
+        const auto column = (clipRow.getWidth() - 2 * groupGap) / 10;
         auto rest = clipRow;
         const auto playsRow = rest.removeFromLeft (column * 3);
         rest.removeFromLeft (groupGap);
         const auto editRow = rest.removeFromLeft (column * 4);
         rest.removeFromLeft (groupGap);
-        const auto filesRow = rest.removeFromLeft (column * 2);
+        const auto filesRow = rest.removeFromLeft (column * 3);
         layoutRow (playsRow, { &clipIndex, &clipMode, &clipBars });
         layoutRow (editRow, { &clipGrid, &clipZoom, nullptr, nullptr });
 
@@ -525,9 +528,10 @@ void SeqPage::layoutNotes (juce::Rectangle<int> right)
         auto cell = clipZoom.getBounds().translated (column, 0).withTrimmedTop (13).withHeight (24);
         clipDraw.setBounds (cell);
         clipQuantise.setBounds (cell.translated (column, 0));
-        // (An 8 px gap between the two buttons, as the toolbar's others have: S13-8.)
+        // (An 8 px gap between the buttons, as the toolbar's others have: S13-8.)
         clipImport.setBounds (cell.withX (filesRow.getX()).withWidth (column - 4));
         clipExport.setBounds (clipImport.getBounds().translated (column + 4, 0));
+        clipPrint.setBounds (clipExport.getBounds().translated (column + 4, 0));
         clipDivider = juce::Rectangle<int> (editRow.getX() - groupGap / 2, playsRow.getY() + 8, 1, playsRow.getHeight() - 8);
         clipDivider2 = juce::Rectangle<int> (filesRow.getX() - groupGap / 2, playsRow.getY() + 8, 1, playsRow.getHeight() - 8);
     }
@@ -564,15 +568,17 @@ void SeqPage::layoutGenerate ()
         { { &sprayDirection, 1.05f }, { sprayCount.get(), sprayKnob }, { sprayRange.get(), sprayKnob },
           { spraySpread.get(), sprayKnob }, { sprayChance.get(), sprayKnob }, { sprayVelocity.get(), sprayKnob } }
     };
+    // (MODE is wider, so "UpDown", "Converge" and "Scale Random" read whole; SPRAY's five rings give the width
+    // back: UI review 29, B1. The rings' cells get the width their ring needs, below.)
+    const std::vector<Item> arpItems { { &arpDiv, 0.9f }, { &arpMode, 1.95f }, { &arpSteps, 0.75f }, { &arpGate, 0.75f },
+                                       { &arpOctaves, 0.75f }, { &arpChance, 0.75f } };
     engineBox = {};
     if (engineTabs.getSelected() != 3)
     {
         const auto engine = engineTabs.getSelected();
         std::vector<Item> items;
         if (engine == 0)
-            // (MODE is wider, so "UpDown", "Converge" and "Scale Random" read whole; SPRAY's five rings give the width
-            // back: UI review 29, B1.)
-            items = { { &arpDiv, 0.9f }, { &arpMode, 1.95f }, { &arpSteps, 0.75f }, { &arpGate, 0.75f }, { &arpOctaves, 0.75f }, { &arpChance, 0.75f } };
+            items = arpItems;
         else if (engine == 1)
             items = { { &eucDiv, 1.0f }, { &eucTarget, 1.55f }, { &eucSteps, 0.7f }, { &eucGate, 0.7f }, { &eucHits, 0.7f }, { &eucRotate, 0.7f } };
         else
@@ -587,58 +593,102 @@ void SeqPage::layoutGenerate ()
     // KEY and MODE. Each menu gets the width its longest value needs at the select text size (a very long list is
     // judged by its first 52 px), taken from the knobs' share.
     const auto nameFont = juce::Font (IlanaTheme::font (IlanaTheme::TextSize::label, true).withKerningFactor (0.07f));
-    for (auto& group : groups)
-        for (auto& item : group)
+    // A ring's cell: the ring, the cell's 3 px a side and a hair, so no ring is cut (UI audit 9).
+    constexpr float ringCell = 44.0f; // (the ring 40 and its cell's 3 px a side, less what a ring's own margin gives; VELOCITY's name fits)
+    const auto fit = [&] (Item& item)
+    {
+        if (auto* menu = dynamic_cast<ComboControl*> (item.control))
         {
-            if (auto* menu = dynamic_cast<ComboControl*> (item.control))
-            {
-                const juce::Font font (IlanaTheme::font (IlanaLookAndFeel::selectText));
-                auto widest = 0.0f;
-                const auto& box = menu->getComboBox();
-                for (int i = 0; i < box.getNumItems(); ++i)
-                    widest = juce::jmax (widest, (float) juce::GlyphArrangement::getStringWidth (font, box.getItemText (i)));
-                item.pixels = juce::jmin (widest, 52.0f) + 23.0f + 3.0f + 6.0f; // (the arrow's 23 px, the label's borders, the cell's 3 px a side)
-            }
-            // (OCTAVES' and SNAP PLAYED's names keep their room too.)
-            else if (item.control == &arpOctaves)
-                item.pixels = 47.0f;
-            else if (item.control == &genSnap)
-                item.pixels = (float) juce::GlyphArrangement::getStringWidthInt (nameFont, "SNAP PLAYED") + 6.0f + 4.0f;
+            const juce::Font font (IlanaTheme::font (IlanaLookAndFeel::selectText));
+            auto widest = 0.0f;
+            const auto& box = menu->getComboBox();
+            for (int i = 0; i < box.getNumItems(); ++i)
+                widest = juce::jmax (widest, (float) juce::GlyphArrangement::getStringWidth (font, box.getItemText (i)));
+            item.pixels = juce::jmin (widest, 52.0f) + 23.0f + 3.0f + 6.0f; // (the arrow's 23 px, the label's borders, the cell's 3 px a side)
+            // The name reads whole at its own size (a label squeezes its text to fit: DIRECTION did).
+            item.pixels = juce::jmax (item.pixels, (float) juce::GlyphArrangement::getStringWidthInt (nameFont, menu->getLabelText()) + 5.0f + 6.0f);
         }
-    // (STRUM's title and its switch need 130 px: its TIME knob takes up what DIRECTION leaves.)
-    {
-        auto& strum = groups[merged ? 2 : 1];
-        strum.back().pixels = juce::jmax (strum.back().pixels, 130.0f - (float) padding * 2.0f - strum.front().pixels);
-    }
-    const auto boxCount = (int) groups.size();
-    const auto available = (float) (area.getWidth() - gap * (boxCount - 1) - padding * 2 * boxCount);
-    std::vector<Item*> flat;
+        // (OCTAVES' and SNAP PLAYED's names keep their room too.)
+        else if (item.control == &arpOctaves)
+            item.pixels = 47.0f;
+        else if (item.control == &genSnap)
+            item.pixels = (float) juce::GlyphArrangement::getStringWidthInt (nameFont, "SNAP PLAYED") + 6.0f + 4.0f;
+
+        for (juce::Component* ring : std::initializer_list<juce::Component*> { &arpSteps, &arpGate, &arpOctaves, &arpChance, &eucSteps, &eucHits, &eucRotate, &eucGate, &pseqLength, &pseqGate,
+                           sprayCount.get(), sprayRange.get(), spraySpread.get(), sprayChance.get(), sprayVelocity.get(), strumTime.get() })
+            if (item.control == ring)
+                item.pixels = juce::jmax (item.pixels, ringCell);
+    };
     for (auto& group : groups)
         for (auto& item : group)
-            flat.push_back (&item);
-    // A menu keeps its weight's share unless its values need more: those are pinned to their width, the rest share what is left.
-    auto unit = 0.0f;
+            fit (item);
+    // (STRUM's title and its switch need 130 px: its TIME knob takes up what DIRECTION leaves.)
+    const auto padStrum = [] (std::vector<std::vector<Item>>& gs)
     {
-        std::vector<bool> pinned (flat.size(), false);
+        auto& strum = gs[gs.size() == 4 ? 2 : 1];
+        strum.back().pixels = juce::jmax (strum.back().pixels, 130.0f - (float) padding * 2.0f - strum.front().pixels);
+    };
+    padStrum (groups);
+    // (The engine's box keeps its title's room: PROB SEQ's two rings left "the pattern" cut.)
+    if (merged)
+    {
+        auto total = 0.0f;
+        for (const auto& item : groups[0])
+            total += item.pixels > 0.0f ? item.pixels : item.weight * 50.0f;
+        groups[0].back().pixels = juce::jmax (groups[0].back().pixels, groups[0].back().pixels + 190.0f - (float) padding * 2.0f - total);
+    }
+    // A menu keeps its weight's share unless its values need more: those are pinned to their width, the rest share what is left.
+    const auto solve = [&] (std::vector<std::vector<Item>>& gs, std::vector<bool>& pinned)
+    {
+        const auto count = (int) gs.size();
+        const auto available = (float) (area.getWidth() - gap * (count - 1) - padding * 2 * count);
+        std::vector<Item*> flat;
+        for (auto& group : gs)
+            for (auto& item : group)
+                flat.push_back (&item);
+        pinned.assign (flat.size(), false);
+        auto result = 0.0f;
         for (auto pass = 0; pass < 8; ++pass)
         {
             auto weights = 0.0f, fixed = 0.0f;
             for (size_t i = 0; i < flat.size(); ++i)
                 (pinned[i] ? fixed : weights) += pinned[i] ? flat[i]->pixels : flat[i]->weight;
-            unit = (available - fixed) / juce::jmax (0.1f, weights);
+            result = (available - fixed) / juce::jmax (0.1f, weights);
             auto changed = false;
             for (size_t i = 0; i < flat.size(); ++i)
-                if (! pinned[i] && flat[i]->pixels > flat[i]->weight * unit)
+                if (! pinned[i] && flat[i]->pixels > flat[i]->weight * result)
                     pinned[i] = true, changed = true;
             if (! changed)
                 break;
         }
-        // (Capped, so the boxes stay a group at the left rather than spreading over the card.)
-        unit = juce::jmin (118.0f, unit);
-        for (size_t i = 0; i < flat.size(); ++i)
-            if (pinned[i])
-                flat[i]->weight = flat[i]->pixels / unit;
+        return result;
+    };
+    std::vector<bool> pinned;
+    auto unit = solve (groups, pinned);
+    // Natural width (UI audit 17): the cards keep the size they have with ARP's box beside them, and stay at the left,
+    // rather than stretching (SPRAY's dials 135 px apart) when ARP is hidden or another engine is shown.
+    if (engineTabs.getSelected() != 0)
+    {
+        auto reference = groups;
+        auto arpGroup = arpItems;
+        for (auto& item : arpGroup)
+            fit (item);
+        if (merged)
+            reference[0] = arpGroup;
+        else
+        {
+            reference.insert (reference.begin(), arpGroup);
+        }
+        std::vector<bool> referencePinned;
+        unit = juce::jmin (unit, solve (reference, referencePinned));
     }
+    // (Capped, so the boxes stay a group at the left rather than spreading over the card.)
+    unit = juce::jmin (118.0f, unit);
+    // (What a menu or ring needs stays whole at this unit.)
+    for (auto& group : groups)
+        for (auto& item : group)
+            if (item.pixels > item.weight * unit)
+                item.weight = item.pixels / unit;
     std::vector<juce::Rectangle<int>*> boxes { &snapBox, &strumBox, &sprayBox };
     std::vector<juce::Component*> switches { &scaleSwitch, &strumSwitch, &sprayOn };
     if (merged)
@@ -647,6 +697,20 @@ void SeqPage::layoutGenerate ()
         switches.insert (switches.begin(), nullptr);
     }
     auto x = (float) area.getX();
+    // With no generator card shown (CLIP) the three cards share the row, their controls staying at the standard
+    // pitch from each card's left inset (nothing spread apart).
+    auto extra = 0.0f;
+    if (engineTabs.getSelected() == 3)
+    {
+        auto used = (float) gap * (float) (groups.size() - 1);
+        for (const auto& group : groups)
+        {
+            for (const auto& item : group)
+                used += item.weight * unit;
+            used += (float) padding * 2.0f;
+        }
+        extra = juce::jmax (0.0f, ((float) area.getWidth() - used) / (float) groups.size());
+    }
 
     for (size_t g = 0; g < groups.size(); ++g)
     {
@@ -654,7 +718,7 @@ void SeqPage::layoutGenerate ()
         for (const auto& item : groups[g])
             weight += item.weight;
 
-        const auto width = weight * unit + (float) padding * 2.0f;
+        const auto width = weight * unit + (float) padding * 2.0f + extra;
         auto& box = *boxes[g];
         box = juce::Rectangle<int> (juce::roundToInt (x), area.getY(), juce::roundToInt (width), area.getHeight());
         x += width + (float) gap;
@@ -826,6 +890,12 @@ void SeqPage::timerCallback ()
     effectRules.apply();
     clipBars.refresh();
 
+    if (const auto hasChord = ! processorRef.getPrintChord().empty(); hasChord != clipPrint.isEnabled())
+    {
+        clipPrint.setEnabled (hasChord);
+        clipPrint.setTooltip (printTooltip (hasChord));
+    }
+
     // The engine tabs light while their engine is on (review 6, I6-15).
     if (part == Part::notes)
     {
@@ -887,7 +957,7 @@ void SeqPage::showEngineTab ()
         control->setVisible (tab == 2);
 
     for (auto* control : std::initializer_list<juce::Component*> { &clipEditor, &clipIndex, &clipMode, &clipBars,
-                                                                    &clipGrid, &clipImport, &clipExport, &clipZoom, &clipDraw, &clipQuantise, &clipExpand })
+                                                                    &clipGrid, &clipImport, &clipExport, &clipPrint, &clipZoom, &clipDraw, &clipQuantise, &clipExpand })
         control->setVisible (tab == 3);
 
     // An expanded roll folds GENERATE only while CLIP is shown.
@@ -977,6 +1047,34 @@ bool SeqPage::importMidi (const juce::File& file)
     clipEditor.reload (true);
     clipBars.refresh();
     return true;
+}
+
+juce::String SeqPage::printTooltip (bool hasChord)
+{
+    if (! hasChord)
+        return "Print to clip\nPlay a chord first: this prints what the generators would play for the chord you hold (or played last).";
+
+    return "Print to clip\nWrites what KEYS > STRUM > EUCLID > PROB SEQ > ARP play for the chord you hold (the last one you played, "
+           "if none) into the chosen clip, over its length, replacing its notes, in one undo step. Then drag it out with EXPORT MIDI.";
+}
+
+// PRINT TO CLIP: the generators' notes for the chord, offline, into the chosen clip.
+void SeqPage::printToClip ()
+{
+    const auto chord = processorRef.getPrintChord();
+
+    if (chord.empty())
+        return;
+
+    const auto index = juce::jlimit (0, ClipState::numClips - 1, (int) readValue ("clip_index"));
+    auto printed = processorRef.printGeneratorChain (chord, processorRef.getClipState().getClip (index).bars);
+    processorRef.performEdit ("Print to clip", [&]
+    {
+        processorRef.getClipState().setClip (index, std::move (printed));
+        processorRef.clipsEdited();
+    });
+    clipEditor.reload (true);
+    clipBars.refresh();
 }
 
 bool SeqPage::isInterestedInFileDrag (const juce::StringArray& files)

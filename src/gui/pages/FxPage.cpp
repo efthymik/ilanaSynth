@@ -353,6 +353,7 @@ FxPage::FxPage (IlanaSynthAudioProcessor& p)
     }
     fileButton.setTooltip ("This chain as a whole: copy it over the other chain, save it to a file, or load one into it");
     fileButton.onClick = [this] { showFileMenu(); };
+    updateKeepMark();
     // The chain's own actions are quiet.
     for (auto* quiet : { &copyChainButton, &fileButton })
     {
@@ -660,14 +661,11 @@ void FxPage::paintOutput (juce::Graphics& g)
 
     if (library->isVisible())
     {
-        auto heading = emptyHeading;
-        g.setColour (IlanaTheme::Ui::text);
-        g.setFont (IlanaTheme::font (IlanaTheme::TextSize::large, true));
-        g.drawText ("The rack is empty", heading.removeFromTop (26), juce::Justification::centredLeft); // off-grid
+        // One hint line (the heading and its sentence were a 60 px band above the tiles).
         g.setColour (IlanaTheme::Ui::text2);
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::body));
-        g.drawText ("Pick an effect to start the chain. Each one goes into the next slot; drag a row's name to reorder them.",
-                    heading.removeFromTop (20), juce::Justification::centredLeft); // off-grid
+        g.drawText ("The rack is empty. Pick an effect to start the chain; drag a row's name to reorder it.",
+                    emptyHeading, juce::Justification::centredLeft, true);
     }
 }
 
@@ -756,7 +754,7 @@ void FxPage::resized ()
     if (empty)
     {
         auto box = stackArea.reduced (Space::s12, 0);
-        emptyHeading = box.removeFromTop (60).withTrimmedTop (Space::s6); // off-grid
+        emptyHeading = box.removeFromTop (Space::s24);
         library->setBounds (box.withHeight (juce::jmin (box.getHeight(), FxLibraryView::preferredHeight() + 170)));
     }
 
@@ -1115,16 +1113,53 @@ void FxPage::showLibrary (juce::Component& target, juce::Rectangle<int> area, in
     box.updatePosition (pointAt, host->getLocalBounds()); // (with the picker's border)
 }
 
+namespace
+{
+// Copy chain / Paste chain: the same data Save chain writes, held in memory
+// (shared by every editor of the process, so it carries to another patch).
+juce::String& fxChainClipboard()
+{
+    static juce::String text;
+    return text;
+}
+} // namespace
+
+// The CHAIN button wears a dot while KEEP FX is on (loading a preset leaves the rack alone).
+void FxPage::updateKeepMark ()
+{
+    fileButton.setButtonText (juce::String::fromUTF8 (keepRackOnPresetLoad() ? "CHAIN \xe2\x80\xa2 \xe2\x96\xbe" : "CHAIN \xe2\x96\xbe"));
+    fileButton.setTooltip (keepRackOnPresetLoad() ? "This chain as a whole. KEEP FX is on: loading a preset leaves this rack as it is."
+                                                  : "This chain as a whole: copy it, save it to a file, or load one into it");
+}
+
 void FxPage::showFileMenu ()
 {
+    const auto directory = processorRef.getUserPresetDirectory();
+    const auto saved = directory.findChildFiles (juce::File::findFiles, false, "*.ilanafxchain");
+    juce::Array<juce::File> files (saved);
+    files.sort();
+
     juce::PopupMenu menu;
     menu.addItem (3, processorRef.isShowingChainA() ? "Copy to chain 2..." : "Copy to chain 1...");
     menu.addSeparator();
+    menu.addItem (4, "Copy chain");
+    menu.addItem (5, "Paste chain", fxChainClipboard().isNotEmpty());
+    menu.addSeparator();
     menu.addItem (1, "Save chain...");
     menu.addItem (2, "Load chain...");
+    menu.addSeparator();
+    menu.addItem (6, "Keep this FX rack when loading presets", true, keepRackOnPresetLoad());
+
+    if (! files.isEmpty())
+    {
+        menu.addSeparator();
+        for (int i = 0; i < files.size() && i < 64; ++i)
+            menu.addItem (100 + i, files[i].getFileNameWithoutExtension());
+    }
+
     juce::Component::SafePointer<FxPage> safeThis (this);
     menu.showMenuAsync (IlanaTheme::menuOptions (&fileButton),
-                        [safeThis] (int result)
+                        [safeThis, files] (int result)
                         {
                             if (safeThis == nullptr)
                                 return;
@@ -1134,6 +1169,33 @@ void FxPage::showFileMenu ()
                                 safeThis->loadChain();
                             else if (result == 3 && safeThis->copyChainButton.onClick != nullptr)
                                 safeThis->copyChainButton.onClick();
+                            else if (result == 6)
+                            {
+                                keepRackOnPresetLoad() = ! keepRackOnPresetLoad();
+                                safeThis->updateKeepMark();
+                            }
+                            else if (result == 4)
+                            {
+                                if (const auto xml = safeThis->processorRef.makeFxChainXml())
+                                    fxChainClipboard() = xml->toString (juce::XmlElement::TextFormat().singleLine());
+                            }
+                            else if (result == 5)
+                            {
+                                if (const auto xml = juce::XmlDocument::parse (fxChainClipboard()))
+                                {
+                                    safeThis->processorRef.getUndoManager().beginNewTransaction ("Paste FX chain");
+                                    safeThis->processorRef.applyFxChainXml (*xml);
+                                    safeThis->updateVisibility();
+                                    safeThis->repaint();
+                                }
+                            }
+                            else if (result >= 100 && result - 100 < files.size())
+                            {
+                                safeThis->processorRef.getUndoManager().beginNewTransaction ("Load FX chain");
+                                safeThis->processorRef.loadFxChainFromFile (files[result - 100]);
+                                safeThis->updateVisibility();
+                                safeThis->repaint();
+                            }
                         });
 }
 

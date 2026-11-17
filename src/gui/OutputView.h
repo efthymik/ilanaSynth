@@ -91,6 +91,7 @@ public:
 
         processorRef.copyScopeDataSmooth (scopeL.data(), scopeR.data(), fftSize);
         auto area = bounds.reduced (12.0f, 10.0f);
+        const auto wholeWell = area; // the idle message centres in the whole well, not the part left after the wave
         const auto colour = IlanaTheme::accent();
 
         auto waveArea = juce::Rectangle<float>();
@@ -119,7 +120,7 @@ public:
         {
             g.setColour (IlanaTheme::Ui::text3);
             g.setFont (IlanaTheme::font (IlanaTheme::TextSize::label, true).withKerningFactor (0.06f));
-            IlanaTheme::drawFitted (g, "PLAY A NOTE\nthe output's wave and spectrum show here", area.toNearestInt(), juce::Justification::centred, 2);
+            IlanaTheme::drawFitted (g, "PLAY A NOTE\nthe output's wave and spectrum show here", wholeWell.toNearestInt(), juce::Justification::centred, 2);
             IlanaTheme::paintGlassOverlay (g, bounds.reduced (6.0f), 5.0f);
             return;
         }

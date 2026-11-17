@@ -558,6 +558,27 @@ int main()
         editor.reset();
     }
 
+    // A|B: side B and the side playing survive the editor closing (they live in the processor).
+    {
+        IlanaSynthAudioProcessor processor;
+        processor.prepareToPlay (48000.0, 256);
+        std::unique_ptr<IlanaSynthAudioProcessorEditor> editor (static_cast<IlanaSynthAudioProcessorEditor*> (processor.createEditor()));
+        editor->setSize (1060, 720);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (100);
+        editor->toggleAB(); // A is stored, B (a copy) plays
+        check (! editor->isShowingA(), "A|B: B plays after the flip");
+        editor.reset();
+        check (processor.abSlotA.isValid() && processor.abSlotB.isValid() && ! processor.abShowingA,
+               "A|B: both slots and the side survive the editor closing");
+        editor.reset (static_cast<IlanaSynthAudioProcessorEditor*> (processor.createEditor()));
+        editor->setSize (1060, 720);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (100);
+        check (! editor->isShowingA(), "A|B: a reopened editor still shows B");
+        editor->toggleAB();
+        check (editor->isShowingA(), "A|B: the reopened editor flips back to A");
+        editor.reset();
+    }
+
     std::cout << (failures == 0 ? "FX TESTS PASSED" : "FX TESTS FAILED") << " (" << failures << " failures)" << std::endl;
     return failures == 0 ? 0 : 1;
 }

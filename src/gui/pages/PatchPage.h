@@ -169,6 +169,7 @@ public:
     std::function<void (int)> onOpenSlot;
 
     void paint (juce::Graphics& g) override;
+    void paintOverChildren (juce::Graphics& g) override;
 
     void resized() override;
 
@@ -188,6 +189,7 @@ public:
 private:
     static constexpr int toolbarHeight = 28;
     static constexpr int inspectorHeight = 70;
+    static constexpr int idleInspectorHeight = 40;
     // (FIT opens at 100 % at the most: polish pass 4; it was 1.8 x.)
     static constexpr float minZoom = 0.5f, fitMaxZoom = 1.0f, fitPadX = 60.0f, fitPadY = 90.0f;
     // The 10 px grid: voice columns 160 apart (a 130 px box and 30 px for the
@@ -253,6 +255,7 @@ private:
     static void placeStripControl (juce::Component& control, juce::Rectangle<int> cell);
 
     void layoutInspector();
+    bool inspectorIsIdle() const;
 
     // The inspector follows the selected box.
     void inspect (const PatchGraph::Node* node);

@@ -728,49 +728,13 @@ void MatrixPage::paintGhostRows (juce::Graphics& g) const
     if (heads.size() < 9)
         return;
 
-    const auto bottom = viewport.getBottom();
-    const auto stride = MatrixRow::rowHeight + 7;
     const auto ink = IlanaTheme::Ui::text3;
-    const auto rim = IlanaTheme::Ui::line;
 
     g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
     g.setColour (ink.withAlpha (0.5f));
     for (const auto& heading : heads)
         g.drawText (heading.text, heading.area, juce::Justification::centredLeft);
-
-    auto y = headerArea.getBottom() + 3;
-    for (int row = 0; y + stride - 4 <= bottom - 4; ++row, y += stride)
-    {
-        // (Behind the starters they step back further, so those read clearly.)
-        const auto behindStarters = y + stride > starterArea().getY() - 26 && y < starterArea().getBottom();
-        const auto fade = juce::jmax (0.14f, 0.7f - 0.05f * (float) row) * (behindStarters ? 0.45f : 1.0f);
-        const auto box = [&] (int column, int inset = 0) { return heads[(size_t) column].area.withY (y).withHeight (MatrixRow::rowHeight).reduced (0, inset).toFloat(); };
-        g.setColour (IlanaTheme::Ui::raised.withAlpha (0.35f * fade));
-        g.fillRoundedRectangle (juce::Rectangle<float> ((float) headerArea.getX(), (float) y - 3.0f, (float) (heads.back().area.getRight() + 30 - headerArea.getX()),
-                                                        (float) MatrixRow::rowHeight + 6.0f), 6.0f);
-        g.setColour (ink.withAlpha (fade));
-        g.drawText (juce::String (row + 1), box (0).toNearestInt(), juce::Justification::centredLeft);
-        // ON switch, SOURCE and DESTINATION boxes, VIA tile.
-        g.setColour (rim.withAlpha (fade * 1.6f));
-        g.drawRoundedRectangle (box (1, 5).withSizeKeepingCentre (30.0f, 16.0f).reduced (0.5f), 8.0f, 1.0f);
-        g.drawRoundedRectangle (box (2, 2).reduced (0.5f), 5.0f, 1.0f);
-        g.drawRoundedRectangle (box (8, 2).reduced (0.5f), 5.0f, 1.0f);
-        g.drawRoundedRectangle (box (3, 4).reduced (0.5f), 5.0f, 1.0f);
-        g.drawRoundedRectangle (box (7, 4).withSizeKeepingCentre (26.0f, box (7, 4).getHeight()).reduced (0.5f), 5.0f, 1.0f);
-        g.drawRoundedRectangle (box (6, 3).reduced (0.5f), 5.0f, 1.0f);
-        g.drawRoundedRectangle (box (5, 2).reduced (0.5f), 5.0f, 1.0f);
-        // The AMOUNT slider: a track with its thumb at the middle; the CURVE's line.
-        const auto amount = box (4);
-        g.setColour (rim.withAlpha (fade * 2.0f));
-        g.fillRect (juce::Rectangle<float> (amount.getWidth() - 56.0f, 2.0f).withCentre ({ amount.getX() + (amount.getWidth() - 56.0f) * 0.5f, amount.getCentreY() }));
-        g.setColour (ink.withAlpha (fade * 1.4f));
-        g.fillEllipse (juce::Rectangle<float> (10.0f, 10.0f).withCentre ({ amount.getX() + (amount.getWidth() - 56.0f) * 0.5f, amount.getCentreY() }));
-        g.drawText ("0%", amount.toNearestInt().withTrimmedLeft (amount.getWidth() - 44), juce::Justification::centredRight);
-        const auto curveBox = box (5, 6);
-        g.setColour (ink.withAlpha (fade * 1.2f));
-        g.drawLine (curveBox.getX() + 6.0f, curveBox.getBottom() - 2.0f, curveBox.getRight() - 6.0f, curveBox.getY() + 2.0f, 1.0f);
-        g.drawText ("+", box (6).toNearestInt().withTrimmedRight (box (6).getWidth() * 0.5f), juce::Justification::centred);
-    }
+    // (Just the column heads: the rows come with the first route.)
 }
 
 juce::Rectangle<float> MatrixPage::emptyStateCard () const
@@ -778,7 +742,7 @@ juce::Rectangle<float> MatrixPage::emptyStateCard () const
     const auto area = viewport.getBounds().withTrimmedTop (56);
     // (The dialog holds the starters and the chevron too: P-5. 346 = the 250 px of
     // text and cable, the caption line, the 74 px of starters and the chevron.)
-    return juce::Rectangle<float> (640.0f, 346.0f).withCentre (area.toFloat().getCentre()).withY ((float) area.getY() + 20.0f);
+    return juce::Rectangle<float> (640.0f, 346.0f).withCentre (area.toFloat().getCentre()).withY ((float) juce::jmax (area.getY() + Space::s8, area.getCentreY() - 173));
 }
 
 void MatrixPage::paintEmptyState (juce::Graphics& g)
@@ -1007,7 +971,7 @@ auto MatrixPage::starterRoutings ()
 juce::Rectangle<int> MatrixPage::starterArea () const
 {
     const auto area = viewport.getBounds().withTrimmedTop (56);
-    return juce::Rectangle<int> (600, 74).withCentre (area.getCentre()).withY (area.getY() + 20 + 234);
+    return juce::Rectangle<int> (600, 74).withCentre (area.getCentre()).withY (juce::jmax (area.getY() + Space::s8, area.getCentreY() - 173) + 234);
 }
 
 void MatrixPage::layoutStarters ()

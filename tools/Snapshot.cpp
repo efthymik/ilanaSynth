@@ -7423,8 +7423,8 @@ void uiGroup_REVIEW1 (UiCtx& ctx)
                     expect (! panel->isDeleteEnabled() && panel->getDeleteTooltip().containsIgnoreCase ("factory"),
                             "DELETE explains itself on a factory preset: " + panel->getDeleteTooltip());
 
-                    // S15-10: the caption says why too, and DOCK is as tall as the bottom buttons.
-                    expect (panel->getAuditionCaption().containsIgnoreCase ("factory"), "DELETE's reason is written in the details: " + panel->getAuditionCaption());
+                    // S15-10: DOCK is as tall as the bottom buttons. (UI audit 20: DELETE's reason lives in its tooltip, checked
+                    // above, so the details pane keeps its room for the preset's macros and routes.)
                     expect (panel->getDockBounds().getHeight() == panel->getFooterButtonBounds().getHeight(),
                             "DOCK is the height of the bottom buttons (" + juce::String (panel->getDockBounds().getHeight()) + " vs "
                                 + juce::String (panel->getFooterButtonBounds().getHeight()) + ")");

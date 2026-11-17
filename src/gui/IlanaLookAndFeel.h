@@ -1112,6 +1112,8 @@ public:
     static constexpr float packedMenuText = 9.0f, packedNameText = 7.5f;
     // A packed menu's text size: its own ("packedMenuSize", the OSC strip's lane menus) or the cards' 9 px.
     static float packedMenuSizeOf (const juce::ComboBox& box) { return (float) box.getProperties().getWithDefault ("packedMenuSize", packedMenuText); }
+    // The name inside a packed menu: its own ("packedNameSize": the FX rack's lone card) or the cards' 7.5 px.
+    static float packedNameSizeOf (const juce::ComboBox& box) { return (float) box.getProperties().getWithDefault ("packedNameSize", packedNameText); }
 
     // A button's corners: 8 px at 30 px high, 6 px at 24 (the sheet's .btn and .btn.sm).
     static float buttonRadius (float height) { return juce::jlimit (3.0f, 8.0f, height * 0.26f); }
@@ -1664,7 +1666,7 @@ public:
         if (slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0)
             originPos = (float) slider.valueToProportionOfLength (0.0);
         const auto originAngle = rotaryStartAngle + originPos * (rotaryEndAngle - rotaryStartAngle);
-        const auto fill = enabled ? slider.findColour (juce::Slider::rotarySliderFillColourId) : Ui::text3;
+        const auto fill = enabled && ! idleArc (slider) ? slider.findColour (juce::Slider::rotarySliderFillColourId) : idleArcColour (slider);
 
         if (std::abs (sliderPos - originPos) > 0.001f)
             strokeValueArc (g, centre, arcRadius, originAngle, angle, rotaryStartAngle, rotaryEndAngle, fill, 0.2f * flare + 0.18f * hover, stroke);
@@ -1675,6 +1677,13 @@ public:
 
         if (flare > 0.01f || (hover > 0.01f && hover < 0.99f))
             slider.repaint();
+    }
+
+    // A knob a page marks "idleArc" (unison rings at one voice) draws its value arc in the idle grey, as a disabled one does.
+    static bool idleArc (const juce::Slider& slider) { return (bool) slider.getProperties().getWithDefault ("idleArc", false); }
+    static juce::Colour idleArcColour (const juce::Slider& slider)
+    {
+        return slider.isEnabled() ? IlanaTheme::Ui::track.interpolatedWith (IlanaTheme::Ui::text3, 0.5f) : IlanaTheme::Ui::text3;
     }
 
     void drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height,
@@ -1759,8 +1768,8 @@ public:
         // (The sheet dims an idle knob as a whole, .kn.dim, its arc keeping
         // its colour under the fade; only a disabled one goes grey.)
         juce::ignoreUnused (dimmed);
-        const auto accent = enabled ? slider.findColour (juce::Slider::rotarySliderFillColourId)
-                                    : Ui::text3;
+        const auto accent = enabled && ! idleArc (slider) ? slider.findColour (juce::Slider::rotarySliderFillColourId)
+                                                          : idleArcColour (slider);
 
         // Bipolar parameters (pan, fine, bend...) fill from the centre.
         auto originPos = 0.0f;
@@ -1852,7 +1861,9 @@ public:
             const auto colour = button.getProperties().contains ("switchColour")
                                     ? juce::Colour ((juce::uint32) (int) button.getProperties()["switchColour"])
                                     : accent();
-            paintSwitch (g, bounds, amount, colour, hover);
+            // On but doing nothing (NOISE at level 0): the switch is lit in a dim, greyed colour.
+            const auto silent = (bool) button.getProperties().getWithDefault ("silentOn", false);
+            paintSwitch (g, bounds, amount, silent ? colour.interpolatedWith (Ui::text3, 0.6f) : colour, hover);
 
             if (button.hasKeyboardFocus (false))
             {
@@ -1961,7 +1972,7 @@ public:
             if (prefixW > 0)
             {
                 g.setColour (Ui::text3.withMultipliedAlpha (textOn));
-                g.setFont (font (packedNameText, true).withKerningFactor (0.09f));
+                g.setFont (font (packedNameSizeOf (box), true).withKerningFactor (0.09f));
                 g.drawText (box.getProperties()["textPrefix"].toString(), juce::Rectangle<int> (5, 0, prefixW, height), juce::Justification::centredLeft, false);
             }
             const auto value = box.getText();
@@ -1998,7 +2009,7 @@ public:
         const auto prefix = box.getProperties()["textPrefix"].toString();
         if (prefix.isNotEmpty() && (bool) box.getProperties().getWithDefault ("packedMenu", false))
         {
-            const auto prefixW = juce::GlyphArrangement::getStringWidthInt (IlanaTheme::font (packedNameText, true).withKerningFactor (0.09f), prefix) + 3;
+            const auto prefixW = juce::GlyphArrangement::getStringWidthInt (IlanaTheme::font (packedNameSizeOf (box), true).withKerningFactor (0.09f), prefix) + 3;
             // (The value comes first: a menu with no room for both drops its name, which the tooltip keeps.)
             const auto valueW = juce::GlyphArrangement::getStringWidthInt (IlanaTheme::font (packedMenuSizeOf (box)), box.getText()) + 1;
             return valueW > box.getWidth() - 5 - prefixW - 13 ? 0 : prefixW;

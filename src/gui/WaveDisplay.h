@@ -1481,7 +1481,38 @@ private:
         repaint();
     }
 
-    struct SampleChips { juce::Rectangle<float> zoomOut, zoomIn, play; };
+    struct SampleChips { juce::Rectangle<float> zoomOut, zoomIn, play, sliceLabel, sliceLess, sliceMore; };
+
+    // The slice stepper (audit 7): while the sample is sliced by transients or by beat, "SLICES n" with - and +
+    // in the header's status line steps the sensitivity (Fewer / Medium / More) or the part count.
+    bool hasSliceStepper() const
+    {
+        if (! hasZoomableSample())
+            return false;
+        const auto* sample = processorRef.getSampleForOsc (oscIndex);
+        const auto mode = processorRef.getSampleSlices (oscIndex).mode;
+        return sample != nullptr && sample->isSliced() && (mode == SampleSlicer::transients || mode == SampleSlicer::equal);
+    }
+
+    static constexpr int sliceParts[] { 2, 4, 8, 16, 32, 64 };
+
+    // The slice menu item a step of -1 or +1 stands for, or 0 at the end of the range.
+    int sliceStepItem (int direction) const
+    {
+        const auto slicing = processorRef.getSampleSlices (oscIndex);
+        if (slicing.mode == SampleSlicer::transients)
+        {
+            const auto level = slicing.sensitivity < 0.4f ? 0 : slicing.sensitivity < 0.7f ? 1 : 2;
+            const auto target = level + direction;
+            return target < 0 || target > 2 ? 0 : target == 0 ? sliceFewerItem : target == 1 ? sliceMediumItem : sliceMoreItem;
+        }
+        auto index = 0;
+        for (int i = 0; i < (int) std::size (sliceParts); ++i)
+            if (sliceParts[i] <= slicing.count)
+                index = i;
+        const auto target = index + direction;
+        return target < 0 || target >= (int) std::size (sliceParts) ? 0 : sliceEqualItem + sliceParts[target];
+    }
 
     // The three chips at the header's right: zoom out, zoom in and the
     // preview note.
@@ -1497,6 +1528,12 @@ private:
         chips.play = { header.getRight() - 36.0f, y, 36.0f, height };
         chips.zoomIn = { chips.play.getX() - 3.0f - 30.0f, y, 30.0f, height };
         chips.zoomOut = { chips.zoomIn.getX() - 3.0f - 30.0f, y, 30.0f, height };
+        if (hasSliceStepper())
+        {
+            chips.sliceMore = { chips.zoomOut.getX() - 12.0f - 30.0f, y, 30.0f, height };
+            chips.sliceLess = { chips.sliceMore.getX() - 3.0f - 30.0f, y, 30.0f, height };
+            chips.sliceLabel = { chips.sliceLess.getX() - 4.0f - 76.0f, y, 76.0f, height };
+        }
         return chips;
     }
 
@@ -1517,6 +1554,17 @@ private:
         g.drawText (juce::String::fromUTF8 ("\xe2\x88\x92"), chips.zoomOut, juce::Justification::centred, false);
         chip (chips.zoomIn, false, atMinimum);
         g.drawText ("+", chips.zoomIn, juce::Justification::centred, false);
+        if (! chips.sliceLabel.isEmpty())
+        {
+            const auto* sample = processorRef.getSampleForOsc (oscIndex);
+            g.setColour (IlanaTheme::Ui::text2);
+            g.drawText ("SLICES " + juce::String (sample != nullptr ? (int) sample->zones.size() : 0), chips.sliceLabel, juce::Justification::centredRight, false);
+            chip (chips.sliceLess, false, sliceStepItem (-1) == 0);
+            g.drawText (juce::String::fromUTF8 ("\xe2\x88\x92"), chips.sliceLess, juce::Justification::centred, false);
+            chip (chips.sliceMore, false, sliceStepItem (1) == 0);
+            g.drawText ("+", chips.sliceMore, juce::Justification::centred, false);
+        }
+        g.setColour (IlanaTheme::Ui::text);
         chip (chips.play, previewing, false);
         juce::Path triangle;
         const auto centre = chips.play.getCentre();
@@ -2253,7 +2301,8 @@ private:
         if (! compact)
         {
             paintSampleChips (g);
-            const auto chipsWidth = getLocalBounds().toFloat().getRight() - sampleChips().zoomOut.getX() + 4.0f;
+            const auto allChips = sampleChips();
+            const auto chipsWidth = getLocalBounds().toFloat().getRight() - (allChips.sliceLabel.isEmpty() ? allChips.zoomOut : allChips.sliceLabel).getX() + 4.0f;
             drawHeaderText (g, sample->name, (sample->zones.size() > 1 ? juce::String ((int) sample->zones.size())
                                                                                + juce::String::fromUTF8 (sample->isSliced() ? " slices \xc2\xb7 " : " zones \xc2\xb7 ")
                                                                            : juce::String())
@@ -3103,6 +3152,11 @@ private:
                 setSampleView (SampleRange::zoomed (sampleView, centre, 2.0, sampleLength()));
             else if (chips.zoomOut.contains (at))
                 setSampleView (SampleRange::zoomed (sampleView, centre, 0.5, sampleLength()));
+            else if (! chips.sliceLabel.isEmpty() && (chips.sliceLess.contains (at) || chips.sliceMore.contains (at)))
+            {
+                if (const auto item = sliceStepItem (chips.sliceLess.contains (at) ? -1 : 1); item != 0)
+                    applySliceMenu (item);
+            }
 
             return;
         }

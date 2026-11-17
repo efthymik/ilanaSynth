@@ -358,7 +358,10 @@ private:
 
 IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioProcessor& p)
     : AudioProcessorEditor (&p),
-      processorRef (p)
+      processorRef (p),
+      slotA (p.abSlotA),
+      slotB (p.abSlotB),
+      showingA (p.abShowingA)
 {
    #if defined (_WIN32)
     // Some hosts create plugin windows on a thread that has been switched to
@@ -700,13 +703,14 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
     voiceModeMenu = std::make_unique<ComboControl> (p.apvts, "voice_mode", "MODE");
     voiceModeMenu->setCompactLayout (true);
     voiceModeMenu->setPackedMenu (true);
+    voiceModeMenu->getComboBox().getProperties().set ("packedMenuSize", IlanaTheme::TextSize::body);
     voicesKnob = std::make_unique<StripKnob> (p, "poly_voices", "Voices", -1, IlanaTheme::Ui::text2, false);
     voicesKnob->setValueLineHidden (true);
     bendKnob = std::make_unique<StripKnob> (p, "bend_range", "Bend", -1, IlanaTheme::Ui::text2, false);
     glideKnob = std::make_unique<StripKnob> (p, "glide", "Glide", -1, IlanaTheme::Ui::text2, false);
     legatoToggle = std::make_unique<ToggleControl> (p.apvts, "glide_legato", "LEGATO");
     legatoToggle->setPackedName (ToggleControl::NamePlace::right);
-    legatoToggle->setRightNameSize (11.0f);
+    legatoToggle->setRightNameCaption (IlanaTheme::TextSize::label); // (GLIDE's caption style)
     for (auto* component : std::initializer_list<juce::Component*> { voiceModeMenu.get(), voicesKnob.get(), bendKnob.get(), glideKnob.get(), legatoToggle.get() })
         content.addAndMakeVisible (component);
     // STEREO beside VOICES (mockup v3, 2026-10-25): the OSC tab's STEREO settings, in a pop-up over the page.
@@ -853,7 +857,8 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
     undoButton.onClick = [this] { undoOrRedo (false); };
     redoButton.onClick = [this] { undoOrRedo (true); };
     historyButton.onClick = [this] { showHistoryMenu(); };
-    abButton.setButtonText ("A");
+    abButton.setButtonText (showingA ? "A" : "B");
+    abButton.setToggleState (! showingA, juce::dontSendNotification);
     abButton.setTooltip ("Compare A | B  (Ctrl+B)\nFlip between two versions of the patch to compare them; the lit letter is the one playing. Right-click to copy one side to the other.");
     abButton.onClick = [this] { toggleAB(); };
     abButton.onMenu = [this]
@@ -3517,7 +3522,11 @@ void IlanaSynthAudioProcessorEditor::loadPresetIndex (int index, std::function<v
             self.closeWavetableEditor(); // it works on the old patch's table
             IlanaAnim::armMorphs(); // (the old shapes fade out over the new ones)
             self.processorRef.beginEdit ("Load " + name);
+            // KEEP FX (FX page): the rack as it was goes back over the preset's.
+            const auto keptRack = FxPage::keepRackOnPresetLoad() ? self.processorRef.makeFxChainXml() : nullptr;
             loaded = userFile != juce::File() ? self.processorRef.loadUserPreset (userFile) : self.processorRef.loadPresetByIndex (index);
+            if (loaded && keptRack != nullptr)
+                self.processorRef.applyFxChainXml (*keptRack);
             self.processorRef.endEdit();
 
             if (loaded)

@@ -1,4 +1,5 @@
 #include "ProcessorInternal.h"
+#include <map>
 
 int IlanaSynthAudioProcessor::selectArpNote (int mode, int octaves)
 {
@@ -457,6 +458,86 @@ void IlanaSynthAudioProcessor::processArpeggiator (juce::MidiBuffer& midiMessage
     }
 
     runSteps (position, numSamples);
+}
+
+// PRINT TO CLIP: the chain the audio thread runs (NoteSpray with STRUM, then
+// the note engine for ARP / EUCLID / PROB SEQ), driven here for one chord on
+// a scratch copy of this processor, on the host's grid at 120 bpm, so the
+// live one (its held keys, its step counters, its random) is never touched.
+// The parts of processChunk it skips are the voices and effects; the clip
+// player and Euclid's exciter hits make no notes.
+Clip IlanaSynthAudioProcessor::printGeneratorChain (const std::vector<int>& chord, int bars) const
+{
+    Clip clip;
+    clip.bars = juce::jlimit (1, ClipState::maxBars, bars);
+
+    if (chord.empty())
+        return clip;
+
+    constexpr double sampleRate = 48000.0, beatSamples = sampleRate * 0.5; // 120 bpm
+    constexpr int blockSize = 512;
+    const auto totalSamples = (int) (clip.bars * ClipState::beatsPerBar * beatSamples);
+
+    auto scratch = std::make_unique<IlanaSynthAudioProcessor>();
+    scratch->apvts.replaceState (const_cast<IlanaSynthAudioProcessor*> (this)->apvts.copyState()); // (copyState is not const; it only reads)
+    scratch->currentSampleRate = sampleRate;
+    scratch->currentBpm = 120.0;
+    scratch->hostPlaying = true;
+
+    struct Open { int start, velocity; };
+    std::map<std::pair<int, int>, Open> open; // (channel, note) while sounding
+    const auto toBeats = [] (int sample) { return std::round ((double) sample / beatSamples * 960.0) / 960.0; };
+    const auto close = [&] (std::pair<int, int> key, int sample)
+    {
+        const auto found = open.find (key);
+
+        if (found == open.end())
+            return;
+
+        const auto start = toBeats (found->second.start);
+        clip.notes.push_back ({ (float) start, (float) juce::jmax (1.0 / 960.0, toBeats (sample) - start), key.second,
+                                found->second.velocity });
+        open.erase (found);
+    };
+
+    juce::MidiBuffer keys, generated, played;
+
+    for (int position = 0; position < totalSamples; position += blockSize)
+    {
+        const auto size = juce::jmin (blockSize, totalSamples - position);
+        scratch->hostPpq = (double) position / beatSamples;
+        keys.clear();
+
+        if (position == 0)
+            for (auto note : chord)
+                keys.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 100), 0);
+
+        scratch->noteSpray.process (keys, generated, size, scratch->readSpraySettings());
+        scratch->processArpeggiator (generated, size, played);
+
+        for (const auto metadata : played)
+        {
+            const auto message = metadata.getMessage();
+            const auto at = position + metadata.samplePosition;
+            const std::pair<int, int> key { message.getChannel(), message.getNoteNumber() };
+
+            if (message.isNoteOn())
+            {
+                close (key, at);
+                open[key] = { at, message.getVelocity() };
+            }
+            else if (message.isNoteOff())
+            {
+                close (key, at);
+            }
+        }
+    }
+
+    while (! open.empty())
+        close (open.begin()->first, totalSamples);
+
+    ClipState::normalise (clip);
+    return clip;
 }
 
 // Euclid in Exciter mode: each hit re-strikes the Physical strings of the
