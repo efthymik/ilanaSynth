@@ -1099,6 +1099,24 @@ inline juce::PopupMenu::Options menuOptions (juce::Component* target)
 }
 inline juce::PopupMenu::Options menuOptions (juce::Component& target) { return menuOptions (&target); }
 
+// The component a call-out box (the table browser, the colour picker, the
+// remap editor) goes into: the plugin editor itself, never the top-level
+// component. In a plugin the top level is the host wrapper around the
+// editor (JUCE's VST3 ContentWrapperComponent), so a call-out added there
+// is the editor's sibling: the software renderer paints it, but with Vulkan
+// on, the editor is drawn into a child window that covers the wrapper, and
+// the call-out opened invisibly under it (ilana 2026-11-17, "they never
+// open"). Falls back to the top level outside an editor.
+inline juce::Component* calloutParent (juce::Component& anchor)
+{
+    // (The editor marks itself with "ilanaCalloutHost": this header doesn't
+    // see juce_audio_processors.)
+    for (auto* c = &anchor; c != nullptr; c = c->getParentComponent())
+        if (c->getProperties().contains ("ilanaCalloutHost"))
+            return c;
+    return anchor.getTopLevelComponent();
+}
+
 } // namespace IlanaTheme
 
 namespace Space = IlanaTheme::Space; // the short name for page code

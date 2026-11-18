@@ -363,6 +363,9 @@ IlanaSynthAudioProcessorEditor::IlanaSynthAudioProcessorEditor (IlanaSynthAudioP
       slotB (p.abSlotB),
       showingA (p.abShowingA)
 {
+    // Call-outs open inside the editor (IlanaTheme::calloutParent): the
+    // Vulkan child window covers anything outside its tree.
+    getProperties().set ("ilanaCalloutHost", true);
    #if defined (_WIN32)
     // Some hosts create plugin windows on a thread that has been switched to
     // DPI-unaware, which makes Windows virtualise (bitmap-stretch) the editor

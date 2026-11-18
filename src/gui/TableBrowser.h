@@ -141,17 +141,19 @@ public:
         auto browser = std::make_unique<TableBrowser> (processor, parameterId, colour);
         browser->setLoaders (std::move (onLoadIn), std::move (onLibraryPickIn));
         browser->anchor = target.getScreenBounds();
-        auto* parent = target.getTopLevelComponent();
+        auto* parent = IlanaTheme::calloutParent (target);
         // The call-out is not guaranteed to sit in the editor's tree, so the
         // browser takes the editor's look itself (HEAR and the scroll bar
         // were the stock widgets: V10-12).
         browser->setLookAndFeel (&target.getLookAndFeel());
 
-        // Fill most of the plugin window so the previews are readable at any
-        // UI zoom (the call-out is not scaled with the editor's content).
+        // Grow with the plugin window so the previews stay readable at any
+        // UI zoom (the call-out is not scaled with the editor's content), but
+        // leave the patch around it in view (ilana 2026-11-18: at 86 % x 80 %
+        // it was "too big").
         if (parent != nullptr)
-            browser->setSize (juce::jmax (740, juce::roundToInt ((float) parent->getWidth() * 0.86f)),
-                              juce::jmax (520, juce::roundToInt ((float) parent->getHeight() * 0.8f)));
+            browser->setSize (juce::jmax (740, juce::roundToInt ((float) parent->getWidth() * 0.7f)),
+                              juce::jmax (500, juce::roundToInt ((float) parent->getHeight() * 0.66f)));
 
         auto& callOut = juce::CallOutBox::launchAsynchronously (std::move (browser),
                                                                 parent != nullptr ? parent->getLocalArea (&target, target.getLocalBounds())
