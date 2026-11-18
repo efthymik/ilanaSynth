@@ -960,7 +960,10 @@ public:
 
 private:
     static constexpr const char* listenedSuffixes[] { "_mode", "_on", "_excite", "_warp", "_warp2", "_spectral", "_tune", "_amp_env" };
-    static constexpr const char* listenedIds[] { "sym_on", "sym_manual", "sym_count", "sb_on", "subosc_on", "noise_level", "voice_mode" };
+    // (Only ids that change the cards' layout or switches: each change rebuilds the page. NOISE LEVEL was here,
+    // left from when COLOUR dimmed at level 0, so every step of its knob relaid the page out and lit dimmed
+    // controls until the next tick: ilana 2026-11-17, "slow and laggy".)
+    static constexpr const char* listenedIds[] { "sym_on", "sym_manual", "sym_count", "sb_on", "subosc_on", "voice_mode" };
 
     template <typename... Components>
     void addChildComponents (Components&... components)

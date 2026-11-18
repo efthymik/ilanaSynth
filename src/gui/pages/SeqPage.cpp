@@ -665,23 +665,7 @@ void SeqPage::layoutGenerate ()
     };
     std::vector<bool> pinned;
     auto unit = solve (groups, pinned);
-    // Natural width (UI audit 17): the cards keep the size they have with ARP's box beside them, and stay at the left,
-    // rather than stretching (SPRAY's dials 135 px apart) when ARP is hidden or another engine is shown.
-    if (engineTabs.getSelected() != 0)
-    {
-        auto reference = groups;
-        auto arpGroup = arpItems;
-        for (auto& item : arpGroup)
-            fit (item);
-        if (merged)
-            reference[0] = arpGroup;
-        else
-        {
-            reference.insert (reference.begin(), arpGroup);
-        }
-        std::vector<bool> referencePinned;
-        unit = juce::jmin (unit, solve (reference, referencePinned));
-    }
+    // (UI audit 17's natural widths were tried and dropped: ilana, 2026-11-17, liked the cards sharing the row.)
     // (Capped, so the boxes stay a group at the left rather than spreading over the card.)
     unit = juce::jmin (118.0f, unit);
     // (What a menu or ring needs stays whole at this unit.)
@@ -697,21 +681,7 @@ void SeqPage::layoutGenerate ()
         switches.insert (switches.begin(), nullptr);
     }
     auto x = (float) area.getX();
-    // With no generator card shown (CLIP) the three cards share the row, their controls staying at the standard
-    // pitch from each card's left inset (nothing spread apart).
-    auto extra = 0.0f;
-    if (engineTabs.getSelected() == 3)
-    {
-        auto used = (float) gap * (float) (groups.size() - 1);
-        for (const auto& group : groups)
-        {
-            for (const auto& item : group)
-                used += item.weight * unit;
-            used += (float) padding * 2.0f;
-        }
-        extra = juce::jmax (0.0f, ((float) area.getWidth() - used) / (float) groups.size());
-    }
-
+    const auto extra = 0.0f;
     for (size_t g = 0; g < groups.size(); ++g)
     {
         auto weight = 0.0f;
