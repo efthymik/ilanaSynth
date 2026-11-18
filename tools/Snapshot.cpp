@@ -11614,6 +11614,7 @@ struct FillRecorder : public juce::LowLevelGraphicsSoftwareRenderer
 // (must be 0), real pointer input through the child window (X11 XTest: the
 // server routes it exactly as a user's mouse), switching off and on, a
 // resize and a window that closes and opens again.
+
 int runVulkanLive (const juce::File& outDir)
 {
     outDir.createDirectory();
@@ -11689,6 +11690,49 @@ int runVulkanLive (const juce::File& outDir)
         juce::FileOutputStream stream (file);
         juce::PNGImageFormat().writeImageToStream (image, stream);
     };
+
+    // A call-out (the TABLE browser) opens inside the editor, which the
+    // Vulkan child window draws. Opened in the window around the editor (the
+    // host's wrapper in a plugin), it sat under that child window, unseen
+    // (ilana 2026-11-17, Vulkan on: "they never open").
+    {
+        shell->showPage ("MAIN");
+        settle (400);
+        std::vector<ComboControl*> combos;
+        findAll<ComboControl> (*editor, combos);
+        ComboControl::PopupCombo* table = nullptr;
+        for (auto* control : combos)
+            if (auto* combo = dynamic_cast<ComboControl::PopupCombo*> (&control->getComboBox()))
+                if (table == nullptr && combo->popupOverride != nullptr && visibleInTree (combo) && control->getLabelText().containsIgnoreCase ("TABLE"))
+                    table = combo; // (the first: OSC 1's)
+        check (table != nullptr, "OSC 1 has a TABLE select");
+        if (table != nullptr)
+        {
+            const auto position = table->getLocalBounds().getCentre().toFloat();
+            const auto press = [&] (bool up)
+            {
+                return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), position,
+                                         up ? juce::ModifierKeys() : juce::ModifierKeys::leftButtonModifier, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                         table, table, juce::Time::getCurrentTime(), position, juce::Time::getCurrentTime(), 1, false);
+            };
+            table->mouseDown (press (false));
+            settle (30);
+            table->mouseUp (press (true));
+            settle (400);
+            settleFrames();
+            auto* modal = juce::Component::getCurrentlyModalComponent();
+            auto* callOut = dynamic_cast<juce::CallOutBox*> (modal);
+            check (callOut != nullptr && callOut->isVisible(), "the TABLE browser opens");
+            check (callOut != nullptr && callOut->getParentComponent() == editor.get(),
+                   "the TABLE browser opens inside the editor (the canvas draws it)");
+            if (auto* now = shell->getVulkanAttachment())
+                writePng (now->readback(), outDir.getChildFile ("vk-table-browser.png"));
+            if (callOut != nullptr)
+                callOut->dismiss();
+            settle (300);
+        }
+    }
+
 
     for (const auto& page : shell->getPageIds())
     {

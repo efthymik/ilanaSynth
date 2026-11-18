@@ -426,7 +426,7 @@ public:
         }
 
         auto editor = std::make_unique<RemapEditor> (processorRef, slotIndex, colour);
-        auto* parent = getTopLevelComponent();
+        auto* parent = IlanaTheme::calloutParent (*this);
         juce::CallOutBox::launchAsynchronously (std::move (editor),
                                                 parent != nullptr ? parent->getLocalArea (this, getLocalBounds())
                                                                   : getScreenBounds(),

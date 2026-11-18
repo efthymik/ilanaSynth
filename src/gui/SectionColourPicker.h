@@ -72,7 +72,7 @@ public:
     // the editor's zoom.
     static void show (IlanaSynthAudioProcessor& p, int key, const juce::String& name, juce::Component& anchor, juce::Rectangle<int> area)
     {
-        auto* parent = anchor.getTopLevelComponent();
+        auto* parent = IlanaTheme::calloutParent (anchor);
         juce::CallOutBox::launchAsynchronously (std::make_unique<SectionColourPicker> (p, key, name),
                                                 parent->getLocalArea (&anchor, area), parent);
     }
