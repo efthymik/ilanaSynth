@@ -2415,8 +2415,6 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
                     monitorOpLfo.store (voice->getOpLfoValue());
                     monitorOpLfoPhase.store (voice->getOpLfoPhase());
                     monitorOpPitch.store (voice->getOpPitchValue());
-                    monitorOpEnvSeconds.store (voice->getOpEnvSeconds());
-                    monitorOpEnvRelease.store (voice->getOpEnvReleaseSeconds());
                 }
             }
         }
@@ -2434,6 +2432,10 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
         }
         if (newestVoice != nullptr)
         {
+            // The OP ENV graph's playhead too follows the newest note, as the
+            // other envelope graphs do (it read the loudest voice).
+            monitorOpEnvSeconds.store (newestVoice->getOpEnvSeconds());
+            monitorOpEnvRelease.store (newestVoice->getOpEnvReleaseSeconds());
             for (int env = 0; env < 16; ++env)
             {
                 envPositions[(size_t) env] = newestVoice->getEnvelopePosition (env);

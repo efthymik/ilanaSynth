@@ -418,11 +418,13 @@ private:
         return readLevel (3);
     }
 
-    // One cycle lasts 1 / RATE seconds (before modulation).
+    // One cycle lasts 1 / RATE seconds, with RATE's routes as the MSEG runs
+    // (the time labels read the bare knob while an LFO sped it up).
     double cycleSeconds() const
     {
         const auto* rate = processorRef.apvts.getRawParameterValue ("mseg_rate");
-        return 1.0 / juce::jmax (0.001, rate != nullptr ? (double) rate->load() : 1.0);
+        const auto rateMod = (double) processorRef.getModDisplay (Mod::Destination::MsegRate);
+        return 1.0 / juce::jmax (0.001, (rate != nullptr ? (double) rate->load() : 1.0) * std::exp2 (rateMod * Mod::Range::msegRateOctaves));
     }
 
     static juce::String timeText (double seconds)

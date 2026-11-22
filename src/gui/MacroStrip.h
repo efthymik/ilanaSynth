@@ -204,6 +204,22 @@ public:
     }
 
     // Whether the macro moves anything: a routing, or its own EVOLVE.
+    // EVOLVE's drift on top of the knob now (0 unless evolving).
+    float shownDrift() const { return macroIndex >= 0 && evolving ? processorRef.getMacroDrift (macroIndex) : 0.0f; }
+
+    // Where an evolving macro's value has drifted to: a dot on the knob's
+    // rim, in the macro's colour (the knob showed only the bare value; the
+    // targets hear value + drift, Modulation.cpp macroValue).
+    void paintOverChildren (juce::Graphics& g) override
+    {
+        const auto drift = shownDrift();
+        if (std::abs (drift) < 0.002f || parameter == nullptr)
+            return;
+        const auto at = knob.pointOnDial (juce::jlimit (0.0f, 1.0f, parameter->getValue() + drift), 2.5f) + knob.getPosition().toFloat();
+        g.setColour (modSourceColour ((int) Mod::macroSourceFor (macroIndex)));
+        g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (at));
+    }
+
     bool isAssigned() const { return routedTargets > 0 || evolving; }
     bool isEvolving() const { return evolving; }
 
@@ -459,7 +475,8 @@ private:
             }
         }
 
-        const auto value = parameter != nullptr ? parameter->getValue() : 0.0f;
+        // An evolving macro drifts round its knob: the sound hears both.
+        const auto value = (parameter != nullptr ? parameter->getValue() : 0.0f) + 4.0f * shownDrift();
 
         if (std::abs (value - lastValue) > 1.0e-5f)
         {

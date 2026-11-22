@@ -16,6 +16,7 @@
 #include "AnimationUtils.h"
 #include "DisplayStyle.h"
 #include "FmOperatorInfo.h"
+#include "ModRingConfig.h"
 
 class EnvelopeDisplay : public juce::Component,
                         public juce::SettableTooltipClient,
@@ -731,7 +732,7 @@ private:
         // (A lit trail redraws while it fades or the dot moves; the dot itself
         // moves the position in the signature.)
         if (IlanaAnim::showing (*this) && (appear < 1.0f || trailMoving || changeGate.check (processorRef.getUiEpoch() ^ IlanaAnim::mouseSignature (*this)
-                                                                ^ IlanaAnim::phaseSignature (position, 31))))
+                                                                ^ IlanaAnim::phaseSignature (position, 31) ^ modulationSignature())))
             repaint();
     }
 
@@ -744,20 +745,33 @@ private:
     mutable juce::Point<float> lastDot;
     IlanaAnim::BlockSmoother levelSmoother; // monitors glided between audio blocks
 
-    float readSeconds (const char* suffix) const
+    // A stage's knob with whatever modulates it (an LFO or macro on ATTACK,
+    // SUSTAIN...), as the voices hear it: the curve breathes with its routes
+    // (ilana 2026-11-21, "check for blindspots like this"). While a handle is
+    // dragged the bare knobs are drawn, so the handle stays under the mouse.
+    float readSeconds (const char* suffix) const { return readValue (suffix); }
+
+    float readValue (const char* suffix) const
     {
-        if (const auto* value = processorRef.apvts.getRawParameterValue (paramPrefix + "_" + suffix))
-            return value->load();
+        const auto id = paramPrefix + "_" + suffix;
+
+        if (const auto* value = processorRef.apvts.getRawParameterValue (id))
+            return dragHandle >= 0 ? value->load() : modulatedParamValue (processorRef, id, value->load());
 
         return 0.0f;
     }
 
-    float readValue (const char* suffix) const
+    // Changes when a modulated stage moves enough to redraw.
+    juce::uint64 modulationSignature() const
     {
-        if (const auto* value = processorRef.apvts.getRawParameterValue (paramPrefix + "_" + suffix))
-            return value->load();
+        static const char* const suffixes[] { "delay", "attack", "hold", "decay", "sustain", "release", "curve" };
+        juce::uint64 signature = 0;
+        auto salt = 40;
 
-        return 0.0f;
+        for (const auto* suffix : suffixes)
+            signature ^= IlanaAnim::phaseSignature (std::sqrt (juce::jmax (0.0f, readValue (suffix))) * 0.5f, salt++);
+
+        return signature;
     }
 
     float readCurve() const { return readValue ("curve"); }

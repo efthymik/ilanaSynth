@@ -1093,8 +1093,12 @@ void IlanaSynthAudioProcessor::processEffectsPatched (juce::AudioBuffer<float>& 
 
 //==============================================================================
 // The card displays read the engine of the card in front of each effect.
-const IlanaSynthAudioProcessor::FxEngine& IlanaSynthAudioProcessor::displayEngine (int type) const
+const IlanaSynthAudioProcessor::FxEngine& IlanaSynthAudioProcessor::displayEngine (int type, int slot) const
 {
+    // A card that knows its slot reads that slot's engine (a copy of the effect runs on its own).
+    if (juce::isPositiveAndBelow (slot, numSlots) && (int) getRawParam (fxSlotIds[(size_t) slot].type) == type)
+        return engineForSlot (slot);
+
     const auto patchPointer = getFxPatchShared(); // (per card per frame: no copy)
     const auto& patch = *patchPointer;
     for (int s = 0; s < numSlots; ++s)

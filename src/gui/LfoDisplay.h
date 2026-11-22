@@ -800,7 +800,8 @@ private:
         if (minimal)
             return;
         const auto rulerY = rulerTop();
-        const auto synced = readParam ("_sync") > 0.5f;
+        // A modulated rate no longer lasts its division: times label it then.
+        const auto synced = readParam ("_sync") > 0.5f && std::abs (rateModulation()) < 0.002f;
         juce::StringArray labels;
 
         if (synced)
@@ -829,7 +830,7 @@ private:
         }
         else
         {
-            const auto rate = juce::jmax (0.001f, readParam ("_rate"));
+            const auto rate = (float) currentRate();
             for (int quarter = 0; quarter <= 4; ++quarter)
             {
                 const auto seconds = (double) quarter * 0.25 / (double) rate;
@@ -1570,16 +1571,24 @@ private:
 
     IlanaAnim::ChangeGate changeGate;
 
-    // RATE in Hz, following SYNC at the host tempo.
+    // RATE in Hz, following SYNC at the host tempo, with its rate routes as
+    // the LFO runs (processor makeRate): the ruler and the sim preview ran at
+    // the bare knob while an LFO or macro sped the real one up.
     double currentRate() const
     {
+        auto rate = (double) readParam ("_rate");
+
         if (readParam ("_sync") > 0.5f)
         {
             static const double beats[] = { 4.0, 2.0, 1.0, 0.5, 0.25, 0.125, 2.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0, 0.75, 0.375 };
-            return (processorRef.getCurrentBpm() / 60.0) / beats[juce::jlimit (0, 10, (int) readParam ("_div"))];
+            rate = (processorRef.getCurrentBpm() / 60.0) / beats[juce::jlimit (0, 10, (int) readParam ("_div"))];
         }
-        return (double) readParam ("_rate");
+
+        return juce::jlimit (0.001, 200.0, rate * std::exp2 ((double) rateModulation() * Mod::Range::lfoRateOctaves));
     }
+
+    // The synth-wide amount on this LFO's RATE (0: unmodulated).
+    float rateModulation() const { return processorRef.getModDisplay (Mod::lfoRateDestinationFor (index)); }
 
 public:
     void triggerPreview() { simPreview.trigger (processorRef.readLfoSimSettings (index)); }

@@ -2128,9 +2128,24 @@ void IlanaSynthAudioProcessor::FxEngine::processTremolo (juce::AudioBuffer<float
     const auto shape = juce::jlimit (0, 5, (int) getParam ("fx_trem_shape"));
     const auto increment = (double) rate / currentSampleRate;
 
+    // S&H used to fall through lfoShapeValue's shapes to a constant 0: a
+    // plain level drop, while its card drew random steps (ilana 2026-11-22:
+    // "make S&H actually work"). It holds a new random level each cycle.
+    const auto sampleHold = shape == 5;
+    const auto ease = (float) (1.0 - std::exp (-1.0 / (0.002 * currentSampleRate)));
+
     for (int i = 0; i < numSamples; ++i)
     {
-        const auto value = lfoShapeValue (shape, tremoloPhase);
+        auto value = 0.0f;
+        if (sampleHold)
+        {
+            tremoloEased += (tremoloHeld - tremoloEased) * ease;
+            value = tremoloEased;
+        }
+        else
+        {
+            value = lfoShapeValue (shape, tremoloPhase);
+        }
         const auto gain = 1.0f - depth * (0.5f - 0.5f * value);
 
         for (int channel = 0; channel < numChannels; ++channel)
@@ -2139,7 +2154,11 @@ void IlanaSynthAudioProcessor::FxEngine::processTremolo (juce::AudioBuffer<float
         tremoloPhase += increment;
 
         if (tremoloPhase >= 1.0)
+        {
             tremoloPhase -= 1.0;
+            if (sampleHold)
+                tremoloHeld = tremoloRandom.nextFloat() * 2.0f - 1.0f;
+        }
     }
 }
 
@@ -2638,6 +2657,8 @@ void IlanaSynthAudioProcessor::FxEngine::prepare (double sampleRate, int samples
     flangerPhase = 0.0;
     dimPhase = 0.0;
     tremoloPhase = 0.0;
+    tremoloRandom.setSeed (0x7e301d);
+    tremoloHeld = tremoloEased = 0.0f;
     shifterPhase = 0.0;
     ringPhase = 0.0;
     gatePhase = 0.0;
@@ -2774,6 +2795,8 @@ void IlanaSynthAudioProcessor::FxEngine::reset()
     flangerPhase = 0.0;
     dimPhase = 0.0;
     tremoloPhase = 0.0;
+    tremoloRandom.setSeed (0x7e301d);
+    tremoloHeld = tremoloEased = 0.0f;
     shifterPhase = 0.0;
     ringPhase = 0.0;
     gatePhase = 0.0;
@@ -2846,15 +2869,15 @@ void IlanaSynthAudioProcessor::resetFxEngines()
 
 // The card displays read the engine the card stands for: the slot its
 // controls are showing (displayEngineFor), else the shared one.
-float IlanaSynthAudioProcessor::getCompGainReduction() const { return displayEngine (4).compGainReduction.load(); }
-float IlanaSynthAudioProcessor::getLimiterGainReduction() const { return displayEngine (21).limiterGainReduction.load(); }
-float IlanaSynthAudioProcessor::getOttBandGain (int band) const { return displayEngine (20).ottBandGain[(size_t) juce::jlimit (0, 2, band)].load(); }
-void IlanaSynthAudioProcessor::getFreezeBands (std::array<float, SpectralFreeze::numBands>& out) const { displayEngine (12).freeze.getBands (out); }
+float IlanaSynthAudioProcessor::getCompGainReduction (int slot) const { return displayEngine (4, slot).compGainReduction.load(); }
+float IlanaSynthAudioProcessor::getLimiterGainReduction (int slot) const { return displayEngine (21, slot).limiterGainReduction.load(); }
+float IlanaSynthAudioProcessor::getOttBandGain (int band, int slot) const { return displayEngine (20, slot).ottBandGain[(size_t) juce::jlimit (0, 2, band)].load(); }
+void IlanaSynthAudioProcessor::getFreezeBands (std::array<float, SpectralFreeze::numBands>& out, int slot) const { displayEngine (12, slot).freeze.getBands (out); }
 int IlanaSynthAudioProcessor::getGateDisplayStep() const { return displayEngine (16).gateDisplayStep.load(); }
 
-float IlanaSynthAudioProcessor::getVocoderBandLevel (int band) const
+float IlanaSynthAudioProcessor::getVocoderBandLevel (int band, int slot) const
 {
-    const auto& engine = displayEngine (31);
+    const auto& engine = displayEngine (31, slot);
     return juce::isPositiveAndBelow (band, (int) engine.vocoderBandDisplay.size()) ? engine.vocoderBandDisplay[(size_t) band].load() : 0.0f;
 }
 

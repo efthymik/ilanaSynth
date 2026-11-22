@@ -85,6 +85,7 @@ FxMiniWindow::FxMiniWindow (IlanaSynthAudioProcessor& p, FxPage& rack, int slotI
     addAndMakeVisible (closeButton);
     if (FxDisplay::hasDisplay (type))
     {
+        display.setSlot (slot);
         display.setType (type, colour);
         addAndMakeVisible (display);
     }

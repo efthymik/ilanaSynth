@@ -109,6 +109,26 @@ inline double combFeedback (double resonance) { return juce::jlimit (0.0, 1.0, r
 
 // Linear (small-signal) frequency response for the response display.
 // s = j * f / cutoff; morph is only used by Formant and Morph.
+enum class CascadeStage { lowPass, highPass, bandPass, onePole };
+
+// `stages` (1 or more, fractional fades the last one in) of one filter stage
+// in series, each tuned so the chain's -3 dB point stays at s = j (a
+// Butterworth-damped biquad unless `damping` says otherwise).
+inline std::complex<double> cascadeAtEdge (std::complex<double> s, double stages, CascadeStage kind, double damping = 1.41421356)
+{
+    stages = juce::jmax (1.0, stages);
+    const auto spread = std::pow (2.0, 1.0 / stages) - 1.0; // where one stage is down by 3 dB / stages
+    const auto edge = kind == CascadeStage::onePole ? std::sqrt (spread) : std::pow (spread, 0.25);
+    const auto t = kind == CascadeStage::highPass ? edge / s : s * edge;
+    const auto stage = kind == CascadeStage::onePole ? 1.0 / (1.0 + t)
+                       : kind == CascadeStage::bandPass ? t * damping / (t * t + damping * t + 1.0)
+                                                        : 1.0 / (t * t + damping * t + 1.0);
+    const auto whole = (int) std::floor (stages);
+    const auto fraction = stages - whole;
+    auto h = std::pow (stage, whole);
+    return h * ((1.0 - fraction) + fraction * stage);
+}
+
 inline std::complex<double> response (int type, bool slope24, double resonance, std::complex<double> s,
                                       double morph = 0.0, double cutoff = 1000.0)
 {
@@ -237,14 +257,30 @@ inline std::complex<double> response (int type, bool slope24, double resonance, 
                 const auto m = juce::jlimit (0.0, 1.0, morph);
                 return comb * ((1.0 - m) + m * body * 2.0);
             }
-            // The Airwindows models, drawn as their plain small-signal
-            // shape (their drive and curves are level-dependent).
-            case AwZLow: case AwAcid: case AwXLow: case AwYNotLow: case AwHolt: case AwAngle: case AwPear:
-                return 1.0 / (s * s + (2.0 - 1.8 * resonance) * s + 1.0);
+            // The Airwindows models, drawn as their small-signal shape
+            // (their drive and curves are level-dependent), with the stage
+            // counts their knobs set (AirwindowsCharacter.h): Z's POLES (morph)
+            // and X's NUKE (resonance) cascade one to four / five biquads, Holt's
+            // POLES one to eight resonant stages, Pear's resonance one to six
+            // one-poles, each with its -3 dB point kept on the cutoff as the
+            // filters do. (They were all drawn as one resonant 2-pole.)
+            case AwZLow:
+                return cascadeAtEdge (s, 1.0 + 3.0 * juce::jlimit (0.0, 1.0, morph), CascadeStage::lowPass);
             case AwZHigh:
-                return s * s / (s * s + (2.0 - 1.8 * resonance) * s + 1.0);
+                return cascadeAtEdge (s, 1.0 + 3.0 * juce::jlimit (0.0, 1.0, morph), CascadeStage::highPass);
             case AwZBand:
-                return s * (2.0 - 1.8 * resonance) / (s * s + (2.0 - 1.8 * resonance) * s + 1.0);
+                return cascadeAtEdge (s, 1.0 + 3.0 * juce::jlimit (0.0, 1.0, morph), CascadeStage::bandPass);
+            case AwXLow:
+                return cascadeAtEdge (s, 1.0 + 4.0 * resonance, CascadeStage::lowPass);
+            case AwHolt:
+                return cascadeAtEdge (s, 1.0 + 7.0 * juce::jlimit (0.0, 1.0, morph), CascadeStage::lowPass, 2.0 - 1.8 * resonance);
+            case AwPear:
+            {
+                const auto c = 0.3 + 0.4 * resonance;
+                return cascadeAtEdge (s, juce::jlimit (1.0, 16.0, std::ceil (c * c * c * 16.0)), CascadeStage::onePole);
+            }
+            case AwAcid: case AwYNotLow: case AwAngle:
+                return 1.0 / (s * s + (2.0 - 1.8 * resonance) * s + 1.0);
             case Disperser:
                 return { 1.0, 0.0 }; // all-pass: flat
             case VowelBank:
@@ -318,7 +354,21 @@ inline std::complex<double> response (int type, bool slope24, double resonance, 
         if (type == CombMorph)
             feedback = combFeedback (resonance) * (juce::jlimit (0.0, 1.0, morph) * 2.0 - 1.0);
         const auto delay = std::exp (-juce::MathConstants<double>::twoPi * s);
-        return (1.0 - 0.5 * std::abs (feedback)) / (1.0 - feedback * delay);
+
+        // The loop's damping one-pole (FilterUnit::process: 0.18 on Comb
+        // Damped, 0.7 on the others), at a 48 kHz rate, with its phase delay
+        // at the pitch taken off the line as the filter does: the teeth fade
+        // up the spectrum as they sound (they were drawn equally tall to 20 kHz).
+        const auto c = type == CombDamped ? 0.18 : 0.7;
+        const auto damping = [c] (double hz)
+        {
+            const auto z1 = std::polar (1.0, -juce::MathConstants<double>::twoPi * hz / 48000.0);
+            return c / (1.0 - (1.0 - c) * z1);
+        };
+        const auto hz = std::abs (s.imag()) * cutoff;
+        const auto pitchPhase = std::arg (damping (cutoff));
+        const auto loop = damping (hz) * std::polar (1.0, -pitchPhase * (hz / juce::jmax (1.0, cutoff)));
+        return (1.0 - 0.5 * std::abs (feedback)) / (1.0 - feedback * loop * delay);
     }
 
     const auto k = 2.0 - 2.0 * juce::jmin (0.98, resonance);

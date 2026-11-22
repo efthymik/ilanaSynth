@@ -5,6 +5,7 @@
 #include <array>
 #include <functional>
 #include <limits>
+#include <map>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -13,6 +14,7 @@
 #include "IlanaLookAndFeel.h"
 #include "AnimationUtils.h"
 #include "FmOperatorInfo.h"
+#include "ModRingConfig.h"
 
 // The FM matrix as operators: the patch's oscillators, with an arrow for every
 // route (thicker = deeper) and a loop for feedback. Drag from one oscillator
@@ -85,7 +87,8 @@ public:
 
         const auto mode = choice (prefix + "_mode");
 
-        if (mode == 2 || mode == 3)
+        // (Live plays its input as it is: the voice never reads FM there.)
+        if (mode == 2 || mode == 3 || mode == 4)
             return false;
 
         return mode != 1 || choice (prefix + "_excite") == 6;
@@ -106,6 +109,9 @@ public:
 
         if (mode == 3)
             return "Granular oscillators don't take FM. They can still modulate other oscillators.";
+
+        if (mode == 4)
+            return "Live oscillators play their input as it is and don't take FM. They can still modulate other oscillators.";
 
         return {};
     }
@@ -1336,13 +1342,42 @@ private:
         return -1;
     }
 
+    // With its routes (an LFO or envelope on an FM amount, a WARP FM
+    // amount): a cable at 0 opened by a route is drawn, and thickness and flow
+    // follow it (they read the bare knobs). The knob's link is cached.
     float read (const juce::String& id) const
     {
-        if (const auto* value = processorRef.apvts.getRawParameterValue (id))
+        const auto* value = processorRef.apvts.getRawParameterValue (id);
+        if (value == nullptr)
+            return 0.0f;
+
+        auto cached = modConfigs.find (id);
+        if (cached == modConfigs.end())
+            cached = modConfigs.emplace (id, modRingConfigFor (id)).first;
+
+        const auto& config = cached->second;
+        if (config.destination == 0)
             return value->load();
 
-        return 0.0f;
+        const auto* parameter = processorRef.apvts.getParameter (id);
+        return parameter != nullptr ? config.modulated (parameter->getNormalisableRange(), value->load(), processorRef.getModDisplay (config.destination))
+                                    : value->load();
     }
+
+    // Changes when a routed FM amount moves enough to redraw.
+    juce::uint64 modulationSignature() const
+    {
+        using D = Mod::Destination;
+        static const D destinations[] { D::FmAmount, D::FmFeedback, D::Fm1to2, D::Fm1to3, D::Fm2to3, D::Fm3to1, D::Fm3to2,
+                                        D::Fm2Feedback, D::Fm3Feedback, D::Osc1Warp, D::Osc2Warp, D::SubWarp, D::Osc4Warp, D::Osc5Warp, D::Osc6Warp };
+        juce::uint64 signature = 0;
+        auto salt = 60;
+        for (const auto destination : destinations)
+            signature ^= IlanaAnim::phaseSignature (processorRef.getModDisplay (destination), salt++);
+        return signature;
+    }
+
+    mutable std::map<juce::String, ModRingConfig> modConfigs;
 
     void toggle (const juce::String& id)
     {
@@ -1360,7 +1395,7 @@ private:
         if (processorRef.getActiveVoiceCount() > 0)
             liveSeconds += (double) frameSeconds();
 
-        if (IlanaAnim::showing (*this) && (changeGate.check (processorRef.getUiEpoch() ^ IlanaAnim::mouseSignature (*this))))
+        if (IlanaAnim::showing (*this) && (changeGate.check (processorRef.getUiEpoch() ^ IlanaAnim::mouseSignature (*this) ^ modulationSignature())))
             repaint();
     }
 

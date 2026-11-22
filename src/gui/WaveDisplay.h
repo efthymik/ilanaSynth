@@ -1906,10 +1906,12 @@ private:
     void drawGrainCloud (juce::Graphics& g, juce::Rectangle<float> plot, float centreY, float halfHeight) const
     {
         const juce::String prefix (OscillatorIds::prefixes[(size_t) juce::jlimit (0, OscillatorIds::count - 1, oscIndex)]);
-        const auto position = juce::jlimit (0.0f, 1.0f, readPlain (grainPositionId));
-        const auto spray = readPlain (prefix + "_grain_spray");
-        const auto density = readPlain (prefix + "_grain_density");
-        const auto size = readPlain (prefix + "_grain_size");
+        // With their routes, as the newest note hears them (the cloud sat
+        // at the bare knobs while an LFO or envelope moved them).
+        const auto position = juce::jlimit (0.0f, 1.0f, readModulated (grainPositionId));
+        const auto spray = readModulated (prefix + "_grain_spray");
+        const auto density = readModulated (prefix + "_grain_density");
+        const auto size = readModulated (prefix + "_grain_size");
         const auto positionX = plot.getX() + position * plot.getWidth();
         const auto halfSpray = spray * 0.25f * plot.getWidth();
 
@@ -2188,6 +2190,18 @@ private:
         g.setColour (juce::Colours::white.withAlpha (0.55f));
         g.fillRect (juce::Rectangle<float> (1.5f, plot.getHeight()).withCentre ({ startX, centreY }));
         g.fillRect (juce::Rectangle<float> (1.5f, plot.getHeight()).withCentre ({ endX, centreY }));
+
+        // Where a route has moved START or END now (the newest note's): a
+        // dashed line in the trace colour beside the handle, which stays on
+        // the knob for dragging (the region ignored its routes).
+        for (const auto& [id, plain] : { std::pair<juce::String, float> { startId, start }, { endId, end } })
+            if (const auto moved = juce::jlimit (0.0f, 1.0f, readModulated (id)); std::abs (moved - plain) > 0.002f)
+            {
+                const auto x = sampleFractionToX (plot, moved);
+                const float dashes[] { 4.0f, 3.0f };
+                g.setColour (traceColour.withAlpha (0.85f));
+                g.drawDashedLine ({ x, plot.getY(), x, plot.getBottom() }, dashes, 2, 1.5f);
+            }
 
         // The two handles, flags on the lines you can drag (S14-4).
         if (! compact && plot.getHeight() > 60.0f)
@@ -2565,6 +2579,17 @@ private:
 
         // SYNC 2 TO 1 draws OSC 2 against OSC 1's cycle at their pitch ratio.
         signature ^= IlanaAnim::phaseSignature (stages.syncRatio * 0.125f, 18);
+
+        // A sample's routed START / END, a grain cloud's routed knobs.
+        if (startId.isNotEmpty())
+            signature ^= IlanaAnim::phaseSignature (readModulated (startId), 19) ^ IlanaAnim::phaseSignature (readModulated (endId), 20);
+        if (grainPositionId.isNotEmpty())
+        {
+            const juce::String prefix (oscPrefix());
+            signature ^= IlanaAnim::phaseSignature (readModulated (grainPositionId), 23)
+                         ^ IlanaAnim::phaseSignature (readModulated (prefix + "_grain_spray"), 24)
+                         ^ IlanaAnim::phaseSignature (readModulated (prefix + "_grain_density"), 25);
+        }
         return signature;
     }
 
@@ -3036,6 +3061,16 @@ private:
         stages.mode2 = Warp::modeForStageTwoChoice (readChoice (prefix + "_warp2"));
         stages.amount2 = readModulated (prefix + "_warp2_amt");
 
+        // The WARP ENVELOPE (the CZ's DCW) opens both stages as the voice
+        // does (Voice::updateSubBlock): a warp at 0 opened by its envelope
+        // drew a plain wave.
+        if (const auto envelope = readChoice (prefix + "_pd_env"); envelope > 0)
+        {
+            const auto opened = readModulated (prefix + "_pd_env_amt") * warpEnvelopeValue (envelope - 1);
+            stages.amount1 = juce::jlimit (0.0f, 1.0f, stages.amount1 + opened);
+            stages.amount2 = juce::jlimit (0.0f, 1.0f, stages.amount2 + opened);
+        }
+
         const auto sourceWarp = [&stages] (int mode, float amount, float& ring)
         {
             if (mode == Warp::Fm) stages.fmAmount += amount;
@@ -3066,6 +3101,24 @@ private:
 
         stages.syncRatio = readSyncRatio();
         return stages;
+    }
+
+    // The newest note's level of envelope `index` in the voice's order
+    // (AMP, FILT, FILT 2, MOD, ENV 5, ENV 6-16, MSEG).
+    float warpEnvelopeValue (int index) const
+    {
+        switch (index)
+        {
+            case 0: return processorRef.getEnvMonitorAmp();
+            case 1: return processorRef.getEnvMonitorFilter();
+            case 2: return processorRef.getEnvMonitorFilter2();
+            case 3: return processorRef.getEnvMonitorMod();
+            case 4: return processorRef.getEnvMonitorEnv4();
+            case 16: return juce::jlimit (0.0f, 1.0f, processorRef.getSourceDisplayValue ((int) Mod::Source::Mseg));
+            default: break;
+        }
+
+        return index >= 5 && index <= 15 ? processorRef.getEnvMonitorExtra (index - 5) : 0.0f;
     }
 
     // OSC 2's cycles per OSC 1 cycle while SYNC 2 TO 1 (FM page) resets it,
