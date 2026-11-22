@@ -1205,8 +1205,14 @@ float IlanaSynthAudioProcessor::globalSourceValue (Mod::Source source) const
 {
     if (const auto lfoIndex = Mod::lfoBIndexFor (source); lfoIndex >= 0)
         return lfoLastValuesB[(size_t) lfoIndex].load();
+    // The envelopes' VELOCITY knobs, as a voice applies them (the monitors
+    // are the loudest voice's raw envelopes; monitorVelocity is its velocity).
+    const auto velocityScale = [this] (float amount) { return 1.0f - amount + amount * monitorVelocity.load(); };
     if (source >= Mod::Source::Env6 && source <= Mod::Source::Env16)
-        return getEnvMonitorExtra ((int) source - (int) Mod::Source::Env6);
+    {
+        const auto index = (int) source - (int) Mod::Source::Env6;
+        return getEnvMonitorExtra (index) * velocityScale (voiceParamsShared.extraEnvVelocity[(size_t) index]);
+    }
     if (const auto lfoIndex = Mod::lfoIndexFor (source); lfoIndex >= 0)
     {
         const auto& lfoId = lfoIds[(size_t) lfoIndex];
@@ -1228,15 +1234,15 @@ float IlanaSynthAudioProcessor::globalSourceValue (Mod::Source source) const
     switch (source)
     {
         case Mod::Source::AmpEnv:     return envMonitorAmp.load();
-        case Mod::Source::FilterEnv:  return envMonitorFilter.load();
-        case Mod::Source::FilterEnv2: return envMonitorFilter2.load();
-        case Mod::Source::ModEnv:     return envMonitorMod.load();
-        case Mod::Source::Env4:       return envMonitorEnv4.load();
+        case Mod::Source::FilterEnv:  return envMonitorFilter.load() * velocityScale (voiceParamsShared.filterVelocity);
+        case Mod::Source::FilterEnv2: return envMonitorFilter2.load() * velocityScale (voiceParamsShared.filter2EnvVelocity);
+        case Mod::Source::ModEnv:     return envMonitorMod.load() * velocityScale (voiceParamsShared.modEnvVelocity);
+        case Mod::Source::Env4:       return envMonitorEnv4.load() * velocityScale (voiceParamsShared.env4Velocity);
         case Mod::Source::Velocity:   return monitorVelocity.load();
         case Mod::Source::KeyTrack:   return monitorKeyTrack.load();
         case Mod::Source::Random:     return monitorRandom.load();
         case Mod::Source::ClockSh:    return clockShValue;
-        case Mod::Source::Mseg:       return lfoBuffers.getNumSamples() > 0 ? lfoBuffers.getSample (5, 0) : 0.0f;
+        case Mod::Source::Mseg:       return msegDisplay.load(); // the block's end, as the LFOs are read
         case Mod::Source::InputEnv:   return inputEnvDisplay.load(); // FX, master and plain-parameter routes (voices read their own)
         case Mod::Source::OpLfo:      return monitorOpLfo.load();
         case Mod::Source::OpPitchEnv: return monitorOpPitch.load();

@@ -103,6 +103,8 @@ bool IlanaSynthAudioProcessor::pasteModule (const ModuleSnapshot& snapshot, int 
 {
     const auto prefix = modulePrefix (snapshot.kind, index) + "_";
     auto any = false;
+    auto* tableParameter = apvts.getParameter (prefix + "table");
+    const auto tableBefore = tableParameter != nullptr ? tableParameter->getValue() : 0.0f;
 
     for (const auto& [suffix, value] : snapshot.values)
         if (apvts.getParameter (prefix + suffix) != nullptr)
@@ -136,6 +138,12 @@ bool IlanaSynthAudioProcessor::pasteModule (const ModuleSnapshot& snapshot, int 
             {
                 after.tables[(size_t) free] = snapshot.table;
                 writeNormalised (prefix + "table", apvts.getParameter (prefix + "table")->convertTo0to1 ((float) (TableFactory::getNumFactoryTables() + free)));
+            }
+            else if (tableParameter != nullptr)
+            {
+                // No free slot: the pasted index points at another table in
+                // this patch, so keep the table this oscillator had.
+                writeNormalised (prefix + "table", tableBefore);
             }
         }
     }

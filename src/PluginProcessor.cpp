@@ -1662,6 +1662,8 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
     // and evaluated synth-wide for the effects and the knob rings.
     Mod::Slot activeSlots[Mod::maxSlots];
     auto numActiveSlots = 0;
+    std::array<int, VoiceParams::maxVoiceKnobs> voiceKnobDestinations {};
+    auto numVoiceKnobDestinations = 0;
 
     for (int i = 0; i < Mod::maxSlots; ++i)
     {
@@ -1681,7 +1683,21 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
             }
 
         if (slot.isActive())
+        {
+            // The voices hold at most maxVoiceKnobs per-voice knobs; a route
+            // into one more falls back to the synth-wide path.
+            if (isVoiceKnobSlot (slot))
+            {
+                auto seen = false;
+                for (int k = 0; k < numVoiceKnobDestinations && ! seen; ++k)
+                    seen = voiceKnobDestinations[(size_t) k] == slot.destination;
+                if (! seen && numVoiceKnobDestinations < VoiceParams::maxVoiceKnobs)
+                    voiceKnobDestinations[(size_t) numVoiceKnobDestinations++] = slot.destination;
+                else if (! seen)
+                    slot.voiceKnobOverflow = true;
+            }
             activeSlots[numActiveSlots++] = slot;
+        }
     }
 
     lfoRouted.fill (false);
@@ -1868,6 +1884,7 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
 
     p.ampVelocity = getParam ("amp_velocity");
     p.filterVelocity = getParam ("filter_velocity");
+    p.filter2Off = getParam ("f2_on") < 0.5f;
     p.filter2EnvVelocity = getParam ("f2e_velocity");
     p.modEnvVelocity = getParam ("me_velocity");
     p.env4Velocity = getParam ("e4_velocity");

@@ -1146,7 +1146,11 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
     {
         if (const auto xml = SafeXml::parse (juce::String::fromUTF8 (saved)))
         {
+            // Learned MIDI CCs stay as they are over a factory preset, as
+            // over the other factory presets (her file's map cleared them).
+            const auto learned = getParamCcMapText();
             applyFullState (juce::ValueTree::fromXml (*xml));
+            setParamCcMapText (learned);
             loadedPresetFile = juce::File();
             setCurrentPresetName (presets[(size_t) index].name);
             return;

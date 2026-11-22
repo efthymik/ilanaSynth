@@ -309,6 +309,11 @@ public:
             return value != nullptr ? value->load() : 0.0f;
         };
 
+        // Filter 2 switched off passes everything, whatever its settings.
+        if (filterIndex == 1)
+            if (const auto* on = p.apvts.getRawParameterValue ("f2_on"); on != nullptr && on->load() < 0.5f)
+                return true;
+
         if (read ("_env") < -0.001f || std::abs (read ("_keytrack")) > 0.001f || std::abs (read ("_fm")) > 0.001f)
             return false;
 

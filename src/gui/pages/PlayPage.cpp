@@ -2000,20 +2000,33 @@ void PlayPage::refreshFilterParts ()
 
 void PlayPage::toggleFilter2 ()
 {
-    if (auto* parameter = processorRef.apvts.getParameter ("f2_cutoff"))
+    // OFF switches Filter 2 off (f2_on), so it passes the signal whatever its
+    // type; it used to push CUTOFF to the top, which muted a High Pass. ON
+    // switches it back on, and a Low Pass left wide open (every new patch's
+    // Filter 2) gets its CUTOFF back, as before.
+    auto* onParameter = processorRef.apvts.getParameter ("f2_on");
+    auto* cutoff = processorRef.apvts.getParameter ("f2_cutoff");
+    if (onParameter == nullptr || cutoff == nullptr)
+        return;
+
+    const auto set = [] (juce::RangedAudioParameter* parameter, float value)
     {
-        const auto open = FilterDisplay::isPassThrough (processorRef, 1, operatorFilterOff);
-        const auto current = parameter->convertFrom0to1 (parameter->getValue());
-        const auto target = open ? juce::jmin (rememberedCutoff, 19000.0f) : 20000.0f;
-        if (! open)
-            rememberedCutoff = current;
-        processorRef.performEdit (parameter->getName (64), [parameter, target]
+        parameter->beginChangeGesture();
+        parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
+        parameter->endChangeGesture();
+    };
+    const auto shownOn = ! FilterDisplay::isPassThrough (processorRef, 1, operatorFilterOff);
+    processorRef.performEdit (shownOn ? "Filter 2 off" : "Filter 2 on", [&]
+    {
+        if (shownOn)
         {
-            parameter->beginChangeGesture();
-            parameter->setValueNotifyingHost (parameter->convertTo0to1 (target));
-            parameter->endChangeGesture();
-        });
-    }
+            set (onParameter, 0.0f);
+            return;
+        }
+        set (onParameter, 1.0f);
+        if (FilterDisplay::isPassThrough (processorRef, 1, operatorFilterOff))
+            set (cutoff, juce::jmin (rememberedCutoff, 19000.0f));
+    });
 }
 
 void PlayPage::syncOscBar ()

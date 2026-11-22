@@ -781,6 +781,9 @@ struct Slot
     bool stereo = false;
     // Set by the processor when a source or via of this route is an LFO that runs per voice (retrigger or key track).
     bool perVoiceLfo = false;
+    // Set by the processor when this route would be a per-voice knob (isVoiceKnobSlot) but the
+    // voices' knob list is full: it then moves the knob synth-wide instead of doing nothing.
+    bool voiceKnobOverflow = false;
     // The slot's drawn remap curve (Vital's per-route remap): remapSize + 1
     // values in -1..1 over the source's range, or nullptr for a straight line.
     const float* remap = nullptr;

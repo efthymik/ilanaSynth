@@ -107,4 +107,94 @@ void runSweepFixTests()
         check (level > -50.0, "osc 3: LEVEL 0 opened by a route plays (" + juce::String (level, 1) + " dB)");
         check (bendRatio > 1.05, "osc 3: LEVEL 0 opened by a route follows the pitch wheel (x" + juce::String (bendRatio, 3) + ")");
     }
+
+    // Round 2 (her "fix everything"): renders with fixed seeds.
+    fixedRandomSeeds() = true;
+    struct RestoreSeeds { ~RestoreSeeds() { fixedRandomSeeds() = false; } } restoreSeeds;
+    const auto renderNote = [] (IlanaSynthAudioProcessor& p, int blocks, const std::function<void (int, juce::MidiBuffer&)>& each,
+                                int fromBlock, int toBlock, bool startNote = true)
+    {
+        juce::AudioBuffer<float> buffer (2, 256);
+        double sum = 0.0;
+        int crossings = 0;
+        float last = 0.0f;
+        for (int block = 0; block < blocks; ++block)
+        {
+            buffer.clear();
+            juce::MidiBuffer midi;
+            if (block == 0 && startNote)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 57, (juce::uint8) 110), 0);
+            if (each)
+                each (block, midi);
+            p.processBlock (buffer, midi);
+            if (block >= fromBlock && block < toBlock)
+                for (int i = 0; i < 256; ++i)
+                {
+                    const auto x = buffer.getSample (0, i);
+                    sum += (double) x * x;
+                    crossings += (last < 0.0f && x >= 0.0f) ? 1 : 0;
+                    last = x;
+                }
+        }
+        return std::pair<double, int> { 10.0 * std::log10 (sum / ((toBlock - fromBlock) * 256.0) + 1.0e-20), crossings };
+    };
+
+    // PLAY's Filter 2 switch is a real on/off: off passes the signal on
+    // whatever the type (a high pass used to be "switched off" by its
+    // cutoff, which muted it).
+    {
+        const auto level = [&] (int type, float cutoff, bool on)
+        {
+            IlanaSynthAudioProcessor p;
+            p.setNonRealtime (true);
+            p.prepareToPlay (48000.0, 256);
+            p.loadFactoryPreset (0);
+            setPlain (p, "f2_type", (float) type);
+            setPlain (p, "f2_cutoff", cutoff);
+            setPlain (p, "f2_on", on ? 1.0f : 0.0f);
+            p.runAsyncUpdateForTest();
+            return renderNote (p, 60, {}, 20, 60).first;
+        };
+        const auto highPassOn = level (2, 18000.0f, true);
+        const auto highPassOff = level (2, 18000.0f, false);
+        const auto openLowPass = level (0, 20000.0f, true);
+        check (highPassOff > highPassOn + 6.0, "filter 2 off: a high pass switched off passes the sound ("
+                                                 + juce::String (highPassOn, 1) + " -> " + juce::String (highPassOff, 1) + " dB)");
+        check (std::abs (highPassOff - openLowPass) < 1.5, "filter 2 off: sounds like the old open low pass ("
+                                                              + juce::String (highPassOff - openLowPass, 2) + " dB)");
+    }
+
+    // BEND moved while the wheel is held reaches the held bend.
+    {
+        IlanaSynthAudioProcessor p;
+        p.setNonRealtime (true);
+        p.prepareToPlay (48000.0, 256);
+        p.loadFactoryPreset (0);
+        setPlain (p, "bend_range", 2.0f);
+        p.runAsyncUpdateForTest();
+        auto* range = p.apvts.getParameter ("bend_range");
+        const auto first = renderNote (p, 50, [] (int block, juce::MidiBuffer& midi)
+        {
+            if (block == 0)
+                midi.addEvent (juce::MidiMessage::pitchWheel (1, 16383), 0);
+        }, 20, 50).second;
+        range->setValueNotifyingHost (range->convertTo0to1 (12.0f));
+        p.runAsyncUpdateForTest();
+        const auto second = renderNote (p, 30, {}, 0, 30, false).second;
+        check ((double) second / juce::jmax (1, first) > 1.4, "bend range: a held bend follows BEND 2 -> 12 (x"
+                                                                + juce::String ((double) second / juce::jmax (1, first), 2) + ")");
+    }
+
+    // A section colour is one undo step, like any other edit.
+    {
+        IlanaSynthAudioProcessor p;
+        p.setNonRealtime (true);
+        p.prepareToPlay (48000.0, 256);
+        p.loadFactoryPreset (0);
+        const auto before = p.getSectionColour (0);
+        p.performEdit ("Section colour", [&] { p.setSectionColour (0, 0xff123456u); });
+        check (p.getSectionColour (0) == 0xff123456u, "colours: the pick lands");
+        p.getUndoManager().undo();
+        check (p.getSectionColour (0) == before, "colours: undo takes the colour back");
+    }
 }

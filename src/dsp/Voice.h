@@ -373,6 +373,7 @@ struct VoiceParams
 
     FilterParams filter1;
     FilterParams filter2;
+    bool filter2Off = false; // f2_on off: Filter 2 passes its input
     bool filtersParallel = false;
     float filterBalance = 0.0f; // parallel only: -1 all Filter 1 .. +1 all Filter 2
     // Roadmap step 16: the ROUTING cables, compiled. Off (as in every older
@@ -565,6 +566,8 @@ inline int voiceKnobOffsetFor (int destination)
 // stereo route into a string knob keeps its own path (it splits the sides).
 inline bool isVoiceKnobSlot (const Mod::Slot& slot)
 {
+    if (slot.voiceKnobOverflow)
+        return false;
     if (! (slot.perVoiceLfo || Mod::isPerVoiceSource (slot.source) || Mod::isPerVoiceSource (slot.aux)))
         return false;
     if (slot.stereo && Mod::StereoString::targetFor (slot.destination).osc >= 0)
@@ -581,7 +584,7 @@ struct VoiceSharedState
     float modWheel[17] {};
     float expression[17] { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
     float pressure[17] {};
-    double masterBendSemitones = 0.0;
+    double masterBendWheel = 0.0; // -1..1; each voice scales it by the BEND range it has now
     double lastNoteFrequency = 0.0; // 0: none yet
 };
 
@@ -611,6 +614,7 @@ public:
     void setParams (const VoiceParams& newParams)
     {
         params = newParams;
+        updateBend();
         voiceKnobsApplied = false; // fresh knobs: nothing of ours to take back
         paramsFresh = true; // the next render eases the glided knobs to these (BlockGlide)
     }
@@ -775,7 +779,8 @@ public:
     void aftertouchChanged (int newValue) override;
     void setSharedState (VoiceSharedState* state) noexcept { shared = state; }
     // MPE master-channel bend, in semitones (added to this voice's own bend).
-    void setMasterBend (double semitones) noexcept { masterBend = semitones; bendSemitones = memberBend + masterBend; }
+    // The MPE master channel's wheel, -1..1 (scaled by masterBendRange).
+    void setMasterBend (double wheel) noexcept { masterBendWheel = wheel; updateBend(); }
     bool isMpe() const noexcept { return params.mpe; }
     // What the note started with (the regression tests read these).
     float getModWheel() const noexcept { return modWheel; }
@@ -935,7 +940,28 @@ private:
     int filter2Fade = 0;
     bool filter2FadeLinked = true, filter2Ran = false;
     // Filter 2 over a block: the model in use, and while a switch fades, the old one faded out.
+    // Filter 2 switched off: its output fades to its input over
+    // filterFadeLength samples, then the filter is skipped.
+    float filter2BypassMix = 0.0f;
     void processFilter2Block (const float* inL, const float* inR, float* outL, float* outR, int n)
+    {
+        const auto bypassTarget = params.filter2Off ? 1.0f : 0.0f;
+        if (bypassTarget == 1.0f && filter2BypassMix >= 1.0f)
+        {
+            std::copy (inL, inL + n, outL);
+            std::copy (inR, inR + n, outR);
+            return;
+        }
+        processFilter2Model (inL, inR, outL, outR, n);
+        if (bypassTarget > 0.0f || filter2BypassMix > 0.0f)
+            for (int s = 0; s < n; ++s)
+            {
+                filter2BypassMix = juce::jlimit (0.0f, 1.0f, filter2BypassMix + (bypassTarget - 0.5f) * (2.0f / (float) filterFadeLength));
+                outL[s] += (inL[s] - outL[s]) * filter2BypassMix;
+                outR[s] += (inR[s] - outR[s]) * filter2BypassMix;
+            }
+    }
+    void processFilter2Model (const float* inL, const float* inR, float* outL, float* outR, int n)
     {
         if (filter2Open)
             processOpenPairBlock (openFilter2L, openFilter2R, filter2Linked, inL, inR, outL, outR, n);
@@ -1175,7 +1201,9 @@ private:
     // Control-rate modulation (evaluateModsRated): each slot's group and the
     // routed destinations of each. The interval is updateSubBlock's.
     static constexpr int modControlInterval = 16;
-    std::array<std::array<int, Mod::maxSlots>, 2> groupSlots {}, groupDestinations {}; // [0] slow, [1] per sample
+    std::array<std::array<int, Mod::maxSlots>, 2> groupSlots {}; // [0] slow, [1] per sample
+    // Every active destination plus every stereo one can land in one group.
+    std::array<std::array<int, Mod::maxSlots + Mod::numStereoDestinations>, 2> groupDestinations {};
     std::array<int, 2> numGroupSlots {}, numGroupDestinations {};
     std::array<float, (size_t) Mod::Destination::Count + Mod::numStereoDestinations> sampleMods {};
 
@@ -1239,8 +1267,14 @@ private:
     double sampleRate = 44100.0;
     double baseFrequency = 440.0;
     double currentFrequency = 440.0;
-    double bendSemitones = 0.0; // memberBend + masterBend
-    double memberBend = 0.0, masterBend = 0.0;
+    double bendSemitones = 0.0; // the wheels times the BEND ranges
+    // The wheels as -1..1: a BEND range moved while the wheel is held
+    // reaches the held bend (updateBend, every setParams).
+    double memberBendWheel = 0.0, masterBendWheel = 0.0;
+    void updateBend() noexcept
+    {
+        bendSemitones = memberBendWheel * (double) params.pitchBendRange + masterBendWheel * (double) params.masterBendRange;
+    }
     VoiceSharedState* shared = nullptr;
     float velocityLevel = 1.0f;
     // The note and velocity (1-127) a multisample picks its region by, and the

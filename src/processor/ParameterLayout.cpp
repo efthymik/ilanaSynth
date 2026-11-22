@@ -1482,5 +1482,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout IlanaSynthAudioProcessor::cr
     // (migrateBodyLevel), so they sound as they did. No knob.
     addBool ("body_legacy_level", "Body Legacy Level", false);
 
+    // Filter 2 on or off (bug sweep 2026-11-22). Off passes the signal by
+    // Filter 2 whatever its type; PLAY's switch used to push CUTOFF to the
+    // top, which on a High Pass or Band Pass muted instead. On for every
+    // old patch.
+    addBool ("f2_on", "F2 On", true);
+
     return layout;
 }

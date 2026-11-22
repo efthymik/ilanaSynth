@@ -697,7 +697,7 @@ inline const std::vector<FactoryPreset>& getLegacyPresets()
             { "f1_cutoff", 4800.0f }, { "f1_reso", 0.15f },
             { "amp_attack", 1.8f }, { "amp_sustain", 0.85f }, { "amp_release", 5.0f },
             { "fx_slot1", 11 }, { "fx_slot10", 13 },
-            { "fx_smear_on", 1 }, { "fx_smear_size", 140.0f }, { "fx_smear_density", 0.4f }, { "fx_smear_mix", 0.4f },
+            { "fx_smear_on", 1 }, { "fx_smear_size", 140.0f }, { "fx_smear_density", 2.0f }, { "fx_smear_mix", 0.4f },
             { "fx_reverb_on", 1 }, { "fx_reverb_type", 3 }, { "fx_reverb_size", 0.85f }, { "fx_reverb_mix", 0.45f },
         } },
 

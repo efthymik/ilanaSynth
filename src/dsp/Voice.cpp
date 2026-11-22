@@ -440,10 +440,10 @@ void Voice::startNote (int midiNoteNumber, float velocity, juce::SynthesiserSoun
         modWheel = shared->modWheel[channel];
         expressionValue = shared->expression[channel];
         aftertouchValue = shared->pressure[channel];
-        masterBend = params.mpe ? shared->masterBendSemitones : 0.0;
+        masterBendWheel = params.mpe ? shared->masterBendWheel : 0.0;
     }
     else
-        masterBend = 0.0;
+        masterBendWheel = 0.0;
 
     pitchWheelMoved (currentPitchWheelPosition);
 
@@ -613,6 +613,7 @@ void Voice::startNote (int midiNoteNumber, float velocity, juce::SynthesiserSoun
 
         lastStringMode[osc] = settings.stringMode;
         lastSampleMode[osc] = settings.sampleMode;
+        lastEnabled[osc] = params.oscillatorEnabled[osc];
         previousOsc[osc] = 0.0f;
     }
 
@@ -624,6 +625,7 @@ void Voice::startNote (int midiNoteNumber, float velocity, juce::SynthesiserSoun
         filter->reset();
     filter1Linked = filter2Linked = true;
     filter1Open = filter2Open = false;
+    filter2BypassMix = params.filter2Off ? 1.0f : 0.0f;
     filter1Fade = 0;
     filter1Ran = false;
     filter2Fade = 0;
@@ -693,6 +695,7 @@ void Voice::resetForNewPatch()
         filter->reset();
     filter1Linked = filter2Linked = true;
     filter1Open = filter2Open = false;
+    filter2BypassMix = params.filter2Off ? 1.0f : 0.0f;
     filter1Fade = 0;
     filter1Ran = false;
     filter2Fade = 0;
@@ -855,10 +858,8 @@ void Voice::pitchWheelMoved (int newValue)
 {
     // MPE: channel 1 is the master channel, its bend reaches every voice
     // through setMasterBend; a note on it has no member bend of its own.
-    memberBend = params.mpe && playingChannel() == 1
-                     ? 0.0
-                     : ((double) newValue - 8192.0) / 8192.0 * (double) params.pitchBendRange;
-    bendSemitones = memberBend + masterBend;
+    memberBendWheel = params.mpe && playingChannel() == 1 ? 0.0 : ((double) newValue - 8192.0) / 8192.0;
+    updateBend();
 }
 
 void Voice::controllerMoved (int controllerNumber, int newValue)
@@ -920,6 +921,14 @@ void Voice::classifySlowLfos()
             if (const auto lfo = Mod::lfoBIndexFor (source); lfo >= 0)
                 lfoSlow[lfo] = false;
         }
+    }
+    // The WEST gate reads its source every sample (like a per-sample route).
+    if (params.west.on && params.west.source != 0)
+    {
+        if (const auto lfo = Mod::lfoIndexFor ((Mod::Source) params.west.source); lfo >= 0)
+            lfoSlow[lfo] = false;
+        if (const auto lfo = Mod::lfoBIndexFor ((Mod::Source) params.west.source); lfo >= 0)
+            lfoSlow[lfo] = false;
     }
 }
 
@@ -1707,7 +1716,8 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
     // checkpoint; its string transition is recorded before sample sync.
     configureStrings (2);
 
-    if (params.oscillators[2].stringMode && ! lastStringMode[2] && params.oscillatorEnabled[2])
+    // A string switched to, or switched on mid-note, is plucked.
+    if (params.oscillators[2].stringMode && (! lastStringMode[2] || ! lastEnabled[2]) && params.oscillatorEnabled[2])
         for (int u = 0; u < stringsPlaying (2); ++u)
             stringFor (2, u).trigger (velocityLevel);
 
@@ -1752,7 +1762,8 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
     subOscEnableSmooth.setTargetValue (params.subOscEnabled ? 1.0f : 0.0f);
     subOsc.setWavetable (params.subOscTable);
 
-    bool modeChanged[VoiceParams::numOscillators] {};
+    bool modeChanged[VoiceParams::numOscillators] {}, enabledBefore[VoiceParams::numOscillators] {};
+    std::copy (std::begin (lastEnabled), std::end (lastEnabled), std::begin (enabledBefore));
     for (int osc = 0; osc < VoiceParams::numOscillators; ++osc)
         modeChanged[osc] = params.oscillators[osc].stringMode != lastStringMode[osc]
                            || params.oscillators[osc].sampleMode != lastSampleMode[osc];
@@ -1789,7 +1800,8 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
     for (int osc = 0; osc < 2; ++osc)
         configureStrings (osc);
 
-    if (params.oscillators[0].stringMode && ! lastStringMode[0])
+    const auto switchedOn = [&] (int osc) { return ! enabledBefore[osc] && params.oscillatorEnabled[osc]; };
+    if (params.oscillators[0].stringMode && (! lastStringMode[0] || switchedOn (0)))
         for (int u = 0; u < stringsPlaying (0); ++u)
             stringFor (0, u).trigger (velocityLevel);
 
@@ -1800,7 +1812,7 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
             oscEnableSmooth[osc].setTargetValue (params.oscillatorEnabled[osc] ? 1.0f : 0.0f);
         }
 
-    if (params.oscillators[1].stringMode && ! lastStringMode[1])
+    if (params.oscillators[1].stringMode && (! lastStringMode[1] || switchedOn (1)))
         for (int u = 0; u < stringsPlaying (1); ++u)
             stringFor (1, u).trigger (velocityLevel);
 
@@ -1813,7 +1825,7 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
             continue;
 
         configureStrings (osc);
-        if (params.oscillators[osc].stringMode && ! lastStringMode[osc])
+        if (params.oscillators[osc].stringMode && (! lastStringMode[osc] || switchedOn (osc)))
             for (int u = 0; u < stringsPlaying (osc); ++u)
                 stringFor (osc, u).trigger (velocityLevel);
         lastStringMode[osc] = params.oscillators[osc].stringMode;
@@ -2376,8 +2388,13 @@ void Voice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSa
             {
                 const auto both1L = bothFilter1L.process (drive (busL[FilterRoute::Both], drive1.l));
                 const auto both1R = bothFilter1R.process (drive (busR[FilterRoute::Both], drive1.r));
-                const auto both2L = bothFilter2L.process (drive (busL[FilterRoute::Both], drive2.l));
-                const auto both2R = bothFilter2R.process (drive (busR[FilterRoute::Both], drive2.r));
+                auto both2L = bothFilter2L.process (drive (busL[FilterRoute::Both], drive2.l));
+                auto both2R = bothFilter2R.process (drive (busR[FilterRoute::Both], drive2.r));
+                if (params.filter2Off) // Filter 2 off: its half of Both passes the bus
+                {
+                    both2L = busL[FilterRoute::Both];
+                    both2R = busR[FilterRoute::Both];
+                }
                 sampleL += (both1L + both2L) * 0.7071f;
                 sampleR += (both1R + both2R) * 0.7071f;
             }

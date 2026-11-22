@@ -130,12 +130,11 @@ public:
         // MPE: the master channel's bend moves every voice, whatever channel it plays on.
         if (midiChannel == 1 && isMpe())
         {
-            const auto range = (double) static_cast<Voice*> (voices.getFirst())->getMasterBendRange();
-            shared.masterBendSemitones = ((double) wheelValue - 8192.0) / 8192.0 * range;
+            shared.masterBendWheel = ((double) wheelValue - 8192.0) / 8192.0;
 
             for (auto* voice : voices)
                 if (auto* ilanaVoice = dynamic_cast<Voice*> (voice))
-                    ilanaVoice->setMasterBend (shared.masterBendSemitones);
+                    ilanaVoice->setMasterBend (shared.masterBendWheel);
         }
 
         Synthesiser::handlePitchWheel (midiChannel, wheelValue);

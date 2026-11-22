@@ -53,6 +53,8 @@ DROP_FX_SLOT = {"Tine Vowel Keys": (3,), "CZ Bitwise Lead": (5,), "Formant Opera
 # without it the held sound is ~14 dB quieter, +8 dB brings it back toward its old loudness (fingerprint peak -2.3 dBFS; the old one hit 0 dBFS).
 LEVEL_FIX = {"Formant Operator Lead": 8.0}
 MACRO_SOURCE = 12  # Macro 1; macro m is MACRO_SOURCE + m
+CLAMP = {"f1_cutoff": (20.0, 20000.0), "f2_cutoff": (20.0, 20000.0), "f1_drive": (1.0, 10.0), "f2_drive": (1.0, 10.0),
+         "amp_attack": (0.001, 5.0)}
 
 
 def clean(name, params):
@@ -70,6 +72,12 @@ def clean(name, params):
     for n in DROP_FX_SLOT.get(name, ()):
         params.pop(f"fx_slot{n}", None)
         params.pop(f"fx_slot{n}_mix", None)
+    # Values the parameter clamps anyway, written as it plays them (bug sweep 2026-11-22).
+    for key, (low, high) in CLAMP.items():
+        if key in params:
+            params[key] = min(high, max(low, params[key]))
+    for key in [k for k in params if k.endswith("_string_slap")]:
+        params[key] = 1.0 if params[key] >= 0.5 else 0.0
     return params
 
 
