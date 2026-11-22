@@ -172,6 +172,10 @@ private:
     double flangerPhase = 0.0;
     double dimPhase = 0.0;
     double tremoloPhase = 0.0;
+    // Tremolo S&H (shape 5): a new random level each cycle, its own generator
+    // (fixed seed, restarted with the phase), eased over ~2 ms so steps don't click.
+    juce::Random tremoloRandom { 0x7e301d };
+    float tremoloHeld = 0.0f, tremoloEased = 0.0f;
     double shifterPhase = 0.0;
     double ringPhase = 0.0;
     double gatePhase = 0.0;

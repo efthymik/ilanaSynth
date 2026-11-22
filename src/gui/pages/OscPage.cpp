@@ -232,12 +232,14 @@ void StringPartialsView::paint (juce::Graphics& g)
     const auto plot = area.reduced (0.0f, 2.0f);
 
     const auto damp = eased[0], stiff = eased[1];
-    const auto pos = juce::jlimit (0.05f, 0.5f, eased[2] > 0.001f ? eased[2] : 0.25f);
+    // (At 0 the string plays its natural strike with no comb.)
+    const auto combed = eased[2] > 0.001f;
+    const auto pos = juce::jlimit (0.02f, 0.5f, combed ? eased[2] : 0.125f);
     constexpr int count = 16;
     const auto slot = plot.getWidth() / (float) count;
     for (int n = 1; n <= count; ++n)
     {
-        const auto comb = 0.3f + 0.7f * std::abs (std::sin (juce::MathConstants<float>::pi * (float) n * pos));
+        const auto comb = combed ? 0.3f + 0.7f * std::abs (std::sin (juce::MathConstants<float>::pi * (float) n * pos)) : 1.0f;
         // (Drawn on a square-root scale, so the upper partials still show in a 28 px row.)
         const auto level = std::sqrt (juce::jlimit (0.02f, 1.0f, comb / std::pow ((float) n, 0.55f + 1.4f * damp) * (1.0f + 0.4f * stiff * (float) (n % 3))));
         const auto bar = juce::Rectangle<float> (juce::jmin (tall ? 7.0f : 4.0f, slot * 0.6f), plot.getHeight() * level)
@@ -251,15 +253,17 @@ void StringPartialsView::paint (juce::Graphics& g)
     }
 }
 
+// With its routes, as the newest note hears it.
 float StringPartialsView::read (const char* suffix) const
 {
-    const auto* value = processorRef.apvts.getRawParameterValue (prefix + suffix);
-    return value != nullptr ? value->load() : 0.0f;
+    return modulatedParamValue (processorRef, prefix + suffix);
 }
 
 void StringPartialsView::follow (float seconds)
 {
-    const std::array<float, 3> now { read ("_string_damp"), read ("_string_stiffness"), read ("_string_excite_pos") };
+    // POSITION as the string takes it: half the knob (or a legacy PICK POS).
+    const std::array<float, 3> now { read ("_string_damp"), read ("_string_stiffness"),
+                                     0.5f * juce::jmax (read ("_string_excite_pos"), read ("_string_pick_pos")) };
     auto changed = false;
 
     for (size_t i = 0; i < 3; ++i)

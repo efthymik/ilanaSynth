@@ -661,10 +661,11 @@ void WestDisplay::paint (juce::Graphics& g)
     g.endTransparencyLayer();
 }
 
+// With its routes, as the voices hear it: a route into FOLD or SYMMETRY
+// moves the curve (it was drawn at the bare knob).
 float WestDisplay::read (const char* id) const
 {
-    const auto* value = processorRef.apvts.getRawParameterValue (id);
-    return value != nullptr ? value->load() : 0.0f;
+    return modulatedParamValue (processorRef, id);
 }
 
 void WestDisplay::timerCallback ()
@@ -735,10 +736,11 @@ void ParamPicture::paintOverChildren (juce::Graphics& g)
     g.drawEllipse (ring.reduced (1.0f), 1.5f);
 }
 
+// With its routes (ilana 2026-11-21, "check for blindspots like this"): the
+// body, board, strings and resonance pictures moved only with the bare knob.
 float ParamPicture::read (const char* id) const
 {
-    const auto* value = processorRef.apvts.getRawParameterValue (id);
-    return value != nullptr ? value->load() : 0.0f;
+    return modulatedParamValue (processorRef, id);
 }
 
 void ParamPicture::beginDrag ()
@@ -861,14 +863,19 @@ void SubWaveDisplay::paint (juce::Graphics& g)
     const auto plot = bounds.reduced (4.0f, 2.0f);
     const auto shape = juce::roundToInt (read ("sub_shape"));
     const auto cycles = juce::roundToInt (read ("sub_octave")) == 1 ? 1.0 : 2.0;
+    const auto colour = (double) juce::jlimit (0.0f, 1.0f, read ("sub_colour"));
     juce::Path path;
     const auto steps = juce::jmax (16, (int) plot.getWidth() * 2);
     for (int i = 0; i <= steps; ++i)
     {
         const auto phase = std::fmod ((double) i / (double) steps * cycles, 1.0);
-        const auto v = shape == 1 ? (phase < 0.5 ? 1.0 : -1.0)
-                       : shape == 2 ? 1.0 - 2.0 * phase
-                                    : std::sin (juce::MathConstants<double>::twoPi * phase);
+        auto v = shape == 1 ? (phase < 0.5 ? 1.0 : -1.0)
+                 : shape == 2 ? 1.0 - 2.0 * phase
+                              : std::sin (juce::MathConstants<double>::twoPi * phase);
+        // COLOUR's tanh drive, as the voice applies it (colourSub): it
+        // rounds the square and saw and fattens the sine (the picture didn't change).
+        if (colour > 0.0005)
+            v = std::tanh (v * (1.0 + 6.0 * colour)) / std::tanh (1.0 + 6.0 * colour);
         const auto point = juce::Point<float> (plot.getX() + (float) i / (float) steps * plot.getWidth(), plot.getCentreY() - (float) v * plot.getHeight() * 0.5f);
         if (i == 0)
             path.startNewSubPath (point);

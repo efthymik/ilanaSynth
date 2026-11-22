@@ -201,27 +201,49 @@ public:
     {
         IlanaTheme::paintWell (g, getLocalBounds().toFloat(), 6.0f);
         const auto colour = fxColour (16);
-        const auto steps = numSteps();
+        const auto euclid = euclidTakesOver();
+        const auto columns = numColumns();
+        const auto steps = euclid ? columns : numSteps();
         const auto playing = processorRef.getGateDisplayStep();
-        auto bars = getBarBounds().toFloat();
-        const auto columnWidth = bars.getWidth() / 16.0f;
+        const auto bars = getBarBounds().toFloat();
         const auto open = gateLength();
+        const auto chosen = pattern();
+        // Random, Build and Break play other steps every cycle: there is no fixed row to draw.
+        const auto moving = ! euclid && (chosen == 4 || chosen == 6 || chosen == 7);
+        const auto hits = juce::jlimit (0, 32, juce::roundToInt (readValue ("euc_hits")));
+        const auto rotate = juce::jlimit (0, 31, juce::roundToInt (readValue ("euc_rotate")));
 
         g.setColour (IlanaTheme::Ui::text3);
         g.setFont (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
-        g.drawText ("STEPS", getLocalBounds().removeFromTop (14).reduced (9, 0), juce::Justification::centredLeft);
+        auto title = getLocalBounds().removeFromTop (14).reduced (9, 0);
+        if (const auto swing = swingAmount(); swing > 0.004f)
+            g.drawText ("SWING " + juce::String (juce::roundToInt (swing * 100.0f)) + "%", title, juce::Justification::centredRight);
+        juce::String label ("STEPS");
+        if (euclid)
+            label = "EUCLID  " + juce::String (hits) + " IN " + juce::String (columns);
+        else if (chosen == 4)
+            label = "RANDOM  NEW STEPS EVERY CYCLE";
+        else if (chosen == 6)
+            label = "BUILD  ONE MORE STEP OPENS EACH CYCLE";
+        else if (chosen == 7)
+            label = "BREAK  ONE MORE STEP CLOSES EACH CYCLE";
+        g.drawText (label, title, juce::Justification::centredLeft);
 
-        for (int step = 0; step < 16; ++step)
+        for (int step = 0; step < columns; ++step)
         {
-            const auto cell = bars.withWidth (columnWidth).reduced (1.5f, 0.0f);
-            bars.removeFromLeft (columnWidth);
+            const auto cell = cellFor (step, columns, bars).reduced (1.5f, 0.0f);
             const auto active = step < steps;
-            const auto value = level (step);
+            const auto value = euclid ? (euclidHit (step, hits, columns, rotate) ? 1.0f : 0.0f) : (moving ? 0.0f : level (step));
 
             g.setColour (juce::Colours::white.withAlpha (active ? (step % 4 == 0 ? 0.11f : 0.07f) : 0.02f));
             g.fillRoundedRectangle (cell, 2.0f);
 
-            if (active && value > 0.001f)
+            if (active && moving)
+            {
+                g.setColour (colour.withAlpha (0.13f));
+                g.fillRoundedRectangle (cell, 2.0f);
+            }
+            else if (active && value > 0.001f)
             {
                 // LENGTH under 100 % draws the open part of the step only.
                 const auto bar = cell.withTop (cell.getBottom() - cell.getHeight() * value);
@@ -239,6 +261,9 @@ public:
 
     void mouseDown (const juce::MouseEvent& event) override
     {
+        if (euclidTakesOver()) // (the rhythm comes from the Euclid card; these steps don't play)
+            return;
+
         gestures.begin();
         lastStep = -1;
 
@@ -308,11 +333,34 @@ private:
 
     int stepAt (juce::Point<int> position) const
     {
-        const auto bars = getBarBounds();
-        return juce::jlimit (0, 15, (int) ((float) (position.x - bars.getX()) / ((float) bars.getWidth() / 16.0f)));
+        const auto bars = getBarBounds().toFloat();
+        const auto columns = numColumns();
+
+        for (int step = 0; step < columns; ++step)
+            if ((float) position.x < cellFor (step, columns, bars).getRight())
+                return step;
+
+        return columns - 1;
     }
 
-    int numSteps() const { return (int) processorRef.apvts.getRawParameterValue ("fx_gate_steps")->load(); }
+    // While EUCLID is on and aimed at the Trance Gate it plays the gate (its own steps, up to 32); the pattern is not heard.
+    float readValue (const char* id) const { return processorRef.apvts.getRawParameterValue (id)->load(); }
+    bool euclidTakesOver() const { return readValue ("euc_on") > 0.5f && juce::roundToInt (readValue ("euc_target")) == 2; }
+    int numColumns() const { return euclidTakesOver() ? juce::jlimit (2, 32, juce::roundToInt (readValue ("euc_steps"))) : 16; }
+    float swingAmount() const { return juce::jlimit (0.0f, 0.5f, readValue ("fx_gate_swing")); }
+
+    // A step's cell. SWING makes every pair's first step 1 + SWING long and its second 1 - SWING, as the gate plays them.
+    juce::Rectangle<float> cellFor (int step, int columns, juce::Rectangle<float> bars) const
+    {
+        const auto unit = bars.getWidth() / (float) columns;
+        const auto swing = swingAmount();
+        const auto second = (step & 1) != 0;
+        const auto x = bars.getX() + unit * (float) (step - (second ? 1 : 0)) + (second ? unit * (1.0f + swing) : 0.0f);
+        const auto width = unit * (second ? 1.0f - swing : 1.0f + swing);
+        return { x, bars.getY(), juce::jmax (1.0f, juce::jmin (width, bars.getRight() - x)), bars.getHeight() };
+    }
+
+    int numSteps() const { return (int) readValue ("fx_gate_steps"); }
     int pattern() const { return (int) processorRef.apvts.getRawParameterValue ("fx_gate_pattern")->load(); }
     float gateLength() const { return juce::jlimit (0.05f, 1.0f, processorRef.apvts.getRawParameterValue ("fx_gate_length")->load()); }
 
