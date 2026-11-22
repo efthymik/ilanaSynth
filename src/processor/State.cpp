@@ -196,6 +196,19 @@ juce::ValueTree IlanaSynthAudioProcessor::buildFullState()
     if (const auto fx = getFxPatch(); ! fx.isDefault())
         state.appendChild (FxPatchData::toValueTree (fx), nullptr);
 
+    // FX CHAIN 1 / CHAIN 2: the chain not in the rack now is saved with the
+    // patch (the one in the rack is its parameters and FxPatch above).
+    if (chainBValid)
+    {
+        state.setProperty ("fxOtherChain", showingChainA ? chainB : chainA, nullptr);
+        state.setProperty ("fxShowingChain", showingChainA ? 1 : 2, nullptr);
+    }
+    else
+    {
+        state.removeProperty ("fxOtherChain", nullptr);
+        state.removeProperty ("fxShowingChain", nullptr);
+    }
+
     // (The old DX7 mode's "Dx7" child is never written: a DX7 voice is
     // ordinary parameters now.)
     state.removeChild (state.getChildWithName ("Dx7"), nullptr);
@@ -555,6 +568,14 @@ void IlanaSynthAudioProcessor::applyFullState (const juce::ValueTree& stateIn)
                 setSectionColour (key, picked[(size_t) key]);
     }
     clipState.loadFrom (state);   // no Clips child: no clips
+    // FX CHAIN 1 / CHAIN 2 (none saved: one chain, CHAIN 1 showing).
+    {
+        const auto other = state.getProperty ("fxOtherChain").toString();
+        chainBValid = other.isNotEmpty();
+        showingChainA = ! chainBValid || (int) state.getProperty ("fxShowingChain", 1) != 2;
+        chainA = showingChainA ? juce::String() : other;
+        chainB = showingChainA ? other : juce::String();
+    }
     // No FxPatch child: no instances, no patcher graph. Applied after the
     // parameters (below), which it is checked against.
     const auto fxPatchLoaded = FxPatchData::fromValueTree (state.getChildWithName (FxPatchData::patchTag));

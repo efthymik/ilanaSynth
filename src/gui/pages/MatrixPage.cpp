@@ -610,8 +610,34 @@ int MatrixPage::duplicateRow (int slot)
     return target;
 }
 
+MatrixPage::~MatrixPage()
+{
+    dropSoloOfOldPatch();
+    if (soloSlot < 0)
+        return;
+    // The routes the solo switched off come back on (no rows to redraw now).
+    processorRef.performEdit ("End solo", [this]
+    {
+        for (const auto other : soloMuted)
+            processorRef.setModSlotValue (other, "byp", 0.0f);
+        if (soloWasOff)
+            processorRef.setModSlotValue (soloSlot, "byp", 1.0f);
+    });
+}
+
+void MatrixPage::dropSoloOfOldPatch()
+{
+    if (soloSlot >= 0 && soloPatchGeneration != processorRef.getPatchGeneration())
+    {
+        soloSlot = -1;
+        soloMuted.clear();
+        soloWasOff = false;
+    }
+}
+
 void MatrixPage::soloRow (int slot)
 {
+    dropSoloOfOldPatch();
     const auto ending = soloSlot == slot;
     const auto previous = soloSlot;
     processorRef.performEdit (ending ? "End solo" : "Solo modulation", [this, slot, ending, previous]
@@ -630,6 +656,7 @@ void MatrixPage::soloRow (int slot)
             return;
 
         soloSlot = slot;
+        soloPatchGeneration = processorRef.getPatchGeneration();
         soloWasOff = processorRef.readModSlot (slot).bypass;
         processorRef.setModSlotValue (slot, "byp", 0.0f);
         for (int other = 0; other < Mod::maxSlots; ++other)
@@ -1381,6 +1408,7 @@ void MatrixPage::layoutList ()
 
 void MatrixPage::timerCallback ()
 {
+    dropSoloOfOldPatch();
     if (! IlanaAnim::showing (*this))
     {
         emptyShownSeconds = 0.0f;

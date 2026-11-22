@@ -3973,7 +3973,9 @@ void Voice::updateSubBlock (const float* mods, float filterEnvValue, float filte
             && oscEnableSmooth[osc].getCurrentValue() <= 0.0005f)
             continue;
 
-        if (osc == 2 && settings.level <= 0.0f)
+        // OSC 3 at LEVEL 0 is skipped, unless a route opens its level (it
+        // then plays and needs its pitch, warp and unison set up).
+        if (osc == 2 && settings.level <= 0.0f && mods[(int) D::SubLevel] <= 0.0f)
             continue;
 
         // The warp envelope (the CZ's DCW) opens both stages of the PD chain.

@@ -3487,12 +3487,27 @@ void IlanaSynthAudioProcessorEditor::loadPresetFile (const juce::File& file)
 
                                auto& processor = safeThis->processorRef;
                                safeThis->closeWavetableEditor(); // it works on the old patch's table
+                               IlanaAnim::armMorphs(); // (as a load from the browser)
                                processor.beginEdit ("Load " + file.getFileNameWithoutExtension());
+                               const auto keptRack = FxPage::keepRackOnPresetLoad() ? processor.makeFxChainXml() : nullptr;
                                const auto loaded = processor.loadPresetFromFile (file);
+                               if (loaded && keptRack != nullptr)
+                                   processor.applyFxChainXml (*keptRack);
                                processor.endEdit();
 
                                if (! loaded)
+                               {
                                    safeThis->presetDisplay.showNotice ("COULDN'T LOAD");
+                                   return;
+                               }
+                               // The EDITED marker measures from this file now.
+                               auto& self = *safeThis;
+                               self.presetLoadFlash = 1.0f;
+                               IlanaAnim::notePresetLoad();
+                               IlanaAnim::playMorphs();
+                               self.animator.startTimerHz (60);
+                               self.updateHeaderButtons();
+                               self.rememberLoadedFingerprint();
                            });
 }
 

@@ -1553,6 +1553,9 @@ void FxPage::updateVisibility ()
         part->setVisible (false); // (placeCard shows them on the FILTER card in front)
 
     library->refresh();
+    // (A patch load sets which chain shows: the pills follow it here.)
+    chainAButton.setToggleState (processorRef.isShowingChainA(), juce::dontSendNotification);
+    chainBButton.setToggleState (! processorRef.isShowingChainA(), juce::dontSendNotification);
     copyChainButton.setButtonText (processorRef.isShowingChainA() ? "COPY TO 2" : "COPY TO 1");
     copyChainButton.setTooltip (processorRef.isShowingChainA() ? "Copy this whole chain over chain 2" : "Copy this whole chain over chain 1");
 
@@ -3134,10 +3137,13 @@ void FxPage::chooseAirwindows (int algorithm)
         }
     };
 
-    for (int k = 0; k < info.numKnobs; ++k)
-        set ("fx_aw_p" + juce::String (k + 1), info.knobs[k].defaultValue);
-
-    set ("fx_aw_algo", (float) algorithm);
+    // One undo step for the pick and its knobs' defaults.
+    processorRef.performEdit (airwindowsDisplayName (info.name), [&]
+    {
+        for (int k = 0; k < info.numKnobs; ++k)
+            set ("fx_aw_p" + juce::String (k + 1), info.knobs[k].defaultValue);
+        set ("fx_aw_algo", (float) algorithm);
+    });
     updateVisibility();
     repaint();
 }
@@ -3251,9 +3257,12 @@ void FxPage::chooseCategoryEffect (int c, int choice)
         }
     };
 
-    for (int k = 0; k < info.numKnobs; ++k)
-        set (prefix + "_p" + juce::String (k + 1), info.knobs[k].defaultValue);
-    set (prefix + "_algo", (float) choice);
+    processorRef.performEdit (airwindowsDisplayName (info.name), [&]
+    {
+        for (int k = 0; k < info.numKnobs; ++k)
+            set (prefix + "_p" + juce::String (k + 1), info.knobs[k].defaultValue);
+        set (prefix + "_algo", (float) choice);
+    });
     updateVisibility();
     repaint();
 }

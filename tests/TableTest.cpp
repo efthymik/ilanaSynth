@@ -109,6 +109,7 @@ void timedRun (const char* name, Suite&& suite)
 #include "HostIntegrationTests.inc"
 #include "HostHardeningTests.inc"
 #include "HardeningTests.inc"
+#include "SweepTests.inc"
 #include "DemoRender.inc"
 #include "OldStateTests.inc"
 
@@ -351,6 +352,13 @@ int main()
     {
         runClipTests();
         std::cout << (failures == 0 ? "CLIP TESTS PASSED" : "CLIP TESTS FAILED") << " (" << failures << " failures)" << std::endl;
+        return failures == 0 ? 0 : 1;
+    }
+
+    if (juce::SystemStats::getEnvironmentVariable ("ILANA_SWEEP_TEST", "").isNotEmpty())
+    {
+        runSweepFixTests();
+        std::cout << (failures == 0 ? "SWEEP TESTS PASSED" : "SWEEP TESTS FAILED") << " (" << failures << " failures)" << std::endl;
         return failures == 0 ? 0 : 1;
     }
 
@@ -908,6 +916,7 @@ int main()
     timedRun ("runHostIntegrationTests", [] { runHostIntegrationTests(); });
     timedRun ("runHostHardeningTests", [] { runHostHardeningTests(); });
     timedRun ("runHardeningTests", [] { runHardeningTests(); });
+    timedRun ("runSweepFixTests", [] { runSweepFixTests(); });
     timedRun ("runAirwindowsFilterTests", [] { runAirwindowsFilterTests(); });
 
     // Thread-ownership checks (src/ThreadChecks.h): the audio-thread flag is

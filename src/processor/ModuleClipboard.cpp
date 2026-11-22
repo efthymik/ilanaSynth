@@ -158,7 +158,10 @@ void IlanaSynthAudioProcessor::initModule (ModuleKind kind, int index)
     if (kind == ModuleKind::Lfo && juce::isPositiveAndBelow (index, numLfos))
     {
         after.curves[(size_t) index] = LfoCurve {};
-        after.draws[(size_t) index] = {};
+        // The drawn shape back to the sine a new patch draws (all zeros
+        // would leave the DRAW shape a flat line).
+        for (int i = 0; i < lfoDrawSteps; ++i)
+            after.draws[(size_t) index][(size_t) i] = (float) std::sin (juce::MathConstants<double>::twoPi * (double) i / (double) lfoDrawSteps);
     }
 
     if (kind == ModuleKind::Oscillator && juce::isPositiveAndBelow (index, OscillatorIds::count))

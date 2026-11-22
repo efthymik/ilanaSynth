@@ -57,6 +57,7 @@ class MatrixPage : public juce::Component,
 {
 public:
     explicit MatrixPage (IlanaSynthAudioProcessor& p);
+    ~MatrixPage() override;
 
     void paint (juce::Graphics& g) override;
 
@@ -237,6 +238,10 @@ private:
     int soloSlot = -1;
     std::vector<int> soloMuted;
     bool soloWasOff = false;
+    // The patch the solo belongs to: another patch loaded drops the solo
+    // (its list names the old patch's routes); the page closing ends it.
+    unsigned soloPatchGeneration = 0;
+    void dropSoloOfOldPatch();
 
     IlanaSynthAudioProcessor& processorRef;
     MatrixDockTarget dockTarget { processorRef };

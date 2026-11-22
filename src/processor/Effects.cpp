@@ -411,13 +411,20 @@ void IlanaSynthAudioProcessor::runFxSlot (int slot, juce::AudioBuffer<float>& bu
         // (A shared engine is left alone while another slot of the type runs.)
         if (fxClock - fxSlotLastRun[(size_t) (slot - 1)] > (std::int64_t) (2.0 * juce::jmax (1.0, currentSampleRate)) + fxBlockLength)
         {
-            auto shared = false;
+            auto shared = false, othersRunning = false;
             if (slotEngines[(size_t) (slot - 1)].load (std::memory_order_acquire) == nullptr)
                 for (int other = 0; other < numFxSlots; ++other)
-                    if (other != slot - 1 && (int) getParam (fxSlotIds[(size_t) other].type) == type
-                        && fxClock - fxSlotLastRun[(size_t) other] <= 2 * (std::int64_t) expectedBlockSize)
-                        shared = true;
-            if (! shared)
+                    if (other != slot - 1 && fxClock - fxSlotLastRun[(size_t) other] <= 2 * (std::int64_t) expectedBlockSize)
+                    {
+                        othersRunning = true;
+                        shared = shared || (int) getParam (fxSlotIds[(size_t) other].type) == type;
+                    }
+            // Another slot of another type runs on the same engine: only this
+            // type's memory starts empty (a whole reset cut that slot's reverb
+            // tail, Freeze or Stutter loop).
+            if (othersRunning && ! shared)
+                engineForSlot (slot - 1).resetMemoryOf (type);
+            else if (! shared)
                 engineForSlot (slot - 1).reset();
         }
         fxSlotLastRun[(size_t) (slot - 1)] = fxClock;
@@ -2829,6 +2836,61 @@ void IlanaSynthAudioProcessor::FxEngine::reset()
             filter.reset();
     }
     crushCounter = 0;
+}
+
+// The memory one effect type keeps (delay lines, loops, tails, filters),
+// emptied while other types go on running on the same engine.
+void IlanaSynthAudioProcessor::FxEngine::resetMemoryOf (int type)
+{
+    switch (type)
+    {
+        case 5:  combLine.reset(); break;
+        case 6:  phaser.reset(); break;
+        case 7:  chorus.reset(); break;
+        case 8:  haasLine.reset(); break;
+        case 9:
+            delayLine.reset();
+            duckEnvelope = 0.0f;
+            for (int channel = 0; channel < 2; ++channel)
+            {
+                tapeShift[channel].reset();
+                delayDampState[channel] = 0.0f;
+            }
+            break;
+        case 10:
+            stutterBuffer.clear();
+            stutterWasOn = stutterRecording = stutterArmed = false;
+            break;
+        case 11: for (auto& unit : smear) unit.reset(); break;
+        case 12: freeze.reset(); break;
+        case 13:
+            reverb.reset();
+            convolution.reset();
+            springComb.reset();
+            gatedReverbEnvelope = 0.0f;
+            reverbKeepDryHold = 0;
+            for (auto& shift : shimmerShift) shift.reset();
+            break;
+        case 14: flangerLine.reset(); flangerPhase = 0.0; break;
+        case 15: dimLine.reset(); dimPhase = 0.0; break;
+        case 17: tapeStopBuffer.clear(); break;
+        case 26: for (auto& shift : octaverShift) shift.reset(); break;
+        case 28:
+            feedbackLine.reset();
+            feedbackState[0] = feedbackState[1] = 0.0f;
+            break;
+        case 30: airwindowsModule.reset(); break;
+        case 31: vocoder.reset(); break;
+        case 42:
+            for (auto& unit : filterUnits)
+                unit.reset();
+            filterGlideStarted = false;
+            break;
+        default:
+            if (const auto category = airwindows::categoryForFxType (type); category >= 0)
+                awCategoryModules[(size_t) category].reset();
+            break; // (the rest keep only a few samples of state)
+    }
 }
 
 IlanaSynthAudioProcessor::FxEngine& IlanaSynthAudioProcessor::engineForSlot (int slotIndex) const
