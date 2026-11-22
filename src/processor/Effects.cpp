@@ -143,11 +143,6 @@ void IlanaSynthAudioProcessor::resetFxLfos()
     fxLfoLastNoteCount = noteOnCount.load (std::memory_order_relaxed);
 }
 
-float IlanaSynthAudioProcessor::getFxLfoValue (int id) const
-{
-    return juce::isPositiveAndBelow (id - 1, FxLfo::maxLfos) ? fxLfoShownValue[(size_t) (id - 1)].load (std::memory_order_relaxed) : 0.0f;
-}
-
 float IlanaSynthAudioProcessor::getFxLfoPhase (int id) const
 {
     return juce::isPositiveAndBelow (id - 1, FxLfo::maxLfos) ? fxLfoShownPhase[(size_t) (id - 1)].load (std::memory_order_relaxed) : 0.0f;

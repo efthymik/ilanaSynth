@@ -495,9 +495,6 @@ public:
         return FmOperatorInfo::tuningText (processorRef, osc) + "  " + FmOperatorInfo::levelText (processorRef, osc);
     }
 
-    // Every patch stands in DX stacks (review 7: one layout, one node style).
-    bool isStacked() const { return true; }
-
     // How many rows the stacks take.
     int getStackRows() const
     {
@@ -1115,98 +1112,6 @@ private:
             points.push_back (from * ((1.0f - t) * (1.0f - t)) + control * (2.0f * t * (1.0f - t)) + end * (t * t));
         }
         return points;
-    }
-
-    // Where each route's amount is written: beside its arrow's middle, on the
-    // first side that covers no node, caption, loop, route or earlier label.
-    std::vector<std::pair<std::pair<int, int>, juce::Rectangle<float>>> amountLabelLayout() const
-    {
-        const auto centres = operatorCentres();
-        const auto radius = operatorRadius();
-        const auto shown = shownOscillators();
-        std::vector<std::pair<int, int>> routes;
-        std::vector<std::vector<juce::Point<float>>> paths;
-        for (const auto source : shown)
-            for (const auto target : shown)
-                if (source != target && read (routeId (source, target)) >= 0.001f)
-                {
-                    routes.push_back ({ source, target });
-                    paths.push_back (routePoints (source, target, centres, radius));
-                }
-
-        std::vector<std::pair<std::pair<int, int>, juce::Rectangle<float>>> placed;
-        for (const auto& route : routes)
-        {
-            const auto source = route.first, target = route.second;
-            const auto from = centres[(size_t) source], to = centres[(size_t) target];
-            const auto direction = (to - from) / juce::jmax (1.0f, from.getDistanceFrom (to));
-            const juce::Point<float> normal (-direction.y, direction.x);
-            const auto bend = bendFor (source, target, centres, radius);
-            const auto both = read (routeId (target, source)) > 0.001f;
-            const auto end = landingPoint (source, target, centres, radius).value_or (to - direction * (radius + 6.0f));
-            // A long link carries its depth nearer the node it belongs to
-            // (its target), not at the middle of a span that may be 150 px
-            // from either (UI review 9, V9-10); short ones stay at the middle.
-            const auto along = from.getDistanceFrom (end) > radius * 6.0f ? 0.72f : 0.5f;
-            auto middle = (from + direction * radius) + (end - (from + direction * radius)) * along + normal * (both ? 7.0f : 0.0f);
-            if (bend != 0.0f)
-            {
-                const auto bentEnd = landingPoint (source, target, centres, radius).value_or (to);
-                const auto bentDirection = (bentEnd - from) / juce::jmax (1.0f, from.getDistanceFrom (bentEnd));
-                const auto control = (from + bentEnd) * 0.5f + juce::Point<float> (-bentDirection.y, bentDirection.x) * bend;
-                middle = from * ((1.0f - along) * (1.0f - along)) + control * (2.0f * along * (1.0f - along)) + bentEnd * (along * along);
-            }
-
-            const auto size = juce::Rectangle<float> (32.0f, 12.0f);
-            std::vector<juce::Rectangle<float>> candidates;
-            for (const auto away : { 0.55f, 0.8f, 1.1f, 1.5f, 1.9f, 2.4f })
-            {
-                candidates.push_back (size.withCentre (middle + juce::Point<float> (radius * away, -radius * away * 0.6f)));
-                candidates.push_back (size.withCentre (middle + juce::Point<float> (-radius * away, radius * away * 0.6f)));
-                candidates.push_back (size.withCentre (middle - normal * radius * away));
-                candidates.push_back (size.withCentre (middle + normal * radius * away));
-                candidates.push_back (size.withCentre (middle + juce::Point<float> (radius * away + 12.0f, 0.0f)));
-                candidates.push_back (size.withCentre (middle - juce::Point<float> (radius * away + 12.0f, 0.0f)));
-                candidates.push_back (size.withCentre (middle - juce::Point<float> (0.0f, radius * away)));
-                candidates.push_back (size.withCentre (middle + juce::Point<float> (0.0f, radius * away)));
-            }
-
-            // How badly a place covers things: nodes, captions, loops and
-            // earlier labels count by the area covered, routes by the piece,
-            // so a crowded diagram still gets the least bad place.
-            const auto cost = [&] (juce::Rectangle<float> box)
-            {
-                auto total = getLocalBounds().toFloat().reduced (2.0f).contains (box) ? 0.0f : 1.0e6f;
-                const auto covered = [&box] (juce::Rectangle<float> other) { return box.getIntersection (other).getWidth() * box.getIntersection (other).getHeight(); };
-                for (const auto osc : shown)
-                {
-                    const auto node = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centres[(size_t) osc]);
-                    total += 100.0f * (covered (node.reduced (radius * 0.12f)) + covered (getCaptionBounds (osc, centres, radius)));
-                    if (read (routeId (osc, osc)) > 0.001f)
-                        total += 100.0f * covered (feedbackLoop (osc, centres, radius));
-                }
-                for (const auto& label : placed)
-                    total += 100.0f * covered (label.second.expanded (2.0f));
-                // Crossing a route costs, its arrowhead (the last two pieces)
-                // most: a depth on a head read as part of it (V8-7).
-                for (const auto& path : paths)
-                    for (size_t i = 1; i < path.size(); ++i)
-                        if (box.expanded (3.0f).intersects (juce::Line<float> (path[i - 1], path[i])))
-                            total += i + 2 >= path.size() ? 400.0f : 40.0f;
-                return total;
-            };
-
-            auto chosen = candidates.front();
-            auto best = std::numeric_limits<float>::max();
-            for (const auto& box : candidates)
-                if (const auto score = cost (box); score < best)
-                {
-                    best = score;
-                    chosen = box;
-                }
-            placed.push_back ({ route, chosen });
-        }
-        return placed;
     }
 
     // The bent route is exactly the curve planned for it (so labels placed

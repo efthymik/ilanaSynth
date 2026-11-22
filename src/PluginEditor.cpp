@@ -63,7 +63,7 @@
 #include "gui/pages/PageHelpers.h"
 #include "gui/PhysicalApplies.h"
 #include "gui/pages/OscPage.h"
-#include "gui/pages/FilterVectorPhysicalPages.h"
+#include "gui/pages/VectorPage.h"
 #include "gui/pages/EnvLfoPages.h"
 #include "gui/pages/ModSourcePanel.h"
 #include "gui/pages/FmInputPages.h"
@@ -1148,15 +1148,6 @@ void IlanaSynthAudioProcessorEditor::setVulkanRendering (bool shouldUseVulkan)
     }
    #else
     juce::ignoreUnused (shouldUseVulkan);
-   #endif
-}
-
-bool IlanaSynthAudioProcessorEditor::isVulkanRendering() const
-{
-   #if ILANA_VULKAN
-    return vulkan != nullptr && vulkan->isActive();
-   #else
-    return false;
    #endif
 }
 

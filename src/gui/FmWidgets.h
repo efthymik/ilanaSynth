@@ -314,7 +314,6 @@ public:
         }
     }
 
-    int getMatching() const { return matching; }
     int getMatchingDx7() const { return matchingDx7; }
     juce::Point<int> getCellCentre (int index) const { return cellBounds (index).getCentre(); }
 

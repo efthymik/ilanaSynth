@@ -168,8 +168,6 @@ public:
         return nullptr;
     }
 
-    float totalCpu() const { return graphCpu.load (std::memory_order_relaxed); }
-
     // The loop guard's gain on the loop that `from` -> `to` closes (1 when
     // it isn't holding it, or there is no such loop). Any thread.
     float loopGuard (Port from, Port to) const

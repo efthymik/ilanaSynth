@@ -148,14 +148,6 @@ inline Mod::Source envelopeSourceFor (int poolIndex)
     return poolIndex < 5 ? first[juce::jlimit (0, 4, poolIndex)] : (S) ((int) S::Env6 + juce::jlimit (0, 10, poolIndex - 5));
 }
 
-inline int envelopePoolIndexFor (Mod::Source source)
-{
-    for (int i = 0; i < 16; ++i)
-        if (envelopeSourceFor (i) == source)
-            return i;
-    return -1;
-}
-
 // Every source once, in the pickers' order: LFOs, their B outputs, the
 // MSEG and OP LFO; the envelopes in pool order and OP PITCH; the macros;
 // then performance and the rest.

@@ -67,9 +67,6 @@ public:
             onPopup();
     }
 
-    // True while the base class's flag is clear (the UI test checks it).
-    bool menuFlagClear() const { return ! isPopupActive(); }
-
     void setCaptionAndName (const juce::String& caption, const juce::String& name)
     {
         getProperties().set ("textPrefix", caption);

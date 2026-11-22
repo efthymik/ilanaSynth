@@ -224,19 +224,12 @@ public:
     {
         return lfoPhaseDisplays[(size_t) juce::jlimit (0, numLfos - 1, index)].load();
     }
-    float getDisplayPhase() const { return displayPhase.load(); }
-    float getDisplayFrequency() const { return displayFrequency.load(); }
     float getSamplePosition (int oscIndex) const
     {
         return displaySamplePositions[(size_t) juce::jlimit (0, OscillatorIds::count - 1, oscIndex)].load();
     }
 
-    float getWavetablePhase (int oscIndex) const
-    {
-        return oscDisplayPhases[(size_t) juce::jlimit (0, OscillatorIds::count - 1, oscIndex)].load();
-    }
     double getCurrentBpm() const { return currentBpm.load(); }
-    float getArpStepRateHz() const;
     float getSourceDisplayValue (int sourceIndex) const;
     // 1 (off), 2 or 4. Switching reprepares the voices, so it happens on
     // the message thread (the audio thread asks for it asynchronously).
@@ -303,7 +296,6 @@ public:
     // preset or a session). Two files may share a base name, so Save goes by
     // this. Message thread only.
     juce::File getLoadedPresetFile() const { return loadedPresetFile; }
-    void setLoadedPresetFile (const juce::File& file) { loadedPresetFile = file; }
 
     // Category and tags travel with the patch (state tree) and are read back
     // from user preset files for the browser. Message thread only.
@@ -479,7 +471,6 @@ public:
     juce::String getModSlotParamId (int slotIndex, const juce::String& field) const;
 
     static constexpr int scopeSize = 4096;
-    void copyScopeData (float* left, float* right, int numSamples) const;
     // The same window, but ending part-way into the newest block by the time
     // since that block arrived (one block behind at most): the scope moves
     // smoothly at the display's rate however large the host's buffer is.
@@ -616,8 +607,6 @@ public:
         return phases;
     }
     void startMacroLearn (int macroIndex);
-    void cancelMacroLearn();
-    int getMacroLearnTarget() const { return macroLearn.load(); }
     int getMacroCc (int macroIndex) const { return macroCc[juce::jlimit (0, Mod::numMacros - 1, macroIndex)].load(); }
     // MIDI learn for any automatable parameter (macros keep their own CCs
     // above): the next controller moved drives it, one CC per parameter.
@@ -1001,8 +990,6 @@ public:
     std::vector<std::pair<juce::String, juce::String>> getFxLfoTargets (int slotIndex) const;
     // The parameter ID a route's param names on a slot ("mix" is the slot's MIX).
     static juce::String fxLfoParamId (int slotIndex, const juce::String& param);
-    // What an LFO box is doing now (display): its shape's value -1..1 and phase 0..1.
-    float getFxLfoValue (int id) const;
     float getFxLfoPhase (int id) const;
     // Tests: the offset (0..1 range) an LFO puts on a slot's parameter in the last chunk.
     float getFxLfoOffset (int slotIndex, const juce::String& parameterId) const;

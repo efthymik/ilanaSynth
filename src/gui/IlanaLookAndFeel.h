@@ -158,15 +158,6 @@ inline juce::ScaledImage dragGhost (juce::Component& source, juce::Rectangle<int
     return juce::ScaledImage (image, (double) displayScale);
 }
 
-// Whether a colour is one of the oscillators' (whatever its alpha).
-inline bool isOscIdentityColour (juce::Colour colour)
-{
-    for (int i = 0; i < 6; ++i)
-        if (oscColour (i).withAlpha (1.0f) == colour.withAlpha (1.0f))
-            return true;
-    return false;
-}
-
 // How opaque a control is while it does nothing (its section is off): dimmed,
 // but still readable against the card (about 4:1 for the label text).
 inline constexpr float dimmedAlpha = 166.0f / 255.0f; // about 65 %, exact in a component's 8-bit alpha
@@ -314,7 +305,6 @@ struct ThemeResources : private juce::DeletedAtShutdown
     JUCE_DECLARE_SINGLETON_INLINE (ThemeResources, false)
 };
 
-inline juce::Typeface::Ptr& regularTypefaceRef() { return ThemeResources::getInstance()->regular; }
 inline juce::Typeface::Ptr& mediumTypefaceRef() { return ThemeResources::getInstance()->medium; }
 inline juce::Typeface::Ptr& boldTypefaceRef() { return ThemeResources::getInstance()->bold; }
 

@@ -1213,21 +1213,6 @@ public:
         }
     }
 
-    // The lanes' off badge, at the right of the ruler's STEP label.
-    static void paintOffBadge (juce::Graphics& g, juce::Rectangle<float> label, const juce::String& text)
-    {
-        const auto font = juce::Font (IlanaTheme::font (IlanaTheme::TextSize::tiny, true));
-        const auto width = juce::GlyphArrangement::getStringWidth (font, text) + 14.0f;
-        const auto badge = juce::Rectangle<float> (width, label.getHeight()).withPosition (label.getX(), label.getY());
-        g.setColour (IlanaTheme::Ui::raised);
-        g.fillRoundedRectangle (badge, badge.getHeight() * 0.5f);
-        g.setColour (IlanaTheme::Ui::line);
-        g.drawRoundedRectangle (badge.reduced (0.5f), badge.getHeight() * 0.5f, 1.0f);
-        g.setColour (IlanaTheme::Ui::text2);
-        g.setFont (font);
-        g.drawText (text, badge, juce::Justification::centred, false);
-    }
-
     void mouseMove (const juce::MouseEvent&) override { repaint(); }
     void mouseExit (const juce::MouseEvent&) override { repaint(); }
 

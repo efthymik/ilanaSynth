@@ -116,8 +116,6 @@ public:
             done (confirmed, dontAskAgain.getToggleState());
     }
 
-    void setDontAskAgain (bool shouldTick) { dontAskAgain.setToggleState (shouldTick, juce::dontSendNotification); }
-
     // The third choice, for the tests (does what its button does).
     bool hasAlternative() const { return alternativeButton.isVisible(); }
     juce::String getAlternativeText() const { return alternativeButton.getButtonText(); }

@@ -61,13 +61,6 @@ public:
     int getSelectedOsc() const { return chosen; }
     const std::vector<int>& getOscillators() const { return oscs; }
 
-    // The tab bounds of an oscillator (the UI test clicks them), or empty.
-    juce::Rectangle<int> getBoundsOf (int osc) const
-    {
-        const auto found = std::find (oscs.begin(), oscs.end(), osc);
-        return found != oscs.end() ? getTabBounds ((int) (found - oscs.begin())) : juce::Rectangle<int>();
-    }
-
     // Picks an oscillator as a click would.
     void pick (int osc)
     {

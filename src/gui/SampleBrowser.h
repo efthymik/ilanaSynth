@@ -136,19 +136,8 @@ public:
     enum class View { folder, favourites, recent };
 
     View getView() const { return view; }
-    juce::File getFolder() const { return folder; }
-    const juce::StringArray& getFavourites() const { return favourites; }
-    const juce::StringArray& getRecent() const { return recent; }
-    const juce::StringArray& getAddedFolders() const { return addedFolders; }
     void setSearchText (const juce::String& text) { search.setText (text, true); }
     int getNumShown() const { return (int) rows.size(); }
-    juce::File getShownFile (int row) const { return juce::isPositiveAndBelow (row, (int) rows.size()) ? rows[(size_t) row].file : juce::File(); }
-    void openFolder (const juce::File& target) { showFolder (target); }
-    void openPlace (int index) { showPlace (index); }
-    void selectShown (int row) { list.selectRow (row); }
-    void activateShown (int row) { activate (row); }
-    void toggleShownFavourite (int row) { toggleFavourite (row); }
-    juce::String getLevelNote() const { return levelNote; }
 
     // ---------------------------------------------------------------- paint
 

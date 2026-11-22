@@ -40,8 +40,6 @@ public:
         glideOnlyLegato = newGlideOnlyLegato;
     }
 
-    Mode getVoiceMode() const { return mode; }
-
     // The last `count` voices are spares: the voice limit never counts them,
     // so a note that steals a voice can start on a spare while the stolen
     // one fades out (8 ms) instead of being cut dead (a click).

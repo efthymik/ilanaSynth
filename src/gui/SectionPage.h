@@ -39,23 +39,6 @@ public:
 
     int getSelected() const { return selected; }
 
-    // A page with nothing to edit in this patch greys its switch, with the
-    // reason as the tooltip (it still opens). An empty reason clears it.
-    void setItemDimmed (int index, const juce::String& reason)
-    {
-        if (index < 0)
-            return;
-
-        while (dimReasons.size() <= index)
-            dimReasons.add ({});
-
-        if (dimReasons[index] != reason)
-        {
-            dimReasons.set (index, reason);
-            repaint();
-        }
-    }
-
     bool isItemDimmed (int index) const { return dimReasons[index].isNotEmpty(); }
 
     int getIdealWidth() const

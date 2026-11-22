@@ -90,8 +90,6 @@ public:
 
     void selectOperator (int op);
 
-    const FmDiagram& getDiagram() const { return diagram; }
-
     void paint (juce::Graphics& g) override;
 
     void visibilityChanged() override;
@@ -110,10 +108,6 @@ public:
     bool refreshShown();
 
     void resized() override;
-
-    juce::Rectangle<int> getOperatorCardBounds() const { return operatorCard; }
-    juce::Rectangle<int> getMatrixCardBounds() const { return matrixCard; }
-    bool areMatrixExtrasShown() const { return ringMod->isVisible(); }
 
 private:
     float read (const juce::String& id) const;

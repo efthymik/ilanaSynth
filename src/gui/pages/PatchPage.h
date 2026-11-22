@@ -173,9 +173,6 @@ public:
 
     void resized() override;
 
-    // Tests: the graph the view shows, and the voice's cables as a patch.
-    const PatchGraph::Graph& getShownGraph() const { return shown; }
-    int getNumWindows() const { return (int) windows.size(); }
     PatchCableView& getView() { return view; }
 
     static bool isVoice (const PatchGraph::Node& node) { return node.id >= voiceId && node.id < lfoNodeId; }

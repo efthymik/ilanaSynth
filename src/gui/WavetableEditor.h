@@ -136,8 +136,6 @@ public:
     std::function<void()> onClose;
 
     int getSlot() const { return slot; }
-    const WavetableDoc& getDoc() const { return doc; }
-    int getSelectedFrame() const { return selected; }
     void selectFrame (int index) { selected = juce::jlimit (0, doc.getNumFrames() - 1, index); refresh(); }
     Mode getMode() const { return mode; }
 

@@ -117,15 +117,6 @@ inline void chooseMode (IlanaSynthAudioProcessor& p, int osc, int newMode)
                    [&p, osc, newMode] { p.setOscillatorMode (osc, newMode); });
 }
 
-// The type menu's items in its order (the UI tests read them).
-inline juce::StringArray modeMenuItems()
-{
-    juce::StringArray items;
-    for (const auto entry : modeMenuOrder())
-        items.add (modeName (entry));
-    return items;
-}
-
 // A type menu (oscN_mode) that picks through chooseMode: its list in the
 // menu's order, the arrow keys step through the same order.
 inline void bindModeMenu (ComboControl& control, IlanaSynthAudioProcessor& p, int osc)
@@ -211,14 +202,6 @@ inline void showOperatorChoices (juce::ComboBox* tune, juce::ComboBox* envelope,
     envelope->setSelectedId (current + 1, juce::dontSendNotification);
 }
 
-inline juce::String oscList (const std::vector<int>& oscs, const juce::String& before)
-{
-    juce::StringArray names;
-    for (const auto osc : oscs)
-        names.add (before + juce::String (osc + 1));
-    return names.joinIntoString (", ");
-}
-
 // "OSC 2 30 %": the FM routes' depths named beside the oscillators, so the
 // caption on OSC carries the number the FM page and the matrix edit (review
 // 11, I11-4). `from`: the routes into osc, else out of it.
@@ -252,14 +235,6 @@ inline juce::String describe (const IlanaSynthAudioProcessor& p, int osc)
     return juce::String (out ? "OUT, MOD " : "MOD ") + juce::String::fromUTF8 ("\xe2\x86\x92 ") + numbers.joinIntoString (", ");
 }
 
-// A modulator: it feeds other oscillators and is not itself heard. Its
-// A modulator's level is still its OUTPUT: a DX7 operator shows one level, named
-// OUTPUT everywhere (UI-CONVENTIONS, review 15 I15-1).
-inline bool isModulator (const IlanaSynthAudioProcessor& p, int osc)
-{
-    return read (p, prefix (osc) + "_out") <= 0.5f && ! targets (p, osc).empty();
-}
-
 inline const char* outputKnobName (const IlanaSynthAudioProcessor& p, int osc)
 {
     juce::ignoreUnused (p, osc);
@@ -270,28 +245,6 @@ inline const char* outputKnobName (const IlanaSynthAudioProcessor& p, int osc)
 // goes "TO OUTPUT", a modulator "MODULATES 1, 3" (I12-3); the tabs keep the
 // short form of describe().
 inline juce::String describeLong (const IlanaSynthAudioProcessor& p, int osc);
-inline juce::String roleLine (const IlanaSynthAudioProcessor& p, int osc)
-{
-    if (describe (p, osc).isEmpty())
-        return {};
-
-    const auto out = read (p, prefix (osc) + "_out") > 0.5f;
-    const auto modulated = targets (p, osc);
-
-    // A wavetable oscillator in an FM route says it in the OSC card's words
-    // and with its amounts: "TO OUTPUT, FM INTO OSC 1 30 %" (I15-12).
-    if (! isOperator (p, osc))
-        return (out ? juce::String ("TO OUTPUT") : juce::String ("SILENT")) + (describeLong (p, osc).isNotEmpty() ? ", " + describeLong (p, osc) : juce::String());
-
-    if (modulated.empty())
-        return out ? "TO OUTPUT" : "SILENT";
-
-    juce::StringArray numbers;
-    for (const auto target : modulated)
-        numbers.add (juce::String (target + 1));
-
-    return juce::String (out ? "TO OUTPUT, MODULATES " : "MODULATES ") + numbers.joinIntoString (", ");
-}
 
 // The same in words, for tooltips and the OSC card's header.
 inline juce::String describeLong (const IlanaSynthAudioProcessor& p, int osc)
@@ -587,8 +540,6 @@ public:
     // bar on the dials' middle line, OUT on the knob names' line. Local y of both.
     void setCellLines (float dialMiddle, float nameTopIn) { cellMiddle = dialMiddle; nameTop = nameTopIn; repaint(); }
     void setPart (Part newPart) { part = newPart; repaint(); }
-    // The width of the level text at the bar's end (PLAY keeps its wider one, v26).
-    void setValueWidth (float width) { valueWidth = width; repaint(); }
 
     // Re-reads the role and the level; repaints when they changed.
     void update (const juce::String& chipTextIn, juce::Colour chipColourIn, bool isLink, const juce::String& tip);
@@ -598,9 +549,6 @@ public:
     bool hitTest (int, int) override { return link && chipText.isNotEmpty(); }
 
     void mouseUp (const juce::MouseEvent& event) override;
-
-    // The chip's text as drawn (the UI test reads it).
-    const juce::String& getChipText() const { return chipText; }
 
     void paint (juce::Graphics& g) override;
 
@@ -917,11 +865,6 @@ public:
     // card (a sample, a string) never squeezes the bands: the oscillator area scrolls instead.
     int getReferenceHeight() const { return referenceHeightFor (numShown()); }
 
-    // What PLAY sizes its two module bands by: always two wavetable cards and the add row, the layout the bands
-    // were approved under (81 / 104 px). A third card scrolls a little rather than the bands shrinking (ilana
-    // 2026-10-22; UI review 26 found three-oscillator presets squashing band 2 to 89 px).
-    int getBandsReferenceHeight() const { return referenceHeightFor (2); }
-
     int referenceHeightFor (int shown) const;
 
     void resized() override;
@@ -929,8 +872,6 @@ public:
     // The oscillator the UI test or the FM page's links pick: its card is
     // scrolled into view.
     void selectOscillator (int osc);
-
-    int getSelectedOscillator() const { return selected; }
 
     // PLAY hosts the cards alone: no VOICE / NOISE / SUB / STRINGS strip below them.
     void setEmbedded (bool shouldEmbed);
@@ -949,11 +890,6 @@ public:
     // The strip under the cards: one row (STEREO, NOISE, SUB, STRINGS,
     // SOUNDBOARD, KEYS); VOICE is in the dock. This scrolls it into view.
     enum SharedTab { sharedVoice = 0, sharedSubNoise, sharedSympathetic, sharedKeys };
-
-    void selectShared (int);
-
-    // The UI test reads the menu's items.
-    juce::StringArray getOscMenuItems (int band) const;
 
     // The card's rectangle in the page (the UI tests).
     juce::Rectangle<int> getCardBounds (int osc) const;
@@ -1001,8 +937,6 @@ private:
     enum class Kind { wavetable, fm, physical, sample, grain, live };
 
     Kind kindOf (int osc) const;
-
-    static bool isCompactKind (Kind kind) { return kind != Kind::sample; }
 
     // One cell of a card's grid: the control, its row, first column and width in columns.
     struct Slot
@@ -1135,10 +1069,6 @@ private:
     // A packed knob in a cell of `width` x (dial + name): its bounds with the room for rings.
     static void placeKnob (KnobControl& knob, int x, int y, int width, int dial);
 
-    // The four unison dials after a menu of `menuWidth`: the first ring right after the menu, the last ring ending at the
-    // panel's edge, one pitch between them (so no dead tail at the right of the panel).
-    static void placeEvenDials (juce::Rectangle<int> c, int y, int menuWidth, std::initializer_list<KnobControl*> knobs, int dial);
-
     // One MIX and one UNISON arrangement for every engine but Physical (UI review 31, items 14 and 15): switching
     // the engine no longer moves LEVEL, the FILTER route, OUT or the unison mode menu. `c` is the panel's content.
     // MIX: LEVEL, PAN and ENV on top; FILTER under them; the OUT meter at the foot, up to twice its old height.
@@ -1207,10 +1137,6 @@ private:
     void paintPanels (juce::Graphics& g, const CardGeometry& card) const;
 
     void paintPanelList (juce::Graphics& g, const std::vector<CardGeometry::Panel>& panels) const;
-
-    // The engine's name in the header: an FM / DX7 oscillator says it is an
-    // operator, and on what envelope.
-    juce::String engineName (int index) const;
 
     // The strip (ilana's mockup, 2026-10-22): one row of six cards under the
     // oscillators, STEREO, NOISE, SUB, STRINGS, SOUNDBOARD and KEYS. Each card
@@ -1352,9 +1278,6 @@ private:
     bool isOff (int index) const;
 
     int numShown() const;
-
-    // The hidden picker's order: the shown oscillators.
-    int oscForTab (int tab) const;
 
     // The list the tests pick an oscillator from (not drawn), each entry's role
     // in its tooltip; also the OUTPUT name of an operator's level.

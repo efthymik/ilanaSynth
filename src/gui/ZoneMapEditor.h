@@ -156,8 +156,6 @@ public:
     std::function<void()> onClose;
 
     int getOscIndex() const { return osc; }
-    const std::vector<SampleZone>& getZones() const { return zones; }
-    int getSelectedZone() const { return selected; }
 
     void selectZone (int index)
     {
@@ -924,9 +922,6 @@ private:
         viewLo = lo;
         viewHi = hi;
     }
-
-    int getViewLow() const { return viewLo; }
-    int getViewHigh() const { return viewHi; }
 
     float keyWidth() const { return juce::jmax (1.0f, mapBounds.getWidth() / (float) (viewHi - viewLo + 1)); }
     float velocityHeight() const { return juce::jmax (1.0f, mapBounds.getHeight() / 127.0f); }

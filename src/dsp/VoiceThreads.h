@@ -88,8 +88,6 @@ public:
         return true;
     }
 
-    int getNumWorkers() const noexcept { return (int) workers.size(); }
-
     // Whether a sub-block of this shape can go to the threads (otherwise the
     // caller renders the voices one after another as before).
     bool canRender (const juce::AudioBuffer<float>& output, int startSample, int numSamples, int numVoices) const noexcept

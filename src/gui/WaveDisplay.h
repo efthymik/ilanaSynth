@@ -44,7 +44,6 @@ public:
     // The FRAME knob beside the picture says which frame: the card's picture needs no readout of its own.
     // The 2D / 3D flip a click makes (the snapshot tool and the UI tests set it directly).
     void setStack3d (bool shouldBe3d) { if (stack3d != shouldBe3d) { stack3d = shouldBe3d; updateViewButtons(); repaint(); } }
-    bool isStack3d() const { return stack3d; }
     // Where the handle of a FRAME route sits (the picture's own coordinates), for the UI tests: {-1, -1} when there is none.
     juce::Point<float> frameRouteHandle (int slot) const
     {
@@ -168,17 +167,6 @@ public:
     }
 
     bool isSlim() const { return slim; }
-
-    // An FM operator plays one plain cycle: no 3D or SPEC views to pick
-    // (UI review 8, I8-15).
-    void setSingleCycle (bool shouldBeSingle)
-    {
-        if (singleCycle == shouldBeSingle)
-            return;
-        singleCycle = shouldBeSingle;
-        updateViewButtons();
-        repaint();
-    }
 
     // The trace and the view pills in another colour (colour coding).
     void setTraceColour (juce::Colour colour)

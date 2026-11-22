@@ -95,14 +95,6 @@ public:
         return true;
     }
 
-    // A card of one filter (PLAY's): -1 shows both, 0 or 1 only that one's curve and marker.
-    void setOnlyFilter (int index)
-    {
-        onlyFilter = index;
-        setRepaintsOnMouseActivity (index >= 0);
-        repaint();
-    }
-
     void paintOverChildren (juce::Graphics& g) override
     {
         if (! dropHover)

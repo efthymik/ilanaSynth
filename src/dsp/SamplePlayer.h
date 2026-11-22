@@ -435,9 +435,6 @@ public:
         pitch = juce::jlimit (0.0001, 64.0, std::abs (pitchRate));
     }
 
-    // The grains' length in output samples (about 46 ms); set by prepare.
-    int getGrainLength() const noexcept { return grainLength; }
-
     bool isActive() const noexcept { return active; }
 
     // Step 33: the key let go. A Sustain Loop leaves its loop and plays on

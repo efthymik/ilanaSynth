@@ -21,7 +21,7 @@
 #include "../ParamControls.h"
 #include "../SectionColourPicker.h"
 #include "EnvLfoPages.h"
-#include "FilterVectorPhysicalPages.h"
+#include "VectorPage.h"
 #include "ModSourcePanel.h"
 #include "OscPage.h"
 #include "PageHelpers.h"
@@ -433,8 +433,6 @@ public:
 
     void setFolded (bool shouldBeFolded);
 
-    bool isFolded() const { return folded; }
-
     static constexpr int tabWidth = 30, tabHeight = 14;
 
     static juce::String foldedText();
@@ -501,8 +499,6 @@ public:
     // The block as it stands open, pictured once when a slide starts (its live views wait the 0.3 s out).
     void pictureFoldBlock();
 
-    // The module block folded down to one line (the editor keeps the choice in its settings file).
-    bool areBandsFolded() const { return bandsFolded; }
     void setBandsFolded (bool shouldFold, bool notify = false);
     std::function<void (bool)> onBandsFoldChanged;
 

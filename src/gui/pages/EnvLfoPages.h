@@ -76,8 +76,6 @@ public:
 
     void addTo (juce::Component& parent) { parent.addChildComponent (*this); }
     void setShown (bool shouldShow) { shown = shouldShow; setVisible (shown); refresh(); }
-    ValueSliderControl& getRateSlider() { return rate; }
-    ValueSliderControl& getDivisionSlider() { return division; }
 
     void resized() override;
 
@@ -332,7 +330,6 @@ public:
 
     // The UI test reaches these through here.
     int getSelected() const { return selected; }
-    LfoRateControl& getRateControl (int lfo) { return controlsList[(size_t) juce::jlimit (0, (int) controlsList.size() - 1, lfo)]->rate; }
     juce::Rectangle<int> getPanelBounds() const { return panel; }
     OperatorLfoEditor& getOperatorEditor() { return opLfoEditor; }
 
@@ -517,10 +514,7 @@ private:
 
     void mouseDown (const juce::MouseEvent& event) override;
 
-    // What a DRIVES row stands for (the UI test): its matrix slot, or -1.
-    int getNumRouteRows() const { return (int) routeHits.size(); }
     int getRouteSlot (int row) const { return juce::isPositiveAndBelow (row, (int) routeHits.size()) ? routeHits[(size_t) row].second : -2; }
-    juce::Point<int> getRouteCentre (int row) const { return routeHits[(size_t) row].first.getCentre(); }
 
     // MOVE TO LFO: what the old MSEG module's routes do moves onto an LFO
     // drawn the same (SHAPE › MSEG), the one drawn-shape editor (UI review
