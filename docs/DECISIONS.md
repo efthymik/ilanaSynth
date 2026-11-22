@@ -35,8 +35,11 @@ One row per decision. Sources: RP = [REVIEW-PLAN.md](REVIEW-PLAN.md) "The user's
 | standing | Superseded models stay as "classic" for old patches (M2 LFOs, M4 hammer, Classic body) | RM |
 | 2026-09-26 | A sound is done only when fitted to a reference and its listening round has passed; an unreached target gets a written gap | RM |
 | 2026-09-26 | References: internet sources without login first; installed plugins only for their init sound; the user should not have to do anything | RM |
-| standing | Each milestone ends with all targets building, `ilanaTableTest` and `ilanaSnapshot --uitest` at 0 failures, the fingerprint check, a commit and an `mN-done` tag | HO |
+| standing | Each milestone ends with all targets building, `ilanaTableTest` and `ilanaSnapshot --uitest` at 0 failures, the fingerprint check, a commit | HO |
 | 2026-09-28 | GitHub Actions is manual-only (no minutes left): run `tools/verify.sh` before pushing | HO |
 | 2026-09-26 | Route Both keeps separate aux filter state so old serial/parallel paths stay exact; Eco caps unison at 4 voices | HH "Decisions to review" |
 | 2026-09-26 | When all oscillators use ENV 1, the old post-filter AMP multiply is preserved exactly | HH "Decisions to review" |
 | 2026-09-26 | New physical string banks have explicit seeds so old fingerprints hold | HH "Decisions to review" |
+
+## Design notes
+- **Plain FM feedback** splits into a buzz at half the sample rate above about 0.2 (the one-sample loop does this in any ideal renderer too). It is kept for old patches; the new Filtered type is the fix. (Moved from HANDOFF.md, 2026-11-22.)

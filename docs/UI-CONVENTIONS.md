@@ -37,7 +37,7 @@ The rules every page follows, so a control looks and reads the same wherever it 
 - A card without a family colour (OUTPUT, SIGNAL FLOW) has no tag in its title: a grey dot read as "switched off" (`IlanaTheme::hasFamilyColour`, I8-32).
 
 ## Page switches
-- A top-level tab's own pages (PLAY's OVERVIEW / VECTOR, OSC's OSCILLATORS / PHYSICAL, MOD's ENV / LFO / MATRIX) are picked with the switch right after the tabs, not at the far right beside SCOPE (UI review 8, V8-36).
+- A top-level tab's own pages (today only PLAY has two: OVERVIEW / VECTOR; MATRIX, FM, SEQ, FX (RACK), PATCH and INPUT are single-page tabs; the old PHYSICAL, OSC, FILTER, ENV / LFO and MOD tabs were folded into PLAY and the source pop-ups) are picked with the switch right after the tabs, not at the far right beside SCOPE (UI review 8, V8-36).
 
 ## Vocabulary: one name for one thing (UI review 10, I10-3, I10-13)
 - **RANDOMISE** (the dice): scramble the parameters. The header's dice menu randomises the patch or a part of it; the FX page's dice (tooltip "Randomise FX") the chain. **RANDOM PRESET** (the browser) is a different action: it loads an existing preset from the list shown.

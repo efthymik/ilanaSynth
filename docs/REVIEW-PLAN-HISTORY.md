@@ -435,7 +435,7 @@ A. **Shared patch-graph foundation** (**DONE**, PR #56; no ID of its own; needed
    Size: medium. A new browser component for samples, plus the favourites and recent lists. Level matching uses the synth's existing level tools.
    Order 31. Why here: a browser for samples. It comes after step 31 so favourites can store portable paths.
 
-45. **Granular controls** (ilana, 2026-10-10: decided; **IN PROGRESS** 2026-10-13, own thread, runs in parallel with the sampler steps). Separate Grain Position from Sample Start, add scan speed and freeze, and expose grain stereo spread as a modulation destination.
+45. **Granular controls** (ilana, 2026-10-10: decided; built 2026-10-14 (was in progress 2026-10-13, own thread, ran in parallel with the sampler steps)). Separate Grain Position from Sample Start, add scan speed and freeze, and expose grain stereo spread as a modulation destination.
    Size: small-medium. Touches `src/dsp/GranularOsc.h`, the parameter layout (new parameters, appended), and the modulation destination list for grain stereo spread.
    Order 32. Why here: separate from the core sample work, so it stays after it.
 

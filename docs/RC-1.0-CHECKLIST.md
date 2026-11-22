@@ -2,7 +2,7 @@
 
 Features are frozen until RC 1.0 (HANDOFF.md). RC 1.0 is reached when every box below is ticked, on one commit. Owner in brackets.
 
-- [ ] Gates green on the RC commit: Linux `tools/verify.sh`; Windows `tools/verify.ps1`; unit tests, FX tests, `--uitest`, pluginval. Fingerprints: 0 unintended changes against the Linux baseline `tests/fingerprints-linux.csv` and the Windows baseline (compare only within a platform). [agent]
+- [ ] Gates green on the RC commit: Linux `tools/verify.sh`; Windows `tools/verify.ps1`; unit tests, FX tests, `--uitest`, pluginval. Fingerprints: 0 unintended changes against the Linux baseline `tests/fingerprints-linux.csv`; Windows is covered by `tools/win-syntax-check.sh` on the changed files (there is no Windows fingerprint baseline). [agent]
 - [ ] Installed on ilana's PC with `build-and-install.cmd`, loads and plays in Ableton Live 12 (VST3 instrument and FX). [ilana]
 - [ ] An old Live set (saved with an earlier install) opens, sounds as before and re-saves. Includes any set using Toy Grand or Dense Board Piano with BOARD macro or MIX routes (see the Dense Board note in HANDOFF). [ilana]
 - [ ] No known HIGH bug in HANDOFF "Open issues" (fixed, or written down as accepted by ilana). [agent, ilana]

@@ -16,7 +16,7 @@ One person: ilana, a producer in Argentina, making music in Ableton Live 12 on W
 
 ## Product Purpose
 
-A complete sound design machine on one page: a "physical hybrid" synth (strings, bows, hammers, electric pianos and resonant bodies wired into wavetable, FM / DX7, granular and sample engines, two routable filters and a 41-type FX rack). Success is that she reaches the sound she hears in her head quickly, by ear, without hunting for controls.
+A complete sound design machine on one page: a "physical hybrid" synth (strings, bows, hammers, electric pianos and resonant bodies wired into wavetable, FM / DX7, granular and sample engines, two routable filters and a 42-type FX rack). Success is that she reaches the sound she hears in her head quickly, by ear, without hunting for controls.
 
 ## Positioning
 
