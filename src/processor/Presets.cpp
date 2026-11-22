@@ -385,7 +385,14 @@ void IlanaSynthAudioProcessor::handleAsyncUpdate()
         const auto count = Presets::getFactoryPresets().size();
 
         if (count > 0)
-            loadFactoryPreset (program % (int) count);
+        {
+            // One undo step for the whole preset, as a load from the editor
+            // (outside one its changes joined the edit before).
+            const auto index = program % (int) count;
+            beginEdit ("Load " + getFactoryPresetNames()[index]);
+            loadFactoryPreset (index);
+            endEdit();
+        }
     }
 
     // Only the macros whose CC moved (all eight; the others keep their
@@ -1194,6 +1201,7 @@ void IlanaSynthAudioProcessor::loadFactoryPreset (int index)
         clipState.reset();
 
     setFxPatch ({}); // no effect instances, no patcher graph
+    resetFxChainBank(); // one chain, CHAIN 1 showing
 
     for (int lfo = 0; lfo < numLfos; ++lfo)
         for (int i = 0; i < lfoDrawSteps; ++i)

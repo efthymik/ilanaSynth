@@ -1031,7 +1031,9 @@ void IlanaSynthAudioProcessor::renderLfos (int numSamples, const juce::MidiBuffe
             // LFO 1-4 always run (they share the clock's random generator,
             // so skipping their draws would shift it), but an unrouted one's
             // wave is only needed for the card's last value.
-            if (lfoRouted[(size_t) lfo] || stateful || shape == 7 || i == numSamples - 1)
+            // (S&H's output B is its A, so a route from B alone needs A too.)
+            if (lfoRouted[(size_t) lfo] || stateful || shape == 7 || i == numSamples - 1
+                || (shape == 5 && lfoRoutedB[(size_t) lfo]))
                 lfoBufferPointers[lfo][i] = shape == 7
                                                 ? lfoSteps[lfo][stepIndex]
                                                 : (stateful ? chaos.value (shape, phase)
@@ -1235,6 +1237,7 @@ float IlanaSynthAudioProcessor::globalSourceValue (Mod::Source source) const
         case Mod::Source::Random:     return monitorRandom.load();
         case Mod::Source::ClockSh:    return clockShValue;
         case Mod::Source::Mseg:       return lfoBuffers.getNumSamples() > 0 ? lfoBuffers.getSample (5, 0) : 0.0f;
+        case Mod::Source::InputEnv:   return inputEnvDisplay.load(); // FX, master and plain-parameter routes (voices read their own)
         case Mod::Source::OpLfo:      return monitorOpLfo.load();
         case Mod::Source::OpPitchEnv: return monitorOpPitch.load();
         default:                      return staticSourceValue ((int) source);

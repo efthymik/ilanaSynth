@@ -36,6 +36,7 @@ public:
     // The effects' part of prepareToPlay, and of a patch change (cutPatchTails).
     void prepare (double sampleRate, int samplesPerBlock, int expectedBlockSize);
     void reset();
+    void resetMemoryOf (int type); // one effect type's memory only (a shared engine)
     void resetRamps() noexcept
     {
         for (auto& ramp : fxRamps)

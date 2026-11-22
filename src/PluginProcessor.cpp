@@ -2101,7 +2101,8 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
     }
 
     for (int osc = 0; osc < OscillatorIds::count; ++osc)
-        if (p.oscillatorEnabled[(size_t) osc] && p.oscillators[(size_t) osc].ampEnv >= 5)
+        if (p.oscillatorEnabled[(size_t) osc] && p.oscillators[(size_t) osc].ampEnv >= 5
+            && p.oscillators[(size_t) osc].ampEnv < 5 + (int) p.extraEnvNeeded.size()) // 16 MSEG, 17 OP ENV: no extra ENV
             p.extraEnvNeeded[(size_t) (p.oscillators[(size_t) osc].ampEnv - 5)] = true;
     for (int i = 0; i < numActiveSlots; ++i)
         for (const auto source : { activeSlots[i].source, activeSlots[i].aux })

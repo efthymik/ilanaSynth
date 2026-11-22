@@ -127,6 +127,7 @@ public:
     void switchFxChain();
     void copyFxChainToOtherBank();
     bool isShowingChainA() const { return showingChainA; }
+    void resetFxChainBank() { chainA = {}; chainB = {}; chainBValid = false; showingChainA = true; }
     IlanaSynthAudioProcessor();
     ~IlanaSynthAudioProcessor() override;
 
