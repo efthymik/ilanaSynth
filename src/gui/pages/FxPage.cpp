@@ -2120,6 +2120,7 @@ void FxPage::placeCard (StackPanel panel, juce::Rectangle<int> bounds)
         {
             auto& display = *displays[(size_t) slot];
             display.setValueSource (panel.instance ? &instanceCards[(size_t) slot].shadow->getState() : nullptr);
+            display.setSlot (slot);
             display.setType (type, fxColour (type));
             display.setBounds (displayArea);
             display.setVisible (true);

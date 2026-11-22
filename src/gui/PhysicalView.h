@@ -18,6 +18,7 @@
 #include "IlanaLookAndFeel.h"
 #include "AnimationUtils.h"
 #include "ModalMarks.h"
+#include "ModRingConfig.h"
 
 // The exciters (oscN_excite) by one set of names on every page, and in
 // groups for the menus (UI review 7, I7-27). Choice 5, the M4 hammer kept
@@ -337,11 +338,11 @@ private:
     bool compact = false;
     static constexpr int numModes = 16;
 
+    // With its routes, as the newest note hears it (an LFO on STIFF or a
+    // velocity route into DECAY moved nothing in the picture).
     float read (const char* suffix) const
     {
-        if (const auto* value = processorRef.apvts.getRawParameterValue (prefix + suffix))
-            return value->load();
-        return 0.0f;
+        return modulatedParamValue (processorRef, prefix + suffix);
     }
 
     float readGlobal (const char* id) const
@@ -447,10 +448,31 @@ private:
     }
 
 private:
+    // Where the exciter meets the string, as a fraction of it: half the
+    // knob (or of a legacy PICK POS, whichever is larger), as the string
+    // takes it (KarplusString::setPhysicalParams); 0 is its natural spot. The
+    // modal piano and guitar have no POSITION. (The knob itself was drawn,
+    // twice as far along as it sounds.)
     float excitePosition() const
     {
-        const auto position = read ("_string_excite_pos");
+        const auto excite = (int) read ("_excite");
+        if (excite == 11 || excite == 12)
+            return 0.125f;
+        const auto position = 0.5f * juce::jlimit (0.0f, 1.0f, juce::jmax (read ("_string_excite_pos"), read ("_string_pick_pos")));
         return position > 0.0f ? juce::jlimit (0.02f, 0.5f, position) : 0.125f;
+    }
+
+    // The exciter's hardness knob as the card shows it: HARDNESS on the
+    // plucks, HAMMER / PLUCK on the hammers and modal engines; a bow has none
+    // (its HAMMER knob is VIBRATO). The picture read HAMMER for every exciter.
+    float exciterHardness() const
+    {
+        const auto excite = (int) read ("_excite");
+        if (excite <= 3 || excite == 10)
+            return read ("_string_pick_hardness");
+        if (excite == 5 || excite == 9 || excite == 11 || excite == 12)
+            return read ("_hammer_hard");
+        return 0.5f;
     }
 
     float hammerLift() const
@@ -477,7 +499,7 @@ private:
     {
         // Mode levels from the strike point and the exciter's hardness.
         const auto strike = (double) excitePosition();
-        const auto hardness = (double) read ("_hammer_hard");
+        const auto hardness = (double) exciterHardness();
         const auto rolloff = 1.2 + 1.2 * (1.0 - hardness);
         for (int n = 1; n <= numModes; ++n)
         {

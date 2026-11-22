@@ -90,13 +90,14 @@ public:
     {
         return modDisplayValues[(size_t) destination].load() * depth;
     }
-    float getCompGainReduction() const;
+    // (`slot`: the rack slot whose engine to read, 0-based; -1 the front card of the type.)
+    float getCompGainReduction (int slot = -1) const;
     // Display only (the FX cards' meters): the limiter's deepest gain in the
     // last block, and OTT's LOW / MID / HIGH gains at the block's end.
-    float getLimiterGainReduction() const;
-    float getOttBandGain (int band) const;
+    float getLimiterGainReduction (int slot = -1) const;
+    float getOttBandGain (int band, int slot = -1) const;
     // FREEZE's spectrum (the held one while HOLD is on) for its card's picture.
-    void getFreezeBands (std::array<float, SpectralFreeze::numBands>& out) const;
+    void getFreezeBands (std::array<float, SpectralFreeze::numBands>& out, int slot = -1) const;
     float getFxSlotCpu (int slot) const { return fxSlotCpu[(size_t) juce::jlimit (0, numFxSlots - 1, slot)].load(); }
     // What a slot did to the signal in the last blocks: its input and output
     // levels (RMS, linear, smoothed), both 0 while the slot is empty or
@@ -200,7 +201,7 @@ public:
     // M8.3: the loudest voice's WEST gate conductance, for the card.
     float getWestGateLevel() const { return westGateDisplay.load(); }
     // The vocoder's band levels as it last ran (FX display; 0 while idle).
-    float getVocoderBandLevel (int band) const;
+    float getVocoderBandLevel (int band, int slot = -1) const;
     float getLfoLiveValueB (int lfo) const { return lfoLastValuesB[(size_t) juce::jlimit (0, numLfos - 1, lfo)].load(); }
 
     // Synth-wide modulation of a destination this block (loudest voice for
@@ -634,6 +635,10 @@ public:
     float getEnvMonitorAmp() const { return envMonitorAmp.load(); }
     float getEnvMonitorFilter() const { return envMonitorFilter.load(); }
     float getEnvMonitorFilter2() const { return envMonitorFilter2.load(); }
+    // The loudest note's velocity (0..1) and its key-track offset in octaves
+    // from C3 (the voice's KEY TRACK source, kept within +/-4), for pictures.
+    float getMonitorVelocity() const { return monitorVelocity.load(); }
+    float getMonitorKeyTrackOctaves() const { return monitorKeyTrack.load() * 4.0f; }
     float getEnvMonitorMod() const { return envMonitorMod.load(); }
     float getEnvMonitorEnv4() const { return envMonitorEnv4.load(); }
     // The Operator Env of the loudest voice: seconds since its note began
@@ -1902,7 +1907,8 @@ private:
     void prepareFxEngines (double sampleRate, int samplesPerBlock);
     void resetFxEngines();
     // The engine an effect type's card shows (its meters and pictures).
-    const FxEngine& displayEngine (int type) const;
+    // (With `slot` the engine of that slot while it holds the type: a copy of an effect has its own.)
+    const FxEngine& displayEngine (int type, int slot = -1) const;
     int fxEngineBlockSize = 512;
 
     // Roadmap step 17: the FX patch (FxPatcher.cpp).

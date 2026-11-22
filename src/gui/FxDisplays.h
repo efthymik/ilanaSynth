@@ -12,6 +12,7 @@
 #include "IlanaLookAndFeel.h"
 #include "AnimationUtils.h"
 #include "DisplayStyle.h"
+#include "ModRingConfig.h"
 #include "ParamInfo.h"
 
 // The small picture on an FX card, one per effect family, drawn from the
@@ -56,6 +57,19 @@ public:
         if (source == valueSource)
             return;
         valueSource = source;
+        lastSignature = 0;
+        repaint();
+    }
+
+    // The rack slot the card stands for (0-based; -1: found by type). With it the
+    // picture follows that slot's FX LFO cables and reads that slot's own engine
+    // (meters, spectrum, bands): a second instance of a type no longer shows the
+    // front card's.
+    void setSlot (int slotIndex)
+    {
+        if (slotIndex == slotNumber)
+            return;
+        slotNumber = slotIndex;
         lastSignature = 0;
         repaint();
     }
@@ -217,12 +231,34 @@ private:
     juce::uint64 lastSignature = 0;
     float smoothTicks = 1.0f, signatureWait = 1.0f; // this frame in 30 Hz ticks; ticks since the settings were read
     juce::AudioProcessorValueTreeState* valueSource = nullptr;
+    int slotNumber = -1; // setSlot
+    double lastMeasuredAt = 0.0; // (ms) the last time an Airwindows picture was measured
     std::array<float, 3> meterGr {}; // smoothed gain reduction (dB, <= 0), or OTT band gains
     bool metersMoving = false;
 
     float param (const char* id) const { return param (juce::String (id)); }
 
+    // The knob's value as the effect hears it: the card's own settings, moved by
+    // the slot's FX LFO cables (FX patcher) and by the mod matrix's FX
+    // destinations (drive amount, mixes, comb / phaser rate, ...), so the picture
+    // follows what the sound does. (The display-blind-spots audit, 2026-11-21.)
     float param (const juce::String& id) const
+    {
+        auto value = rawParam (id);
+
+        if (slotNumber >= 0)
+            if (const auto offset = processorRef.getFxLfoOffset (slotNumber, id); offset != 0.0f)
+                if (const auto* parameter = processorRef.apvts.getParameter (id))
+                {
+                    value = parameter->convertFrom0to1 (juce::jlimit (0.0f, 1.0f, parameter->convertTo0to1 (value) + offset));
+                    if (dynamic_cast<const juce::AudioParameterFloat*> (parameter) == nullptr)
+                        value = std::round (value); // (a choice or a count: the engine rounds it)
+                }
+
+        return matrixModulated (id, value);
+    }
+
+    float rawParam (const juce::String& id) const
     {
         if (valueSource != nullptr)
             if (const auto* value = valueSource->getRawParameterValue (id))
@@ -230,6 +266,25 @@ private:
         if (const auto* value = processorRef.apvts.getRawParameterValue (id))
             return value->load();
         return 0.0f;
+    }
+
+    // The FX destinations of the mod matrix, with the knob they move (the rings'
+    // own table, ParamControls.h, gives the unit: share of travel or octaves).
+    float matrixModulated (const juce::String& id, float plain) const
+    {
+        static const char* const modulatedIds[] { "fx_drive_amount", "fx_crush_mix", "fx_comb_freq", "fx_phaser_rate", "fx_chorus_depth",
+                                                  "fx_delay_feedback", "fx_delay_mix", "fx_smear_mix", "fx_freeze_mix", "fx_reverb_size",
+                                                  "fx_reverb_mix" };
+        if (! id.startsWith ("fx_"))
+            return plain;
+
+        for (const auto* name : modulatedIds)
+            if (id == name)
+                if (const auto config = modRingConfigFor (id); config.destination != 0)
+                    if (const auto* parameter = processorRef.apvts.getParameter (id))
+                        return config.modulated (parameter->getNormalisableRange(), plain, processorRef.getModDisplay (config.destination));
+
+        return plain;
     }
 
     // An Airwindows knob as the effect runs it (algorithm: its registry
@@ -479,7 +534,7 @@ private:
     int slotIndexOfType() const
     {
         for (int slot = 1; slot <= IlanaSynthAudioProcessor::numFxSlots; ++slot)
-            if ((int) param ("fx_slot" + juce::String (slot)) == type)
+            if ((int) rawParam ("fx_slot" + juce::String (slot)) == type)
                 return slot - 1;
         return -1;
     }
@@ -511,7 +566,7 @@ private:
 
     bool updateInputLevel (bool smooth)
     {
-        const auto slot = slotIndexOfType();
+        const auto slot = slotNumber >= 0 ? slotNumber : slotIndexOfType();
         const auto target = slot >= 0 ? juce::jlimit (0.0f, 1.0f, processorRef.getFxSlotInLevel (slot) * juce::MathConstants<float>::sqrt2) : 0.0f;
         const auto next = smooth ? IlanaAnim::approach (inputLevel, target, 0.4f, smoothTicks) : target;
         const auto moved = std::abs (next - inputLevel) > 0.002f;
@@ -523,6 +578,8 @@ public:
     // For the UI test: the dot's level (0 = no dot).
     float getInputDotLevel() const { return inputLevel; }
     void refreshNow() { refresh (false); }
+    juce::uint64 getSettingsSignature() const { return signature(); }
+    float getMeterDb() const { return meterGr[0]; } // (the gain reduction shown, dB)
 
 private:
     // ---- Dynamics: static in/out curve (dB), live gain reduction ----
@@ -757,12 +814,12 @@ private:
         const auto live = processorRef.getOutputPeak() > 1.0e-5f;
 
         if (type == 4)
-            target[0] = juce::Decibels::gainToDecibels (processorRef.getCompGainReduction(), -60.0f);
+            target[0] = juce::Decibels::gainToDecibels (processorRef.getCompGainReduction (slotNumber), -60.0f);
         else if (type == 21)
-            target[0] = juce::Decibels::gainToDecibels (processorRef.getLimiterGainReduction(), -60.0f);
+            target[0] = juce::Decibels::gainToDecibels (processorRef.getLimiterGainReduction (slotNumber), -60.0f);
         else if (type == 20)
             for (int band = 0; band < 3; ++band)
-                target[(size_t) band] = juce::Decibels::gainToDecibels (processorRef.getOttBandGain (band), -60.0f);
+                target[(size_t) band] = juce::Decibels::gainToDecibels (processorRef.getOttBandGain (band, slotNumber), -60.0f);
 
         if (! live)
             target = {};
@@ -797,16 +854,22 @@ private:
         {
             const auto division = juce::jlimit (0, 10, (int) param ("fx_delay_div"));
             left = right = (float) divisionBeats[division];
-            if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (processorRef.apvts.getParameter ("fx_delay_div")))
-                caption = choice->getCurrentChoiceName();
+            caption = choiceText ("fx_delay_div");
         }
         else
+        {
             caption = juce::String (juce::roundToInt (param ("fx_delay_time"))) + " ms";
+            if (std::abs (left - right) > 1.0e-4f)
+                caption = juce::String (juce::roundToInt (param ("fx_delay_time"))) + " / " + juce::String (juce::roundToInt (param ("fx_delay_time_r"))) + " ms";
+        }
 
         beatsPerEcho = left;
         const auto feedback = juce::jlimit (0.0f, 0.95f, param ("fx_delay_feedback"));
         const auto pingPong = param ("fx_delay_pingpong") > 0.5f;
-        const auto split = ! pingPong && std::abs (left - right) > 1.0e-4f;
+        const auto different = std::abs (left - right) > 1.0e-4f; // (unsynced, L and R keep their own times)
+        const auto split = ! pingPong && different;
+        // The echoes are the wet part: as loud as MIX lets them (the extra taps have a MIX of their own).
+        const auto mix = juce::jlimit (0.0f, 1.0f, param ("fx_delay_mix"));
         std::vector<Echo> echoes;
 
         for (int k = 1; k <= 24; ++k)
@@ -814,18 +877,32 @@ private:
             const auto level = std::pow (feedback, (float) (k - 1));
             if (level < 0.02f)
                 break;
+            if (level * mix < 0.01f)
+                continue;
             if (pingPong)
-                echoes.push_back ({ left * (float) k, level, (k % 2 == 1) ? 0 : 1, false });
+                echoes.push_back ({ left * (float) k, level * mix, (k % 2 == 1) ? 0 : 1, false });
             else if (split)
             {
-                echoes.push_back ({ left * (float) k, level, 0, false });
-                echoes.push_back ({ right * (float) k, level, 1, false });
+                echoes.push_back ({ left * (float) k, level * mix, 0, false });
+                echoes.push_back ({ right * (float) k, level * mix, 1, false });
             }
             else
-                echoes.push_back ({ left * (float) k, level, 2, false });
+                echoes.push_back ({ left * (float) k, level * mix, 2, false });
         }
 
-        // The extra taps (src/processor/Effects.cpp's patterns), off the left time.
+        // (A tap sits at its own multiple of each side's time: with different L and R times the right row's taps move.)
+        const auto addTap = [&] (float multiple, float level)
+        {
+            if (different)
+            {
+                echoes.push_back ({ left * multiple, level, 0, true });
+                echoes.push_back ({ right * multiple, level, 1, true });
+            }
+            else
+                echoes.push_back ({ left * multiple, level, 2, true });
+        };
+
+        // The extra taps (src/processor/Effects.cpp's patterns), off each side's time.
         if (param ("fx_taps_on") > 0.5f)
         {
             static constexpr float tapTimes[6][4] { { 0.25f, 0.5f, 0, 0 }, { 0.25f, 0.375f, 0.75f, 0 }, { 0.375f, 0.75f, 0, 0 },
@@ -833,18 +910,18 @@ private:
             static constexpr float tapGains[6][4] { { 0.7f, 0.5f, 0, 0 }, { 0.6f, 0.5f, 0.4f, 0 }, { 0.6f, 0.45f, 0, 0 },
                                                     { 0.5f, 0.35f, 0.25f, 0 }, { 0.6f, 0.55f, 0.5f, 0.45f }, { 0.4f, 0.5f, 0.6f, 0 } };
             const auto pattern = juce::jlimit (0, 6, (int) param ("fx_taps_pattern"));
-            const auto mix = param ("fx_taps_mix");
+            const auto tapMix = param ("fx_taps_mix");
 
             if (pattern == 6)
             {
                 for (int step = 0; step < 16; ++step)
                     if (const auto gain = param ("fx_taps_step" + juce::String (step + 1)); gain > 0.001f)
-                        echoes.push_back ({ left * (float) (step + 1) * 0.25f, gain * mix, 2, true });
+                        addTap ((float) (step + 1) * 0.25f, gain * tapMix);
             }
             else
                 for (int tap = 0; tap < 4; ++tap)
                     if (tapTimes[pattern][tap] > 0.0f)
-                        echoes.push_back ({ left * tapTimes[pattern][tap], tapGains[pattern][tap] * mix, 2, true });
+                        addTap (tapTimes[pattern][tap], tapGains[pattern][tap] * tapMix);
         }
 
         return echoes;
@@ -1119,6 +1196,7 @@ private:
     {
         const auto rate = juce::jmax (0.01f, param ("fx_chorus_rate"));
         const auto depth = juce::jlimit (0.0f, 1.0f, param ("fx_chorus_depth"));
+        const auto mix = juce::jlimit (0.0f, 1.0f, param ("fx_chorus_mix"));
         const auto plot = plotArea();
         // Two cycles (at least half a second), delay 0..20 ms up the side.
         const auto seconds = juce::jmax (0.5f, 2.0f / rate);
@@ -1139,9 +1217,9 @@ private:
             else
                 sweep.lineTo (point);
         }
-        g.setColour (colour);
+        g.setColour (colour.withAlpha (wetAlpha (mix))); // (the sweep is the wet part: as strong as MIX)
         g.strokePath (sweep, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        paintCaption (g, "DELAY SWEEP", "7 ms " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb1 ")) + juce::String (10.0f * depth, 1) + " ms");
+        paintCaption (g, "DELAY SWEEP  " + mixText (mix), "7 ms " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb1 ")) + juce::String (10.0f * depth, 1) + " ms");
     }
 
     // ---- Phaser: JUCE's six all-passes, at the sweep's ends and middle ----
@@ -1318,6 +1396,7 @@ private:
         const auto count = (int) freezeBands.size();
         const auto width = plot.getWidth() / (float) count;
         const auto held = param ("fx_freeze_on") > 0.5f;
+        const auto freezeMix = juce::jlimit (0.0f, 1.0f, param ("fx_freeze_mix")); // (the frozen sound's share, with its modulation)
         auto any = false;
 
         for (int b = 0; b < count; ++b)
@@ -1329,7 +1408,7 @@ private:
             if (level > 0.01f)
             {
                 any = true;
-                g.setColour (colour.withAlpha (held ? 0.85f : 0.45f));
+                g.setColour (colour.withAlpha ((held ? 0.85f : 0.45f) * wetAlpha (freezeMix)));
                 g.fillRect (bar.withTop (bar.getBottom() - bar.getHeight() * level));
             }
         }
@@ -1379,12 +1458,15 @@ private:
             left[0] = right[0] = 0.8f;
             run->process (left.data(), right.data(), total);
 
+            // The module's own MIX: the dry hit and the wet tail, as the chain blends them.
+            const auto mix = juce::jlimit (0.0f, 1.0f, param (prefix + "_mix"));
             impulseEnvelope.assign (columns, 0.0f);
             for (int i = 0; i < total; ++i)
             {
                 auto& cell = impulseEnvelope[(size_t) juce::jmin (columns - 1, i * columns / total)];
-                const auto v = std::abs (std::isfinite (left[(size_t) i]) ? left[(size_t) i] : 0.0f)
-                               + std::abs (std::isfinite (right[(size_t) i]) ? right[(size_t) i] : 0.0f);
+                const auto dry = i == 0 ? 0.8f * (1.0f - mix) : 0.0f;
+                const auto v = std::abs ((std::isfinite (left[(size_t) i]) ? left[(size_t) i] : 0.0f) * mix + dry)
+                               + std::abs ((std::isfinite (right[(size_t) i]) ? right[(size_t) i] : 0.0f) * mix + dry);
                 cell = juce::jmax (cell, v * 0.5f);
             }
             return true;
@@ -1490,8 +1572,9 @@ private:
 
     juce::String choiceText (const char* id) const
     {
+        // (The card's own value: an instance's, not the parameter's.)
         if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (processorRef.apvts.getParameter (id)))
-            return choice->getCurrentChoiceName();
+            return choice->choices[juce::jlimit (0, choice->choices.size() - 1, (int) param (id))];
         return {};
     }
 
@@ -1512,9 +1595,13 @@ private:
         paintTick (g, text, lane.withWidth (28.0f).withHeight (10.0f), juce::Justification::centredLeft, 0.8f);
     }
 
+    // The wet part of a picture drawn as a trace: how strongly it shows at a MIX.
+    static float wetAlpha (float mix) { return 0.25f + 0.75f * mix; }
+    static juce::String mixText (float mix) { return "MIX " + juce::String (juce::roundToInt (mix * 100.0f)) + "%"; }
+
     // A sweep of a delay against time: the chorus family's picture.
     void paintSweep (juce::Graphics& g, juce::Rectangle<float> plot, float rate, float centreMs, float swingMs, float topMs,
-                     std::initializer_list<float> phases, float seconds) const
+                     std::initializer_list<float> phases, float seconds, float strength = 1.0f) const
     {
         g.setColour (juce::Colours::white.withAlpha (0.06f));
         const auto step = topMs > 12.0f ? 5.0f : 1.0f;
@@ -1539,7 +1626,7 @@ private:
                 else
                     sweep.lineTo (point);
             }
-            g.setColour (colour.withAlpha (alpha));
+            g.setColour (colour.withAlpha (alpha * strength));
             g.strokePath (sweep, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             alpha *= 0.55f;
         }
@@ -1587,6 +1674,7 @@ private:
         const auto plot = plotArea();
         const auto reverse = param ("fx_stutter_reverse") > 0.5f;
         const auto pitch = param ("fx_stutter_pitch");
+        const auto mix = juce::jlimit (0.0f, 1.0f, param ("fx_stutter_mix"));
         const auto slices = 4;
         const auto width = plot.getWidth() / (float) slices;
         for (int s = 0; s < slices; ++s)
@@ -1609,12 +1697,13 @@ private:
                 else
                     wave.lineTo (point);
             }
-            g.setColour (colour.withAlpha (s == 0 ? 0.45f : 1.0f));
+            g.setColour (colour.withAlpha (s == 0 ? 0.45f : wetAlpha (mix))); // (the repeats are the wet part)
             g.strokePath (wave, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             if (plot.getHeight() > 30.0f)
                 paintTick (g, s == 0 ? "SLICE" : (flipped ? "REVERSED" : "REPEAT"), cell.withTrimmedLeft (3.0f).withHeight (10.0f), juce::Justification::centredLeft);
         }
-        paintCaption (g, "REPEATS", choiceText ("fx_stutter_div") + (pitch != 0.0f ? "  " + signedText (pitch, 0, " st") : juce::String()));
+        paintCaption (g, mix < 0.995f ? "REPEATS  " + mixText (mix) : juce::String ("REPEATS"),
+                      choiceText ("fx_stutter_div") + (pitch != 0.0f ? "  " + signedText (pitch, 0, " st") : juce::String()));
     }
 
     void paintSmear (juce::Graphics& g)
@@ -1859,8 +1948,9 @@ private:
         const auto plot = plotArea();
         const auto rate = juce::jlimit (0.05f, 8.0f, param ("fx_flanger_rate")), depth = juce::jlimit (0.0f, 1.0f, param ("fx_flanger_depth"));
         const auto feedback = param ("fx_flanger_feedback");
-        paintSweep (g, plot, rate, 2.5f, 2.5f * depth * 0.8f, 5.0f, { 0.0f }, juce::jmax (0.5f, 2.0f / rate));
-        paintCaption (g, "DELAY SWEEP", "2.5 ms " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb1 ")) + juce::String (2.0f * depth, 1) + " ms " + juce::String::fromUTF8 ("\xc2\xb7") + " FB " + juce::String (juce::roundToInt (feedback * 100.0f)) + "%");
+        const auto mix = juce::jlimit (0.0f, 1.0f, param ("fx_flanger_mix"));
+        paintSweep (g, plot, rate, 2.5f, 2.5f * depth * 0.8f, 5.0f, { 0.0f }, juce::jmax (0.5f, 2.0f / rate), wetAlpha (mix));
+        paintCaption (g, "DELAY SWEEP  " + mixText (mix), "2.5 ms " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb1 ")) + juce::String (2.0f * depth, 1) + " ms " + juce::String::fromUTF8 ("\xc2\xb7") + " FB " + juce::String (juce::roundToInt (feedback * 100.0f)) + "%");
     }
 
     void paintDimension (juce::Graphics& g)
@@ -1868,9 +1958,10 @@ private:
         const auto plot = plotArea();
         const auto rate = juce::jlimit (0.05f, 4.0f, param ("fx_dim_rate")), depth = juce::jlimit (0.0f, 1.0f, param ("fx_dim_depth"));
         // The two ears: 12 ms and 19 ms, swept against each other.
-        paintSweep (g, plot, rate, 12.0f, 12.0f * 0.25f * depth, 25.0f, { 0.0f }, juce::jmax (0.5f, 2.0f / rate));
-        paintSweep (g, plot, rate, 19.0f, 19.0f * 0.25f * depth, 25.0f, { 2.1f }, juce::jmax (0.5f, 2.0f / rate));
-        paintCaption (g, "L / R DELAY SWEEP", juce::String (rate, 2) + " Hz");
+        const auto mix = juce::jlimit (0.0f, 1.0f, param ("fx_dim_mix"));
+        paintSweep (g, plot, rate, 12.0f, 12.0f * 0.25f * depth, 25.0f, { 0.0f }, juce::jmax (0.5f, 2.0f / rate), wetAlpha (mix));
+        paintSweep (g, plot, rate, 19.0f, 19.0f * 0.25f * depth, 25.0f, { 2.1f }, juce::jmax (0.5f, 2.0f / rate), wetAlpha (mix));
+        paintCaption (g, "L / R DELAY SWEEP  " + mixText (mix), juce::String (rate, 2) + " Hz");
     }
 
     void paintEnsemble (juce::Graphics& g)
@@ -1930,6 +2021,7 @@ private:
     {
         const auto plot = plotArea();
         const auto shift = param ("fx_shifter_shift");
+        const auto mix = juce::jlimit (0.0f, 1.0f, param ("fx_shifter_mix")); // the moved lines' share; the grey ones keep the rest
         constexpr float top = 3000.0f;
         const auto toX = [&] (float hz) { return plot.getX() + 4.0f + hz / top * (plot.getWidth() - 8.0f); };
         g.setColour (juce::Colours::white.withAlpha (0.06f));
@@ -1943,16 +2035,16 @@ private:
         for (int k = 1; k <= 12; ++k)
         {
             const auto level = 1.0f / (float) std::pow ((float) k, 0.7f);
-            const auto bar = [&] (float hz, juce::Colour c)
+            const auto bar = [&] (float hz, juce::Colour c, float share)
             {
                 const auto f = std::abs (hz);
-                if (f > top)
+                if (f > top || share < 0.01f)
                     return;
                 g.setColour (c);
-                g.fillRect (juce::Rectangle<float> (2.0f, (plot.getHeight() - 14.0f) * level).withBottomY (plot.getBottom() - 1.0f).withX (toX (f) - 1.0f));
+                g.fillRect (juce::Rectangle<float> (2.0f, juce::jmax (1.0f, (plot.getHeight() - 14.0f) * level * share)).withBottomY (plot.getBottom() - 1.0f).withX (toX (f) - 1.0f));
             };
-            bar ((float) k * 220.0f, IlanaTheme::Ui::text3.withAlpha (0.5f));
-            bar ((float) k * 220.0f + shift, colour);
+            bar ((float) k * 220.0f, IlanaTheme::Ui::text3.withAlpha (0.5f), 1.0f - mix);
+            bar ((float) k * 220.0f + shift, colour, mix);
         }
         paintCaption (g, "PARTIALS (GREY) MOVED", (shift > 0.0f ? "+" : "") + describeValue ("fx_shifter_shift", shift));
     }
@@ -1961,6 +2053,7 @@ private:
     {
         const auto plot = plotArea();
         const auto carrier = param ("fx_ring_freq");
+        const auto mix = juce::jlimit (0.0f, 1.0f, param ("fx_ring_mix")); // sidebands by MIX, the note by what is left
         constexpr double low = 20.0, high = 20000.0;
         paintFrequencyGrid (g, plot, low, high);
         if (plot.getHeight() > 30.0f)
@@ -1968,17 +2061,17 @@ private:
                 paintTick (g, tick.second, juce::Rectangle<float> (logX (plot, tick.first, low, high) + 2.0f, plot.getBottom() - 10.0f, 24.0f, 10.0f), juce::Justification::centredLeft);
         const auto bar = [&] (double hz, juce::Colour c, float level)
         {
-            if (hz < low || hz > high)
+            if (hz < low || hz > high || level < 0.01f)
                 return;
             g.setColour (c);
-            g.fillRect (juce::Rectangle<float> (2.0f, (plot.getHeight() - 14.0f) * level).withBottomY (plot.getBottom() - 11.0f).withX (logX (plot, hz, low, high) - 1.0f));
+            g.fillRect (juce::Rectangle<float> (2.0f, juce::jmax (1.0f, (plot.getHeight() - 14.0f) * level)).withBottomY (plot.getBottom() - 11.0f).withX (logX (plot, hz, low, high) - 1.0f));
         };
         const float dashes[] { 3.0f, 3.0f };
         g.setColour (IlanaTheme::Ui::text3.withAlpha (0.7f));
         g.drawDashedLine ({ logX (plot, carrier, low, high), plot.getY(), logX (plot, carrier, low, high), plot.getBottom() - 11.0f }, dashes, 2, 1.0f);
-        bar (440.0, IlanaTheme::Ui::text3.withAlpha (0.6f), 1.0f);
-        bar (std::abs (440.0 - (double) carrier), colour, 0.8f);
-        bar (440.0 + (double) carrier, colour, 0.8f);
+        bar (440.0, IlanaTheme::Ui::text3.withAlpha (0.6f), 1.0f - mix);
+        bar (std::abs (440.0 - (double) carrier), colour, 0.8f * mix);
+        bar (440.0 + (double) carrier, colour, 0.8f * mix);
         paintTick (g, "IN", juce::Rectangle<float> (logX (plot, 440.0, low, high) + 3.0f, plot.getY() + 2.0f, 20.0f, 10.0f), juce::Justification::centredLeft, 0.9f);
         {
             const auto x = logX (plot, carrier, low, high);
@@ -2023,7 +2116,8 @@ private:
     void paintFeedbackLoop (juce::Graphics& g)
     {
         const auto plot = plotArea();
-        const auto amount = param ("fx_feedback_amount"), delay = juce::jmax (1.0f, param ("fx_feedback_delay"));
+        const auto amount = juce::jlimit (0.0f, 0.95f, param ("fx_feedback_amount")), delay = juce::jmax (1.0f, param ("fx_feedback_delay"));
+        const auto tone = juce::jlimit (0.0f, 1.0f, param ("fx_feedback_tone")), mix = juce::jlimit (0.0f, 1.0f, param ("fx_feedback_mix"));
         constexpr float window = 250.0f;
         const auto toX = [&] (float ms) { return plot.getX() + 6.0f + ms / window * (plot.getWidth() - 12.0f); };
         g.setColour (juce::Colours::white.withAlpha (0.06f));
@@ -2033,16 +2127,36 @@ private:
         if (plot.getHeight() > 30.0f)
             for (const auto ms : { 100.0f, 200.0f })
                 paintTick (g, juce::String ((int) ms) + " ms", juce::Rectangle<float> (toX (ms) + 2.0f, plot.getBottom() - 14.0f, 34.0f, 10.0f), juce::Justification::centredLeft);
-        // Each trip round the loop comes back AMOUNT as loud.
-        auto level = 1.0f;
+        // The sound itself (grey), then each trip round the loop: the first copy is the delayed
+        // input, every later one comes back AMOUNT as loud and TONE rounds it off (a low-pass in
+        // the loop, so a click's peak sinks faster than AMOUNT alone), all as loud as MIX lets them.
+        std::vector<float> smeared (1024, 0.0f); // (a click, once more through the loop's low-pass each trip)
+        smeared[0] = 1.0f;
+        const auto coefficient = 1.0f - tone * 0.9f;
+        auto trip = 1.0f, peak = 1.0f; // AMOUNT to the trip so far; the click's height after the low-pass
         for (int i = 0; i < 80 && toX ((float) i * delay) < plot.getRight(); ++i)
         {
-            g.setColour (colour.withAlpha (i == 0 ? 0.5f : 1.0f));
-            const auto h = juce::jmax (1.0f, (plot.getHeight() - 14.0f) * level);
+            const auto shown = i == 0 ? 1.0f : mix * trip * peak;
+            if (i > 0 && shown < 0.005f)
+                break;
+            g.setColour (i == 0 ? IlanaTheme::Ui::text3.withAlpha (0.6f) : colour);
+            const auto h = juce::jmax (1.0f, (plot.getHeight() - 14.0f) * shown);
             g.fillRect (juce::Rectangle<float> (2.0f, h).withBottomY (plot.getBottom() - 1.0f).withX (toX ((float) i * delay) - 1.0f));
-            level *= amount;
+
+            if (i > 0) // (the next trip: AMOUNT, and one more pass through the low-pass)
+            {
+                trip *= amount;
+                auto state = 0.0f;
+                peak = 0.0f;
+                for (auto& v : smeared)
+                {
+                    state += (v - state) * coefficient;
+                    v = state;
+                    peak = juce::jmax (peak, std::abs (v));
+                }
+            }
         }
-        paintCaption (g, "ROUND THE LOOP", juce::String (juce::roundToInt (amount * 100.0f)) + "% " + juce::String::fromUTF8 ("\xc2\xb7") + " " + juce::String (juce::roundToInt (delay)) + " ms");
+        paintCaption (g, tone > 0.005f ? "ROUND THE LOOP  TONE " + juce::String (juce::roundToInt (tone * 100.0f)) + "%  " + mixText (mix) : "ROUND THE LOOP  " + mixText (mix), juce::String (juce::roundToInt (amount * 100.0f)) + "% " + juce::String::fromUTF8 ("\xc2\xb7") + " " + juce::String (juce::roundToInt (delay)) + " ms");
     }
 
     void paintPicture (juce::Graphics& g)
@@ -2076,19 +2190,19 @@ private:
         switch (fxType)
         {
             case 8:  return { "fx_haas_delay", "fx_haas_mix" };
-            case 10: return { "fx_stutter_div", "fx_stutter_reverse", "fx_stutter_pitch" };
+            case 10: return { "fx_stutter_div", "fx_stutter_reverse", "fx_stutter_pitch", "fx_stutter_mix" };
             case 11: return { "fx_smear_size", "fx_smear_density", "fx_smear_mix" };
-            case 14: return { "fx_flanger_rate", "fx_flanger_depth", "fx_flanger_feedback" };
-            case 15: return { "fx_dim_rate", "fx_dim_depth" };
+            case 14: return { "fx_flanger_rate", "fx_flanger_depth", "fx_flanger_feedback", "fx_flanger_mix" };
+            case 15: return { "fx_dim_rate", "fx_dim_depth", "fx_dim_mix" };
             case 17: return { "fx_tape_stop_time", "fx_tape_stop_mix", "fx_tape_stop_trigger" };
             case 18: return { "fx_tilt", "fx_tilt_level" };
             case 19: return { "fx_util_gain", "fx_util_mono", "fx_util_invert" };
             case 22: return { "fx_width", "fx_width_mix" };
             case 23: return { "fx_trem_rate", "fx_trem_depth", "fx_trem_shape" };
-            case 24: return { "fx_shifter_shift" };
-            case 25: return { "fx_ring_freq" };
+            case 24: return { "fx_shifter_shift", "fx_shifter_mix" };
+            case 25: return { "fx_ring_freq", "fx_ring_mix" };
             case 26: return { "fx_octaver_mix" };
-            case 28: return { "fx_feedback_amount", "fx_feedback_delay" };
+            case 28: return { "fx_feedback_amount", "fx_feedback_delay", "fx_feedback_tone", "fx_feedback_mix" };
             case 42: return { "fx_filter_type", "fx_filter_slope", "fx_filter_cutoff", "fx_filter_reso", "fx_filter_morph", "fx_filter_spread" };
             default: return {};
         }
@@ -2110,11 +2224,11 @@ private:
         static const char* const dynamicsIds[] { "fx_comp_threshold", "fx_comp_ratio", "fx_comp_makeup", "fx_comp_mix",
                                                  "fx_ott_amount", "fx_ott_mix", "fx_limit_ceiling" };
         static const char* const delayIds[] { "fx_delay_time", "fx_delay_time_r", "fx_delay_sync", "fx_delay_div", "fx_delay_feedback",
-                                              "fx_delay_pingpong", "fx_taps_on", "fx_taps_pattern", "fx_taps_mix" };
+                                              "fx_delay_pingpong", "fx_taps_on", "fx_taps_pattern", "fx_taps_mix", "fx_delay_mix" };
         static const char* const reverbIds[] { "fx_reverb_type", "fx_reverb_size", "fx_reverb_damping" };
         static const char* const vowelIds[] { "fx_vowel_morph", "fx_vowel_mix" };
         static const char* const combIds[] { "fx_comb_freq", "fx_comb_feedback", "fx_comb_mix" };
-        static const char* const chorusIds[] { "fx_chorus_rate", "fx_chorus_depth" };
+        static const char* const chorusIds[] { "fx_chorus_rate", "fx_chorus_depth", "fx_chorus_mix" };
         static const char* const phaserIds[] { "fx_phaser_rate", "fx_phaser_depth", "fx_phaser_feedback", "fx_phaser_mix" };
         static const char* const vocoderIds[] { "fx_voc_bands", "fx_voc_source", "fx_voc_formant" };
 
@@ -2150,7 +2264,7 @@ private:
                     }
                 }
                 break;
-            case Kind::freeze: mixIn (param ("fx_freeze_on")); break;
+            case Kind::freeze: mixIn (param ("fx_freeze_on")); mixIn (param ("fx_freeze_mix")); break;
             case Kind::picture: for (const auto& id : pictureIds (type)) mixIn (param (id)); break;
             case Kind::none: break;
         }
@@ -2169,7 +2283,14 @@ private:
         const auto readSettings = signatureWait >= 1.0f || lastSignature == 0;
         if (readSettings)
             signatureWait = 0.0f;
-        if (const auto now = readSettings ? signature() : lastSignature; now != lastSignature)
+        const auto now = readSettings ? signature() : lastSignature;
+        // An Airwindows picture is measured by running the algorithm: a knob an FX LFO
+        // or the mod matrix keeps moving re-measures at most every 120 ms (an impulse
+        // response is seconds of audio). A direct call always catches up.
+        const auto measured120 = smooth && lastSignature != 0 && juce::Time::getMillisecondCounterHiRes() - lastMeasuredAt < 120.0
+                                 && (kind == Kind::airwindowsImpulse || kind == Kind::airwindowsTransfer || kind == Kind::airwindowsResponse);
+
+        if (now != lastSignature && ! measured120)
         {
             lastSignature = now;
             allInOneKind();
@@ -2179,6 +2300,7 @@ private:
                 measureImpulse();
             if (kind == Kind::airwindowsResponse)
                 measureResponse();
+            lastMeasuredAt = juce::Time::getMillisecondCounterHiRes();
             dirty = true;
         }
 
@@ -2190,7 +2312,7 @@ private:
             auto moving = false;
             for (size_t b = 0; b < bandLevels.size(); ++b)
             {
-                const auto target = live ? processorRef.getVocoderBandLevel ((int) b) : 0.0f;
+                const auto target = live ? processorRef.getVocoderBandLevel ((int) b, slotNumber) : 0.0f;
                 const auto next = smooth ? IlanaAnim::approach (bandLevels[b], target, 0.4f, smoothTicks) : target;
                 moving = moving || std::abs (next - bandLevels[b]) > 1.0e-4f;
                 bandLevels[b] = std::abs (next) < 1.0e-5f ? 0.0f : next;
@@ -2203,7 +2325,7 @@ private:
         if (kind == Kind::freeze)
         {
             std::array<float, SpectralFreeze::numBands> now {};
-            processorRef.getFreezeBands (now);
+            processorRef.getFreezeBands (now, slotNumber);
             auto moving = false;
             for (size_t b = 0; b < freezeBands.size(); ++b)
             {

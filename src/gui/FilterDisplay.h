@@ -3,6 +3,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <complex>
@@ -311,11 +312,22 @@ public:
         if (read ("_env") < -0.001f || std::abs (read ("_keytrack")) > 0.001f || std::abs (read ("_fm")) > 0.001f)
             return false;
 
-        const auto cutoffDestination = (int) (filterIndex == 0 ? Mod::Destination::Filter1Cutoff : Mod::Destination::Filter2Cutoff);
+        // Disperser is an all-pass chain: flat to look at, but it smears the
+        // phase it is there for (it read as an open filter, "FILTER OFF").
+        if ((int) read ("_type") == FilterType::Disperser)
+            return false;
+
+        // A route into the cutoff, or into RESO, MORPH or ENV AMT (which
+        // can bend an open curve), shapes the sound.
+        using D = Mod::Destination;
+        const auto first = filterIndex == 0;
+        const int shaping[] { (int) (first ? D::Filter1Cutoff : D::Filter2Cutoff), (int) (first ? D::Filter1Reso : D::Filter2Reso),
+                              (int) (first ? D::Filter1Morph : D::Filter2Morph), (int) (first ? D::Filter1Env : D::Filter2Env) };
         for (int slot = 0; slot < Mod::maxSlots; ++slot)
         {
             const auto routing = p.readModSlot (slot);
-            if (routing.destination == cutoffDestination && routing.source != Mod::Source::None && std::abs (routing.depth) > 1.0e-4f)
+            if (std::find (std::begin (shaping), std::end (shaping), routing.destination) != std::end (shaping)
+                && routing.source != Mod::Source::None && std::abs (routing.depth) > 1.0e-4f)
             {
                 const auto macro = Mod::macroIndexFor (routing.source);
                 const auto* macroValue = macro >= 0 ? p.apvts.getRawParameterValue ("macro" + juce::String (macro + 1)) : nullptr;
@@ -464,6 +476,7 @@ private:
     bool isModulated (int filterIndex) const
     {
         return std::abs (cutoffOf (filterIndex, true) / cutoffOf (filterIndex, false) - 1.0) > 0.005
+               || std::abs (resonanceOf (filterIndex, true) - resonanceOf (filterIndex, false)) > 0.002
                || std::abs (processorRef.getModDisplay (filterIndex == 0 ? Mod::Destination::Filter1Morph
                                                                          : Mod::Destination::Filter2Morph)) > 0.002f;
     }
@@ -484,7 +497,8 @@ private:
         // While sound plays, every frame: the spectrum under the curve
         // slides between audio blocks (copyScopeDataSmooth) instead of
         // stepping at the host's block rate (ilana, 2026-11-14).
-        if (IlanaAnim::showing (*this) && ((live && blocksArriving.check (processorRef.getUiEpoch())) || appear < 1.0f || falling || sweeping || changeGate.check (processorRef.getUiEpoch() ^ IlanaAnim::mouseSignature (*this))))
+        if (IlanaAnim::showing (*this) && ((live && blocksArriving.check (processorRef.getUiEpoch())) || appear < 1.0f || falling || sweeping || changeGate.check (processorRef.getUiEpoch() ^ IlanaAnim::mouseSignature (*this)
+                                                                                                                                                                          ^ IlanaAnim::phaseSignature ((float) resonanceOf (0, true), 21) ^ IlanaAnim::phaseSignature ((float) resonanceOf (1, true), 22))))
             repaint();
     }
 
@@ -582,21 +596,65 @@ private:
         return 0.0f;
     }
 
-    // The cutoff as set, or with the live modulation on top.
+    // The cutoff as set, or as the newest note hears it: its routes, and
+    // while notes sound the ENV AMT sweep (with its velocity scaling) and KEY
+    // TRACK, as Voice::updateFilterCoefficients adds them (the faint curve
+    // only followed routes; a filter-envelope pluck never moved it).
     double cutoffOf (int filterIndex, bool withMod) const
     {
-        const auto base = (double) readParam (filterIndex == 0 ? "f1_cutoff" : "f2_cutoff");
-        const auto mod = withMod ? (double) processorRef.getModDisplay (
-                                       filterIndex == 0 ? Mod::Destination::Filter1Cutoff : Mod::Destination::Filter2Cutoff)
-                                 : 0.0;
+        using D = Mod::Destination;
+        const auto first = filterIndex == 0;
+        const auto base = (double) readParam (first ? "f1_cutoff" : "f2_cutoff");
 
-        return juce::jlimit (20.0, 20000.0, base * std::exp2 (mod * (double) Mod::Range::cutoffOctaves));
+        if (! withMod)
+            return juce::jlimit (20.0, 20000.0, base);
+
+        auto octaves = (double) processorRef.getModDisplay (first ? D::Filter1Cutoff : D::Filter2Cutoff) * (double) Mod::Range::cutoffOctaves;
+
+        if (processorRef.getActiveVoiceCount() > 0)
+        {
+            const auto velocity = processorRef.getMonitorVelocity();
+            const auto velocityScale = [velocity] (float amount) { return 1.0f - amount + amount * velocity; };
+            auto envScale = velocityScale (readParam ("filter_velocity"));
+
+            if (! first)
+                envScale *= velocityScale (readParam ("f2e_velocity"));
+
+            const auto envAmount = (double) readParam (first ? "f1_env" : "f2_env")
+                                   + (double) processorRef.getModDisplay (first ? D::Filter1Env : D::Filter2Env) * (double) Mod::Range::filterEnvOctaves;
+            const auto envelope = (double) (first ? processorRef.getEnvMonitorFilter() : processorRef.getEnvMonitorFilter2());
+            octaves += envAmount * envelope * (double) envScale
+                       + (double) readParam (first ? "f1_keytrack" : "f2_keytrack") * (double) processorRef.getMonitorKeyTrackOctaves();
+        }
+
+        return juce::jlimit (20.0, 20000.0, base * std::exp2 (octaves));
+    }
+
+    // RESONANCE as set, or with its routes.
+    double resonanceOf (int filterIndex, bool withMod) const
+    {
+        const auto first = filterIndex == 0;
+        const auto reso = (double) readParam (first ? "f1_reso" : "f2_reso");
+        return withMod ? juce::jlimit (0.0, 1.0, reso + (double) processorRef.getModDisplay (first ? Mod::Destination::Filter1Reso
+                                                                                                    : Mod::Destination::Filter2Reso))
+                       : reso;
+    }
+
+    // The two filters side by side, as the voice mixes them (BALANCE fades
+    // one out; WEST in Filter 2's place takes its share and is drawn apart).
+    std::complex<double> parallelSum (double frequency, bool withMod) const
+    {
+        const auto balance = (double) readParam ("filter_balance");
+        const auto gain1 = juce::jmin (1.0, 1.0 - balance);
+        const auto gain2 = juce::jmin (1.0, 1.0 + balance);
+        const auto second = filter2Replaced() ? std::complex<double>() : response (1, frequency, withMod) * gain2;
+        return (response (0, frequency, withMod) * gain1 + second) * 0.7071;
     }
 
     std::complex<double> response (int filterIndex, double frequency, bool withMod) const
     {
         const auto cutoff = cutoffOf (filterIndex, withMod);
-        const auto reso = (double) readParam (filterIndex == 0 ? "f1_reso" : "f2_reso");
+        const auto reso = resonanceOf (filterIndex, withMod);
         const auto type = (int) readParam (filterIndex == 0 ? "f1_type" : "f2_type");
         const auto slope24 = readParam (filterIndex == 0 ? "f1_slope" : "f2_slope") > 0.5f;
 
@@ -659,7 +717,7 @@ private:
 
             if (parallel)
             {
-                h = (response (0, frequency, withMod) + response (1, frequency, withMod)) * 0.707;
+                h = parallelSum (frequency, withMod);
             }
             else if (filterIndex == 1)
             {
@@ -783,7 +841,7 @@ private:
             const auto frequency = xToFrequency ((double) juce::jlimit (0.0f, 1.0f, (px - plot.getX()) / plot.getWidth()));
             auto h = response (index, frequency, false);
             if (parallel)
-                h = (response (0, frequency, false) + response (1, frequency, false)) * 0.707;
+                h = parallelSum (frequency, false);
             else if (index == 1)
                 h = response (0, frequency, false) * response (1, frequency, false);
             return plot.getY() + (float) dbToY (20.0 * std::log10 (juce::jmax (1.0e-6, std::abs (h)))) * plot.getHeight();

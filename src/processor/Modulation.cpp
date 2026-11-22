@@ -1263,14 +1263,19 @@ void IlanaSynthAudioProcessor::evaluateGlobalModulation (const Mod::Slot* slots,
         if (! juce::isPositiveAndBelow (slot.destination, maxDestinations))
             continue;
 
-        // A spectral amount fed by a per-note source is worked out by each voice.
-        if (Mod::isVoiceSpectralSlot (slot))
-            continue;
-
         auto value = Mod::shape (slot, globalSourceValue (slot.source));
 
         if (slot.aux != Mod::Source::None)
             value *= Mod::auxScale (slot.aux, globalSourceValue (slot.aux));
+
+        // A spectral amount fed by a per-note source is worked out by each
+        // voice; the picture and the ring still show the newest note's swing
+        // (they showed nothing for an envelope or velocity route).
+        if (Mod::isVoiceSpectralSlot (slot))
+        {
+            voiceKnobShown[(size_t) slot.destination] += slot.depth * value;
+            continue;
+        }
 
         // So is a knob a voice reads (VoiceParams::voiceKnobs): the ring
         // still shows the newest note's swing, the knob itself stays put.

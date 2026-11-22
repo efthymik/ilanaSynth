@@ -37,6 +37,7 @@
 #include "gui/TableBrowser.h"
 #include "gui/WavetableEditor.h"
 #include "PluginEditor.h"
+#include "gui/pages/PlayPage.h"
 #include "gui/SectionColourPicker.h"
 #include "gui/EnvelopeDisplay.h"
 #include "gui/FmWidgets.h"
@@ -5825,6 +5826,50 @@ void uiGroup_WARP2 (UiCtx& ctx)
 // the audio thread's cache had built, so it froze or lagged a step), OSC 4-6's own spectral warp (they showed
 // OSC 3's), FRAME between two frames under FRAME BLEND Crossfade / Spectral (it jumped to the nearest frame) and
 // SYNC 2 TO 1 on OSC 2. Pictures with ILANA_UITEST_SHOTS.
+#include "BlindspotScenes.h"
+
+// Display blind spots (ilana 2026-11-21): each scene's picture changes with
+// the route, note or knob it used to miss.
+// A group that loads presets puts the patch back as it found it (later groups
+// lean on earlier ones' state, e.g. SAMPLE_ZOOM on BOUNCE's sample in OSC 2).
+struct UiKeepPatch
+{
+    explicit UiKeepPatch (IlanaSynthAudioProcessor& p) : processor (p) { processor.getStateInformation (state); }
+    ~UiKeepPatch()
+    {
+        processor.setStateInformation (state.getData(), (int) state.getSize());
+        settle (200);
+    }
+    IlanaSynthAudioProcessor& processor;
+    juce::MemoryBlock state;
+};
+
+void uiGroup_BLINDSPOTS (UiCtx& ctx)
+{
+    const UiKeepPatch keep (ctx.processor);
+    const auto shotsDir = juce::SystemStats::getEnvironmentVariable ("ILANA_UITEST_SHOTS", "");
+    const auto shots = runBlindspotScenes (ctx, shotsDir.isNotEmpty() ? juce::File (shotsDir) : juce::File());
+    expect (shots.size() >= 13, "every blind-spot scene ran (" + juce::String ((int) shots.size()) + ")");
+    for (const auto& shot : shots)
+    {
+        auto count = 0;
+        for (int j = 0; j < juce::jmin (shot.plain.getHeight(), shot.routed.getHeight()); ++j)
+            for (int i = 0; i < juce::jmin (shot.plain.getWidth(), shot.routed.getWidth()); ++i)
+                count += shot.plain.getPixelAt (i, j) != shot.routed.getPixelAt (i, j) ? 1 : 0;
+        expect (count > 40, "the picture follows what it used to miss: " + shot.name + " (" + juce::String (count) + " pixels moved)");
+    }
+}
+
+// The report's pictures: ilanaSnapshot --blindspots DIR
+int runBlindspots (const juce::File& dir)
+{
+    dir.createDirectory();
+    UiCtx ctx;
+    const auto shots = runBlindspotScenes (ctx, dir);
+    ctx.closeEditor();
+    return shots.empty() ? 1 : 0;
+}
+
 void uiGroup_SHAPE_DISPLAY (UiCtx& ctx)
 {
     UI_GROUP_PRELUDE
@@ -9563,6 +9608,8 @@ void uiGroup_POPUP_STACK (UiCtx& ctx)
     }
 }
 
+#include "FxBlindSpotUiTests.h"
+
 struct UiGroup
 {
     const char* id;
@@ -9594,6 +9641,8 @@ const UiGroup uiGroups[] = {
     { "BOUNCE", uiGroup_BOUNCE },
     { "WARP2", uiGroup_WARP2 },
     { "SHAPE_DISPLAY", uiGroup_SHAPE_DISPLAY },
+    { "BLINDSPOTS", uiGroup_BLINDSPOTS },
+    { "FX_DISPLAY", uiGroup_FX_DISPLAY },
     { "SAMPLE_ZOOM", uiGroup_SAMPLE_ZOOM },
     { "PHYSICAL", uiGroup_PHYSICAL },
     { "FILTER_PICKERS", uiGroup_FILTER_PICKERS },
@@ -12213,6 +12262,12 @@ int main (int argc, char** argv)
 
     if (juce::String (argv[1]) == "--foldrepro" && argc > 2)
         return runFoldRepro (juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]));
+
+    if (juce::String (argv[1]) == "--blindspots" && argc > 2)
+    {
+        IlanaAnim::fullMotion() = false;
+        return runBlindspots (juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]));
+    }
 
     if (juce::String (argv[1]) == "--fxsizes" && argc > 2)
         return runFxSizes (juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]));
