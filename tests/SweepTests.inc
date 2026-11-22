@@ -1,5 +1,5 @@
 // Broad bug sweep (2026-11-22): regressions for what it fixed.
-// Included by TableTest.cpp; ILANA_SWEEP_TEST=1 runs only these.
+// Included by TableTest.cpp; ILANA_TEST_ONLY=sweep runs only these.
 
 void runSweepFixTests()
 {

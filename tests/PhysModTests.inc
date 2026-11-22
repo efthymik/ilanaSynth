@@ -6,7 +6,7 @@
 // note with an LFO on one knob and compares the waveform's bend (second
 // difference) at the block boundaries with its bend elsewhere in the block:
 // a step at the boundary shows up as a spike there. Included by
-// TableTest.cpp; ILANA_PHYSMOD_TEST=1 runs only these.
+// TableTest.cpp; ILANA_TEST_ONLY=physmod runs only these.
 //
 // ILANA_PHYSMOD_RENDER="<preset file>|<out.wav>" renders a preset's chord
 // (C3 E3 G3 C4, 4 s held, 1.5 s release, 48 kHz, 512-sample blocks) to a
@@ -173,7 +173,7 @@ void runPhysModTests()
         { burst, "string_stiffness" }, { burst, "string_pickup" },
     };
 
-    const auto verbose = juce::SystemStats::getEnvironmentVariable ("ILANA_PHYSMOD_TEST", "").isNotEmpty();
+    const auto verbose = juce::SystemStats::getEnvironmentVariable ("ILANA_TEST_ONLY", "").contains ("physmod");
 
     for (const auto& c : cases)
     {

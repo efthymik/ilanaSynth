@@ -1,6 +1,6 @@
 // The FX patcher's LFO boxes (FxLfo.h, ilana 2026-10-12). Included by
 // TableTest.cpp after FxPatcherTests.inc (it uses its helpers);
-// ILANA_FX_LFO_TEST=1 runs only these.
+// ILANA_TEST_ONLY=fxlfo runs only these.
 
 namespace FxLfoLab
 {

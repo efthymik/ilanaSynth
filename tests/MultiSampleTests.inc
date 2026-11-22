@@ -1,7 +1,7 @@
 // SoundFont (SF2) and SFZ multisamples in the Sample oscillator: the loaders
 // read regions, roots, levels and loops, and a note plays the region that
 // covers it at the right pitch. Included by TableTest.cpp;
-// ILANA_MULTISAMPLE_TEST=1 runs only these.
+// ILANA_TEST_ONLY=multisample runs only these.
 
 #include "dsp/MultiSample.h"
 #include "SamplePaths.h"

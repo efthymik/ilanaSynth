@@ -1,6 +1,6 @@
 // Roadmap step 40: a sample follows the host tempo (SYNC, BPM) and STRETCH
 // keeps its pitch apart from its speed. Included by TableTest.cpp;
-// ILANA_SAMPLE_TEMPO_TEST=1 runs only these.
+// ILANA_TEST_ONLY=sampletempo runs only these.
 
 namespace SampleTempoLab
 {

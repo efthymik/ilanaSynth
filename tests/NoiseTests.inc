@@ -1,7 +1,7 @@
 // The compact SUB and NOISE cards: six noise colours (src/dsp/NoiseColours.h),
 // NOISE's own switch and type, SUB's own COLOUR, noise volume as a
 // modulation destination, and older patches loading as they did. Included by
-// TableTest.cpp; ILANA_NOISE_TEST=1 runs these alone.
+// TableTest.cpp; ILANA_TEST_ONLY=noise runs these alone.
 
 namespace NoiseTests
 {

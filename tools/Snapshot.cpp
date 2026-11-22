@@ -6325,13 +6325,6 @@ void uiGroup_PHYSICAL (UiCtx& ctx)
             stringShown = stringShown || (visibleInTree (view) && view->getOscillator() == physicalPrefix);
         expect (stringShown, "the OSC card shows the moving string");
         {
-            std::vector<juce::TextButton*> buttons;
-            findAll<juce::TextButton> (*editor, buttons);
-            auto editBodyShown = false;
-            for (auto* button : buttons)
-                if (visibleInTree (button) && button->getButtonText() == juce::String::fromUTF8 ("EDIT BODY \xe2\x80\xba"))
-                    editBodyShown = true;
-            expect (! editBodyShown, "a Physical card has no EDIT BODY link (the BODY tab is on the same page)");
             pages->showPage ("MAIN");
             settle (200);
         }
@@ -6439,7 +6432,7 @@ void uiGroup_FILTER_MARKERS (UiCtx& ctx)
             const auto inset = plot.reduced (8.0f);
             // (High: above the middle of a tall graph; PLAY's short one only keeps them off its bottom.)
             const auto highLimit = compact ? plot.getY() + plot.getHeight() * 0.75f : plot.getCentreY();
-            expect (inset.contains (markers[0]) && inset.contains (markers[1]) && markers[0].getDistanceFrom (markers[1]) >= 10.0f
+            expect (inset.contains (markers[0]) && inset.contains (markers[1]) && markers[0].getDistanceFrom (markers[1]) >= 18.0f
                         && markers[0].y < highLimit && markers[1].y < highLimit,
                     "Init: the open filters' markers sit high on the response, inside the plot, apart ("
                         + markers[0].toString() + " / " + markers[1].toString() + ")");

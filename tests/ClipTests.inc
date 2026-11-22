@@ -1,6 +1,6 @@
 // The clip sequencer: notes at the right samples, Key transpose, Host play,
 // the patch state, MIDI import. Included by TableTest.cpp;
-// ILANA_CLIP_TEST=1 runs only these.
+// ILANA_TEST_ONLY=clip runs only these.
 
 namespace ClipLab
 {

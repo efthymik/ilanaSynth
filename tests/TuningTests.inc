@@ -1,5 +1,5 @@
 // Scala microtuning (.scl scales, .kbm keyboard mappings). Included by
-// TableTest.cpp; ILANA_TUNING_TEST=1 runs these alone.
+// TableTest.cpp; ILANA_TEST_ONLY=tuning runs these alone.
 
 #include "dsp/Tuning.h"
 #include "MtsEsp.h"

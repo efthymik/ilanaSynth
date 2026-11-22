@@ -1,6 +1,6 @@
 // FX splitters: a slot on one band works on that band only and the rest
 // passes around it untouched. Included by TableTest.cpp;
-// ILANA_SPLITTER_TEST=1 runs only these.
+// ILANA_TEST_ONLY=splitter runs only these.
 
 namespace SplitterLab
 {

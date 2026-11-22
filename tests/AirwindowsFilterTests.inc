@@ -2,7 +2,7 @@
 // model stays finite and bounded, filters the way its type says, comes out
 // at a comparable level, and the Disperser is flat with the right group
 // delay. Also prints ns/sample per model. Included by TableTest.cpp;
-// ILANA_AWFILTER_TEST=1 runs only these.
+// ILANA_TEST_ONLY=awfilter runs only these.
 
 #include "dsp/AirwindowsCharacter.h"
 

@@ -1,5 +1,5 @@
 // The Airwindows FX module (type 30) and its ported algorithms. Included by
-// TableTest.cpp; ILANA_AIRWINDOWS_TEST=1 runs these alone.
+// TableTest.cpp; ILANA_TEST_ONLY=airwindows runs these alone.
 
 #include "dsp/airwindows/AirwindowsModule.h"
 #include "dsp/airwindows/DelaySync.h"

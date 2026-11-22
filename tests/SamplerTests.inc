@@ -2,7 +2,7 @@
 // export, playback modes, ping-pong, random start, playback quality, the zone
 // map, round robin and velocity blending, SoundFont presets, slices and the
 // sample browser. Included by TableTest.cpp after MultiSampleTests.inc (it
-// reuses MultiSampleLab's helpers); ILANA_SAMPLER_TEST=1 runs only these.
+// reuses MultiSampleLab's helpers); ILANA_TEST_ONLY=sampler runs only these.
 
 #include "gui/SampleBrowserModel.h"
 

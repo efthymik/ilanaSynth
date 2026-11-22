@@ -1,7 +1,7 @@
 // Hostile input (polish and bug pass 2026-11-16, round A): files and host
 // state the synth reads must never crash, hang or eat memory. Each case is
 // a file a stranger could hand over (a preset pack, a .kbm, a MIDI clip).
-// Included by TableTest.cpp; ILANA_HARDENING_TEST=1 runs only these.
+// Included by TableTest.cpp; ILANA_TEST_ONLY=hardening runs only these.
 
 void runHardeningTests()
 {
@@ -51,8 +51,12 @@ void runHardeningTests()
         out.writeInt ((int) text.size());
         out.write (text.data(), text.size());
         out.writeByte (0);
+        const auto before = processor.getParameters()[3]->getValue();
         processor.setStateInformation (out.getData(), (int) out.getDataSize());
-        check (true, "xml: deeply nested host state does not crash");
+        juce::MemoryBlock after;
+        processor.getStateInformation (after);
+        check (std::abs (processor.getParameters()[3]->getValue() - before) < 1.0e-6f && after.getSize() > 0,
+               "xml: deeply nested host state is refused: parameters unchanged, state still saves");
 
         // A normal state still round-trips.
         IlanaSynthAudioProcessor source;

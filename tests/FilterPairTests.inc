@@ -1,7 +1,7 @@
 // The stereo pair paths (LadderFilter::processPairBlock, DriveLadder and
 // OtaFilter::processPairBlock via CascadePair.h, Disperser, VowelFilter and VowelMorph::processPairBlock; SSE lanes) must give bit for bit what two separate runs give, for both models, both
 // slopes, any coefficients and any mix of pair and single blocks.
-// Included by TableTest.cpp; ILANA_FILTERPAIR_TEST=1 runs only these.
+// Included by TableTest.cpp; ILANA_TEST_ONLY=filterpair runs only these.
 
 void runFilterPairTests()
 {

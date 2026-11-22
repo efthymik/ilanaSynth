@@ -157,7 +157,7 @@ The real rack through its migrated graph (`processEffectsGraph`) against the fix
 
 Same box, 48 kHz, block 512, but the box was slower and noisier than for step A (the same `--heldcpu` run reads 15-18 % today against 10.1 % then), so every figure is a mean of alternating runs of the step A build (`871d8a3`) and this one.
 
-What changed on the audio path: SERIES and PARALLEL now run through the rack's compiled graph (`fxRackRunner`); each slot looks up its engine and value table (`engineForSlot`, `slotValues`); PATCHER runs its own plan (`fxPatchRunner`) with the silence skip on and per-type tails (`fxTailSamples`). A patch that uses none of it renders sample for sample as before (0 of 698 fingerprints, `ILANA_GRAPH_TEST`).
+What changed on the audio path: SERIES and PARALLEL now run through the rack's compiled graph (`fxRackRunner`); each slot looks up its engine and value table (`engineForSlot`, `slotValues`); PATCHER runs its own plan (`fxPatchRunner`) with the silence skip on and per-type tails (`fxTailSamples`). A patch that uses none of it renders sample for sample as before (0 of 698 fingerprints, `ILANA_TEST_ONLY=graph`).
 
 | `ILANA_BENCH_ONLY=graph`, rack via `processEffects`, mean us per block (5 runs each) | before | after |
 |---|---|---|
@@ -185,7 +185,7 @@ Rules followed: A1 (plans compiled on the message thread; a slot change runs the
 
 ## Step 16 measured (2026-10-11, branch `claude/reroutable-oscillators-hl008x`)
 
-What follows the rules in B: the cables compile to a small table (`VoiceRouting::compile`: stage order, used stages, one bus per distinct set of cables, at most 8) when the ten `cable_*` masks change, checked once per block by a 40-bit signature, no allocation. The voice loops index buses by it per chunk; stages nothing feeds, or that feed nothing, are not run. With ROUTING on CHAIN (every existing patch) the voice runs today's code path unchanged: 0 of 698 fingerprints changed, and `ILANA_OSC_ROUTING_TEST=1 ilanaTableTest` plays 600 of 659 presets sample for sample as cables (57 are not repeatable run to run, 2 are corners the cables don't model, 0 differ). Deviation from rule B1: the table is compiled on the audio thread (cheap, allocation-free) rather than on the message thread, so a host automating nothing and a preset load both stay in step with no lock.
+What follows the rules in B: the cables compile to a small table (`VoiceRouting::compile`: stage order, used stages, one bus per distinct set of cables, at most 8) when the ten `cable_*` masks change, checked once per block by a 40-bit signature, no allocation. The voice loops index buses by it per chunk; stages nothing feeds, or that feed nothing, are not run. With ROUTING on CHAIN (every existing patch) the voice runs today's code path unchanged: 0 of 698 fingerprints changed, and `ILANA_TEST_ONLY=oscrouting ilanaTableTest` plays 600 of 659 presets sample for sample as cables (57 are not repeatable run to run, 2 are corners the cables don't model, 0 differ). Deviation from rule B1: the table is compiled on the audio thread (cheap, allocation-free) rather than on the message thread, so a host automating nothing and a preset load both stay in step with no lock.
 
 Whole engine, `ilanaSnapshot --heldcpu` (12 held notes, multi-core on), 4 alternating runs, mean % of real time: main / this branch (chain) / the same preset's chain as cables (`ILANA_HELD_CABLES=1`) / cables with OSC 1 to F1 and OUT and OSC 2 to F2 (three buses, both filters run):
 

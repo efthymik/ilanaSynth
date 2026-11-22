@@ -1,6 +1,6 @@
 // The shared patch graph (roadmap step A): the model, the compiler, the
 // runner and the preset migration (src/processor/PatchGraph*.h). Included by
-// TableTest.cpp; ILANA_GRAPH_TEST=1 runs only these (ILANA_GRAPH_PRESETS=N
+// TableTest.cpp; ILANA_TEST_ONLY=graph runs only these (ILANA_GRAPH_PRESETS=N
 // checks only the first N factory presets).
 
 #include <map>
@@ -702,7 +702,7 @@ void runPatchGraphTests (bool everyPreset = true)
 
         auto failed = 0, unrepeatable = 0, withFx = 0, checked = 0;
         juce::String first, unrepeatableNames;
-        // (The whole suite checks every sixth preset; ILANA_GRAPH_TEST all of them.)
+        // (The whole suite checks every sixth preset; ILANA_TEST_ONLY=graph all of them.)
         const auto stride = everyPreset ? 1 : 6;
         for (int index = 0; index < limit; index += stride)
         {

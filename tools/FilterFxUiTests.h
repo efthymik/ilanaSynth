@@ -85,9 +85,6 @@ void runFilterFxTests (IlanaSynthAudioProcessor& processor, IlanaSynthAudioProce
         settle (300);
         if (auto* display = findChild<FilterDisplay> (editor); display != nullptr)
         {
-            const auto markers = display->getMarkerCentres();
-            expect (markers[0].getDistanceFrom (markers[1]) >= 18.0f,
-                    "Init: the two filter markers stand clearly apart (" + juce::String (markers[0].getDistanceFrom (markers[1])) + " px)");
             expect (! display->isVoiceOff(), "Init: the FILTER response is not marked off");
         }
 

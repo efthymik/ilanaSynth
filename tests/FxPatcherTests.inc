@@ -1,6 +1,6 @@
 // Roadmap step 17: effect instances and the FX patcher (FxPatch.h,
 // FxPatcher.cpp). Included by TableTest.cpp after ParallelFxTests.inc (it
-// uses its rack helpers); ILANA_FX_PATCHER_TEST=1 runs only these.
+// uses its rack helpers); ILANA_TEST_ONLY=fxpatcher runs only these.
 
 namespace FxPatcherLab
 {

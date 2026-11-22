@@ -1,5 +1,5 @@
 // The vocoder FX module (type 31). Included by TableTest.cpp;
-// ILANA_VOCODER_TEST=1 runs these alone.
+// ILANA_TEST_ONLY=vocoder runs these alone.
 
 #include "dsp/Vocoder.h"
 
