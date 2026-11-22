@@ -1089,6 +1089,7 @@ IlanaSynthAudioProcessor::PatchData IlanaSynthAudioProcessor::capturePatchData()
 
     data.tuningScale = tuningState.getScaleText();
     data.tuningMapping = tuningState.getMappingText();
+    data.colours = getSectionColours();
     return data;
 }
 
@@ -1129,7 +1130,7 @@ bool IlanaSynthAudioProcessor::samePatchData (const PatchData& a, const PatchDat
 
     if (a.tables != b.tables || a.embedded != b.embedded || a.samplePaths != b.samplePaths || a.sampleOptions != b.sampleOptions
         || a.macroNames != b.macroNames || a.macroCcs != b.macroCcs || a.reveal != b.reveal
-        || a.tuningScale != b.tuningScale || a.tuningMapping != b.tuningMapping)
+        || a.tuningScale != b.tuningScale || a.tuningMapping != b.tuningMapping || a.colours != b.colours)
         return false;
 
     if (a.fx != b.fx && (a.fx == nullptr || b.fx == nullptr || ! FxPatchData::samePatch (*a.fx, *b.fx)))
@@ -1148,6 +1149,10 @@ bool IlanaSynthAudioProcessor::samePatchData (const PatchData& a, const PatchDat
 
 void IlanaSynthAudioProcessor::restorePatchData (const PatchData& data, const PatchData& reference)
 {
+    for (int key = 0; key < SectionColours::count; ++key)
+        if (data.colours[(size_t) key] != reference.colours[(size_t) key])
+            setSectionColour (key, data.colours[(size_t) key]);
+
     for (int lfo = 0; lfo < numLfos; ++lfo)
     {
         if (data.draws[(size_t) lfo] != reference.draws[(size_t) lfo])
@@ -1415,6 +1420,7 @@ juce::int64 IlanaSynthAudioProcessor::getPatchDataHash() const
         add (&data.macroCcs[macro], sizeof (int));
     }
     addText (getParamCcMapText());
+    add (data.colours.data(), sizeof (data.colours));
     addText (data.tuningScale);
     addText (data.tuningMapping);
 

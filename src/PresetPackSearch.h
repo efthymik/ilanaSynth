@@ -268,7 +268,7 @@ inline void addSearchPresets (const std::function<void (const FactoryPreset&)>& 
         FactoryPreset p { "Talking Saw Pluck", {} };
         p.category = "Pluck";
         p.values = {
-            { "amp_attack", 0.0f }, { "amp_decay", 0.2109768f }, { "amp_release", 0.04008679f }, { "amp_sustain", 0.0f },
+            { "amp_attack", 0.001f }, { "amp_decay", 0.2109768f }, { "amp_release", 0.04008679f }, { "amp_sustain", 0.0f },
             { "arp_gate", 0.5003f }, { "bend_range", 0.0f }, { "e4_attack", 0.05099f }, { "e4_release", 0.30485f },
             { "f1_cutoff", 1574.425f }, { "f1_drive", 4.996f }, { "f1_env", 3.057277f }, { "f1_reso", 0.39984f },
             { "f1_slope", 1.0f }, { "f1_type", 23.0f }, { "f2e_release", 0.30485f }, { "fe_decay", 0.05683726f },
@@ -308,7 +308,7 @@ inline void addSearchPresets (const std::function<void (const FactoryPreset&)>& 
         FactoryPreset p { "Cluster Formant Pluck", {} };
         p.category = "Pluck";
         p.values = {
-            { "amp_attack", 0.0f }, { "amp_decay", 0.4402832f }, { "amp_release", 0.1296211f }, { "amp_sustain", 0.0f },
+            { "amp_attack", 0.001f }, { "amp_decay", 0.4402832f }, { "amp_release", 0.1296211f }, { "amp_sustain", 0.0f },
             { "amp_velocity", 0.974f }, { "f1_cutoff", 20000.0f }, { "f1_type", 10.0f }, { "fe_decay", 0.1080943f },
             { "fe_sustain", 0.0f }, { "fx_limit_ceiling", -0.5f }, { "fx_reverb_mix", 0.16f }, { "fx_reverb_on", 1.0f },
             { "fx_reverb_size", 0.55f }, { "fx_slot1", 21.0f }, { "fx_slot2", 13.0f }, { "lfo2_rate", 1.69f },
@@ -454,7 +454,7 @@ inline void addSearchPresets (const std::function<void (const FactoryPreset&)>& 
             { "env7_attack", 0.05099f }, { "env7_decay", 0.399605f }, { "env7_release", 0.30485f }, { "env8_attack", 0.05099f },
             { "env8_decay", 0.399605f }, { "env8_release", 0.30485f }, { "env9_attack", 0.05099f }, { "env9_decay", 0.399605f },
             { "env9_release", 0.30485f }, { "f1_cutoff", 327.7649f }, { "f1_drive", 1.0f }, { "f1_env", 2.170505f },
-            { "f1_keytrack", 0.5f }, { "f1_reso", 0.7059008f }, { "f1_type", 25.0f }, { "f2_cutoff", 62943.42f },
+            { "f1_keytrack", 0.5f }, { "f1_reso", 0.7059008f }, { "f1_type", 25.0f }, { "f2_cutoff", 20000.0f },
             { "f2e_attack", 0.010998f }, { "f2e_decay", 0.399605f }, { "f2e_release", 0.30485f }, { "fe_decay", 0.1723971f },
             { "fe_release", 0.50475f }, { "fe_sustain", 0.0f }, { "filter_velocity", 0.8f }, { "fx_amp_drive", 4.002f },
             { "fx_chorus_depth", 0.15f }, { "fx_chorus_mix", 0.2f }, { "fx_chorus_on", 1.0f }, { "fx_chorus_rate", 0.3998f },
@@ -570,7 +570,7 @@ inline void addSearchPresets (const std::function<void (const FactoryPreset&)>& 
         p.values = {
             { "amp_attack", 0.01788253f }, { "amp_decay", 0.2756325f }, { "amp_release", 0.5465372f }, { "amp_sustain", 0.2188451f },
             { "body_coupling", 0.3675499f }, { "body_coupling_mode", 1.0f }, { "body_material", 0.9374588f }, { "body_type", 4.0f },
-            { "f1_cutoff", 20000.0f }, { "f2_drive", 0.7022163f }, { "fx_awdyn_p1", 0.4542749f }, { "fx_awverb_algo", 4.0f },
+            { "f1_cutoff", 20000.0f }, { "f2_drive", 1.0f }, { "fx_awdyn_p1", 0.4542749f }, { "fx_awverb_algo", 4.0f },
             { "fx_awverb_mix", 0.2442511f }, { "fx_awverb_p1", 1.0f }, { "fx_awverb_p2", 0.4191722f }, { "fx_awverb_p3", 0.2769922f },
             { "fx_awverb_p4", 0.5f }, { "fx_chorus_on", 1.0f }, { "fx_delay_on", 1.0f }, { "fx_delay_time", 17.73318f },
             { "fx_eq_low_freq", 77.36281f }, { "fx_eq_low_gain", -9.280344f }, { "fx_eq_mid_freq", 2868.412f }, { "fx_eq_mid_gain", 10.77316f },
@@ -599,7 +599,7 @@ inline void addSearchPresets (const std::function<void (const FactoryPreset&)>& 
         p.values = {
             { "amp_attack", 0.01788253f }, { "amp_decay", 0.2756325f }, { "amp_release", 0.5465372f }, { "amp_sustain", 0.2188451f },
             { "body_coupling", 0.3675499f }, { "body_coupling_mode", 1.0f }, { "body_material", 0.9374588f }, { "body_type", 4.0f },
-            { "f1_cutoff", 20000.0f }, { "f2_drive", 0.7022163f }, { "fx_awdyn_p1", 0.4542749f }, { "fx_awverb_algo", 4.0f },
+            { "f1_cutoff", 20000.0f }, { "f2_drive", 1.0f }, { "fx_awdyn_p1", 0.4542749f }, { "fx_awverb_algo", 4.0f },
             { "fx_awverb_mix", 0.2442511f }, { "fx_awverb_p1", 1.0f }, { "fx_awverb_p2", 0.4191722f }, { "fx_awverb_p3", 0.2769922f },
             { "fx_awverb_p4", 0.5f }, { "fx_slot1", 34.0f }, { "fx_slot2", 37.0f }, { "lfo2_rate", 1.11f },
             { "lfo2_shape", 18.0f }, { "lfo5_rate", 4.370106f }, { "master_clip", 0.0f }, { "mod1_amt", -0.4414317f },
@@ -887,7 +887,7 @@ inline void addSearchPresets (const std::function<void (const FactoryPreset&)>& 
             { "mod8_src", 3.0f }, { "mod9_amt", 0.5435298f }, { "mod9_dst", 173.0f }, { "mod9_src", 3.0f },
             { "noise_level", 0.2577458f }, { "osc1_detune", 29.51558f }, { "osc1_fb_type", 1.0f }, { "osc1_frame", 0.5f },
             { "osc1_level", 0.5613332f }, { "osc1_spread", 0.8262763f }, { "osc1_string_excite_pos", 0.4602544f }, { "osc1_string_pick_hardness", 0.4848315f },
-            { "osc1_string_slap", 0.6097597f }, { "osc1_string_stiffness", 0.5201561f }, { "osc1_table", 52.0f }, { "osc1_uni_mode", 1.0f },
+            { "osc1_string_slap", 1.0f }, { "osc1_string_stiffness", 0.5201561f }, { "osc1_table", 52.0f }, { "osc1_uni_mode", 1.0f },
             { "osc1_unison", 8.0f }, { "osc2_fb_type", 1.0f }, { "osc2_level", 0.0f }, { "osc2_on", 1.0f },
             { "osc2_string_pickup", 0.3466368f }, { "osc2_table", 19.0f }, { "osc2_warp", 2.0f }, { "osc4_fb_type", 1.0f },
             { "osc5_fb_type", 1.0f }, { "osc6_fb_type", 1.0f }, { "poly_voices", 16.0f }, { "res_amount", 1.0f },
@@ -1016,7 +1016,7 @@ inline void addSearchPresets (const std::function<void (const FactoryPreset&)>& 
             { "osc1_excite", 8.0f }, { "osc1_fb_type", 1.0f }, { "osc1_frame", 0.5f }, { "osc1_level", 1.0f },
             { "osc1_mode", 1.0f }, { "osc1_spread", 0.7589413f }, { "osc1_uni_mode", 1.0f }, { "osc1_unison", 10.0f },
             { "osc2_fb_type", 1.0f }, { "osc2_frame", 0.9165743f }, { "osc2_on", 1.0f }, { "osc2_semi", 12.0f },
-            { "osc2_spectral", 2.0f }, { "osc2_spectral_amt", 0.01391029f }, { "osc2_string_slap", 0.5865543f }, { "osc2_table", 37.0f },
+            { "osc2_spectral", 2.0f }, { "osc2_spectral_amt", 0.01391029f }, { "osc2_string_slap", 1.0f }, { "osc2_table", 37.0f },
             { "osc2_warp2", 9.0f }, { "osc4_fb_type", 1.0f }, { "osc5_fb_type", 1.0f }, { "osc6_fb_type", 1.0f },
             { "route_cables", 1.0f }, { "sb_size", 0.0f }, { "sub_fb_type", 1.0f }, { "sub_shape", 1.0f },
             { "subosc_level", 0.3f }, { "subosc_on", 1.0f }, { "vec_d", 2.904678f }, { "vec_drift", 0.2558216f },
@@ -1152,7 +1152,7 @@ inline void addSearchPresets (const std::function<void (const FactoryPreset&)>& 
         p.category = "Keys";
         p.values = {
             { "amp_attack", 0.003f }, { "amp_release", 0.3f }, { "body_coupling", 0.3675499f }, { "body_coupling_mode", 1.0f },
-            { "body_material", 0.9374588f }, { "body_type", 4.0f }, { "f1_cutoff", 20000.0f }, { "f2_drive", 0.7022163f },
+            { "body_material", 0.9374588f }, { "body_type", 4.0f }, { "f1_cutoff", 20000.0f }, { "f2_drive", 1.0f },
             { "fx_awdyn_p1", 0.4542749f }, { "fx_awverb_algo", 4.0f }, { "fx_awverb_mix", 0.2442511f }, { "fx_awverb_p1", 1.0f },
             { "fx_awverb_p2", 0.4191722f }, { "fx_awverb_p3", 0.2769922f }, { "fx_awverb_p4", 0.5f }, { "fx_slot1", 34.0f },
             { "fx_slot2", 37.0f }, { "fx_slot4", 27.0f }, { "fx_slot4_mix", 0.6447677f }, { "lfo1_rate", 0.286f },

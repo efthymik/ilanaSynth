@@ -147,6 +147,7 @@ private:
     juce::dsp::Phaser<float> phaser;
     juce::dsp::Convolution convolution;
     std::atomic<bool> reverbIrLoaded { false };
+    static constexpr double maxDelaySeconds = 8.5; // the delay line and the stutter loop
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> delayLine { 96000 };
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> combLine { 96000 };
     FreeverbFast reverb; // juce::Reverb, bit for bit, without the divisions

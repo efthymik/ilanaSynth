@@ -116,12 +116,13 @@ inline void show (juce::ComboBox& box, const IlanaSynthAudioProcessor& processor
     juce::Component::SafePointer<juce::ComboBox> safeBox (&box);
     menu.showMenuAsync (IlanaTheme::menuOptions (&box).withMinimumWidth (box.getWidth())
                             .withItemThatMustBeVisible (box.getSelectedId()),
-                        [safeBox, picked = std::move (picked)] (int id)
+                        [safeBox, picked = std::move (picked), current] (int id)
                         {
                             if (safeBox == nullptr || id <= 0)
                                 return;
                             safeBox->setSelectedId (id, juce::sendNotificationSync);
-                            if (picked != nullptr)
+                            // Re-picking the shown shape keeps its P1-P4.
+                            if (picked != nullptr && id - 1 != current)
                                 picked (id - 1);
                         });
 }

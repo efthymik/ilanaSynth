@@ -781,6 +781,7 @@ public:
         {
             sectionColours[(size_t) key].store (argb);
             ++sectionColourVersion;
+            ++dataEpoch; // part of the patch's data (undo, the EDITED marker)
         }
     }
     SectionColours::Table getSectionColours() const
@@ -1121,6 +1122,7 @@ private:
         std::array<LfoCurve, (size_t) numLfos> curves;
         std::array<LfoCurve, (size_t) Mod::maxSlots> remaps;
         std::shared_ptr<const ClipState::Clips> clips;
+        SectionColours::Table colours {}; // the sections' own colours (0: default)
     };
     struct PatchDataEdit;
     float readNormalised (const juce::String& id) const;

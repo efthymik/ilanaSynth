@@ -406,10 +406,10 @@ void IlanaSynthAudioProcessor::runFxSlot (int slot, juce::AudioBuffer<float>& bu
             return;
         }
 
-        // Skipped for longer than the longest delay memory (2 s): whatever it
+        // Skipped for longer than the longest delay memory (maxDelaySeconds): whatever it
         // holds is stale and would replay as new echoes, so it starts empty.
         // (A shared engine is left alone while another slot of the type runs.)
-        if (fxClock - fxSlotLastRun[(size_t) (slot - 1)] > (std::int64_t) (2.0 * juce::jmax (1.0, currentSampleRate)) + fxBlockLength)
+        if (fxClock - fxSlotLastRun[(size_t) (slot - 1)] > (std::int64_t) (FxEngine::maxDelaySeconds * juce::jmax (1.0, currentSampleRate)) + fxBlockLength)
         {
             auto shared = false, othersRunning = false;
             if (slotEngines[(size_t) (slot - 1)].load (std::memory_order_acquire) == nullptr)
@@ -879,9 +879,9 @@ void IlanaSynthAudioProcessor::FxEngine::processDelay (juce::AudioBuffer<float>&
 
         float delaySamples[2];
         float baseDelaySamples[2];
-        baseDelaySamples[0] = juce::jlimit (1.0f, (float) (currentSampleRate * 1.9),
+        baseDelaySamples[0] = juce::jlimit (1.0f, (float) (currentSampleRate * (maxDelaySeconds - 0.1)),
                                             (float) (timeMs * 0.001 * currentSampleRate));
-        baseDelaySamples[1] = juce::jlimit (1.0f, (float) (currentSampleRate * 1.9),
+        baseDelaySamples[1] = juce::jlimit (1.0f, (float) (currentSampleRate * (maxDelaySeconds - 0.1)),
                                             (float) (timeMsR * 0.001 * currentSampleRate));
         delaySamples[0] = baseDelaySamples[0];
         delaySamples[1] = baseDelaySamples[1];
@@ -1033,12 +1033,16 @@ void IlanaSynthAudioProcessor::FxEngine::processStutter (juce::AudioBuffer<float
 
     const auto stutterOn = getParam ("fx_stutter_on") > 0.5f;
 
-    if (stutterOn && ! stutterWasOn && stutterBuffer.getNumSamples() > 0)
-    {
-        const auto beats = getSyncDivisionBeats ((int) getParam ("fx_stutter_div"));
-        const auto length = (int) ((60.0 / juce::jmax (20.0, currentBpm.load())) * beats * currentSampleRate);
+    // The loop length follows DIV and the tempo while STUTTER runs: a new
+    // length captures again at it (it was read only at switch-on).
+    const auto beats = getSyncDivisionBeats ((int) getParam ("fx_stutter_div"));
+    const auto wantedLength = juce::jlimit (16, juce::jmax (16, stutterBuffer.getNumSamples()),
+                                            (int) ((60.0 / juce::jmax (20.0, currentBpm.load())) * beats * currentSampleRate));
+    const auto lengthMoved = stutterOn && stutterWasOn && std::abs (wantedLength - stutterLength) > juce::jmax (16, stutterLength / 200);
 
-        stutterLength = juce::jlimit (16, juce::jmax (16, stutterBuffer.getNumSamples()), length);
+    if (stutterOn && (! stutterWasOn || lengthMoved) && stutterBuffer.getNumSamples() > 0)
+    {
+        stutterLength = wantedLength;
         stutterWrite = 0;
         stutterRead = 0;
         stutterPosition = 0.0;
@@ -1251,6 +1255,15 @@ void IlanaSynthAudioProcessor::FxEngine::processReverb (juce::AudioBuffer<float>
             return;
         }
 
+        // IR with no impulse loaded (none picked, or a preset's file is
+        // missing): no reverb, rather than a Room that sounds plausible.
+        if (type == 6)
+        {
+            if (reverbWetOnly)
+                buffer.clear();
+            return;
+        }
+
         juce::Reverb::Parameters reverbParams;
         reverbParams.roomSize = juce::jlimit (0.0f, 1.0f, getParam ("fx_reverb_size") + getFxMod (Mod::Destination::FxReverbSize, 1.0f));
         reverbParams.damping = getParam ("fx_reverb_damping");
@@ -1348,7 +1361,10 @@ void IlanaSynthAudioProcessor::FxEngine::processReverb (juce::AudioBuffer<float>
 
         if (type == 3)
         {
-            // Shimmer: add an octave-up granulated layer on top of the verb
+            // Shimmer: add an octave-up granulated layer on top of the verb.
+            // It follows MIX (the shifter hears the dry part too, so at
+            // MIX 0 it was an octave-up copy of the dry signal).
+            const auto shimmerGain = 0.28f * (reverbWetOnly ? 1.0f : reverbParams.wetLevel);
             for (int channel = 0; channel < juce::jmin (2, numChannels); ++channel)
             {
                 auto* data = buffer.getWritePointer (channel);
@@ -1357,7 +1373,7 @@ void IlanaSynthAudioProcessor::FxEngine::processReverb (juce::AudioBuffer<float>
                 for (int i = 0; i < numSamples; ++i)
                 {
                     shimmerShift[channel].push (data[i]);
-                    data[i] += shimmerShift[channel].process() * 0.28f;
+                    data[i] += shimmerShift[channel].process() * shimmerGain;
                 }
             }
         }
@@ -1423,29 +1439,32 @@ void IlanaSynthAudioProcessor::FxEngine::processCompressor (juce::AudioBuffer<fl
     mixRamp.begin (getParam ("fx_comp_mix"), numSamples);
     auto deepestGain = 1.0f; // for the card's meter only
 
-    for (int channel = 0; channel < numChannels; ++channel)
+    // Stereo-linked: one detector on the louder side sets one gain for both
+    // (each side on its own pulled a hard-panned sound's image to one side).
+    auto envelope = juce::jmax (compEnvelope[0], compEnvelope[1]);
+    for (int i = 0; i < numSamples; ++i)
     {
-        auto* data = buffer.getWritePointer (channel);
-        auto envelope = compEnvelope[channel];
+        auto magnitude = 0.0f;
+        for (int channel = 0; channel < numChannels; ++channel)
+            magnitude = juce::jmax (magnitude, std::abs (buffer.getSample (channel, i)));
+        const auto coefficient = magnitude > envelope ? attackCoefficient : releaseCoefficient;
+        envelope = magnitude + (envelope - magnitude) * coefficient;
 
-        for (int i = 0; i < numSamples; ++i)
+        auto gain = 1.0f;
+
+        if (envelope > threshold)
+            gain = std::pow (envelope / threshold, 1.0f / ratio - 1.0f);
+
+        deepestGain = juce::jmin (deepestGain, gain);
+        const auto wet = gain * makeupRamp.at (i);
+        const auto mix = mixRamp.at (i);
+        for (int channel = 0; channel < numChannels; ++channel)
         {
-            const auto magnitude = std::abs (data[i]);
-            const auto coefficient = magnitude > envelope ? attackCoefficient : releaseCoefficient;
-            envelope = magnitude + (envelope - magnitude) * coefficient;
-
-            auto gain = 1.0f;
-
-            if (envelope > threshold)
-                gain = std::pow (envelope / threshold, 1.0f / ratio - 1.0f);
-
-            deepestGain = juce::jmin (deepestGain, gain);
-            const auto processed = data[i] * gain * makeupRamp.at (i);
-            data[i] = data[i] + (processed - data[i]) * mixRamp.at (i);
+            auto* data = buffer.getWritePointer (channel);
+            data[i] = data[i] + (data[i] * wet - data[i]) * mix;
         }
-
-        compEnvelope[channel] = envelope;
     }
+    compEnvelope[0] = compEnvelope[1] = envelope;
 
     compGainReduction.store (deepestGain);
 }
@@ -1996,15 +2015,17 @@ void IlanaSynthAudioProcessor::FxEngine::processUtility (juce::AudioBuffer<float
     const auto mono = getParam ("fx_util_mono") > 0.5f;
     const auto invert = getParam ("fx_util_invert") > 0.5f;
 
+    // The signed gain glides, so INVERT fades through 0 across the block
+    // instead of stepping the polarity (a click).
+    const auto target = invert ? -gain : gain;
     auto& gainRamp = fxRamps[(size_t) FxRamp::UtilGain];
-    gainRamp.begin (gain, numSamples);
-    const auto sign = invert ? -1.0f : 1.0f;
+    gainRamp.begin (target, numSamples);
 
     for (int channel = 0; channel < channels; ++channel)
         if (gainRamp.moving())
-            buffer.applyGainRamp (channel, 0, numSamples, gainRamp.from * sign, gain * sign);
+            buffer.applyGainRamp (channel, 0, numSamples, gainRamp.from, target);
         else
-            buffer.applyGain (channel, 0, numSamples, gain * sign);
+            buffer.applyGain (channel, 0, numSamples, target);
 
     if (mono && channels > 1)
     {
@@ -2079,25 +2100,26 @@ void IlanaSynthAudioProcessor::FxEngine::processLimiter (juce::AudioBuffer<float
 
     auto deepestGain = 1.0f; // for the card's meter only
 
-    for (int channel = 0; channel < channels; ++channel)
+    // Stereo-linked, as the compressor: one envelope on the louder side.
+    auto envelope = juce::jmax (limiterEnvelope[0], limiterEnvelope[1]);
+    for (int i = 0; i < numSamples; ++i)
     {
-        auto* data = buffer.getWritePointer (channel);
+        auto magnitude = 0.0f;
+        for (int channel = 0; channel < channels; ++channel)
+            magnitude = juce::jmax (magnitude, std::abs (buffer.getSample (channel, i)));
+        const auto ceiling = ceilingRamp.at (i);
 
-        for (int i = 0; i < numSamples; ++i)
-        {
-            const auto magnitude = std::abs (data[i]);
-            const auto ceiling = ceilingRamp.at (i);
+        if (magnitude > envelope)
+            envelope = magnitude;
+        else
+            envelope = magnitude + (envelope - magnitude) * releaseCoefficient;
 
-            if (magnitude > limiterEnvelope[channel])
-                limiterEnvelope[channel] = magnitude;
-            else
-                limiterEnvelope[channel] = magnitude + (limiterEnvelope[channel] - magnitude) * releaseCoefficient;
-
-            const auto gain = limiterEnvelope[channel] > ceiling ? ceiling / limiterEnvelope[channel] : 1.0f;
-            deepestGain = juce::jmin (deepestGain, gain);
-            data[i] *= gain;
-        }
+        const auto gain = envelope > ceiling ? ceiling / envelope : 1.0f;
+        deepestGain = juce::jmin (deepestGain, gain);
+        for (int channel = 0; channel < channels; ++channel)
+            buffer.getWritePointer (channel)[i] *= gain;
     }
+    limiterEnvelope[0] = limiterEnvelope[1] = envelope;
 
     limiterGainReduction.store (deepestGain);
 }
@@ -2623,7 +2645,7 @@ void IlanaSynthAudioProcessor::FxEngine::prepare (double sampleRate, int samples
 {
     // (setSize leaves new memory as it found it: the tape and stutter heads
     // read a sample ahead of what they wrote, so start them from silence.)
-    stutterBuffer.setSize (2, (int) (sampleRate * 2.0), false, false, true);
+    stutterBuffer.setSize (2, (int) (sampleRate * maxDelaySeconds), false, false, true); // a 1/1 loop down to 30 BPM
     stutterBuffer.clear();
 
     for (int channel = 0; channel < 2; ++channel)
@@ -2733,7 +2755,9 @@ void IlanaSynthAudioProcessor::FxEngine::prepare (double sampleRate, int samples
     convolution.prepare (spec);
     convolution.reset();
 
-    delayLine.setMaximumDelayInSamples ((int) (sampleRate * 2.0));
+    // 8.5 s: a synced 1/1 (four beats) fits down to 30 BPM (it was 2 s,
+    // so 1/1 clamped below 126 BPM and left the grid).
+    delayLine.setMaximumDelayInSamples ((int) (sampleRate * maxDelaySeconds));
     delayLine.prepare (spec);
     delayLine.reset();
 

@@ -80,7 +80,8 @@ public:
     // Sets a section's colour (0: its default) and shows it on every page now.
     static void apply (IlanaSynthAudioProcessor& p, int key, juce::uint32 argb)
     {
-        p.setSectionColour (key, argb);
+        if (p.getSectionColour (key) != argb)
+            p.performEdit ("Section colour", [&p, key, argb] { p.setSectionColour (key, argb); }); // an undo step, and EDITED
         SectionColours::shown() = p.getSectionColours();
         ++SectionColours::version();
         IlanaTheme::identityColourListeners (&p).call ([] (IlanaTheme::IdentityColourListener& listener) { listener.identityColoursChanged(); });

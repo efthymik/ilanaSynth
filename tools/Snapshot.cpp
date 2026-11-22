@@ -6408,9 +6408,13 @@ void uiGroup_WEST_BODY (UiCtx& ctx)
             const auto cutoffOn = readParam ("f2_cutoff");
             f2Switch->triggerClick();
             settle (300);
-            expect (cutoffOn < 19000.0f && readParam ("f2_cutoff") >= 19999.0f, "the F2 switch brings a cutoff in and parks it at the top again (V14-12)");
+            // Sweep round 2: OFF is a real bypass (f2_on), the cutoff stays where it was.
+            expect (cutoffOn < 19000.0f && readParam ("f2_on") < 0.5f && std::abs (readParam ("f2_cutoff") - cutoffOn) < 1.0f
+                        && ! f2Switch->getToggleState(),
+                    "the F2 switch brings a cutoff in, and OFF bypasses Filter 2 leaving the cutoff (V14-12)");
         }
         setParam ("f2_cutoff", 20000.0f);
+        setParam ("f2_on", 1.0f);
         pages->showPlayViews (0, -1, -1);
         settle (200);
     }
