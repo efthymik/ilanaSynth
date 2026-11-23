@@ -21,6 +21,15 @@ FetchContent_MakeAvailable(JUCE)
 include(cmake/JuceLayerClip.cmake) # greyed-out controls draw through small layers (animation frame rate)
 include(cmake/BuildInfo.cmake) # git hash and date for src/BuildInfo.h and build/build-label.txt
 
+# Linux: link the C++ runtime and libgcc statically, so prebuilt plugins do
+# not require the host's libstdc++.so.6 / libgcc_s.so.1 versions. This does
+# not lower the glibc requirement; build on the oldest glibc you target.
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        add_link_options(-static-libstdc++ -static-libgcc)
+    endif()
+endif()
+
 # Step 40 follow-up: the TIME menu's high-quality stretchers, rendered in the
 # background (src/dsp/stretch). Pinned sources, only downloaded: Signalsmith
 # Stretch and its linear library (MIT), Bungee (MPL-2.0) with Eigen (MPL-2.0)
@@ -289,6 +298,23 @@ if (ILANA_CLAP)
     clap_juce_extensions_plugin(TARGET ilanaSynthFX
         CLAP_ID "com.ilanaaudio.ilanasynthfx"
         CLAP_FEATURES audio-effect stereo)
+endif()
+
+# Linux: give each format its own version script, so the VST3 module exports
+# only the VST3 entry points and the CLAP module only clap_entry, with the rest
+# hidden. Small symbol tables, and no clashes when a host loads both formats.
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    function (ilana_plugin_symbols target map)
+        if (TARGET ${target})
+            target_link_options(${target} PRIVATE
+                "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/${map}")
+        endif()
+    endfunction()
+
+    foreach (plugin ilanaSynth ilanaSynthFX)
+        ilana_plugin_symbols(${plugin}_VST3 vst3.map)
+        ilana_plugin_symbols(${plugin}_CLAP clap.map)
+    endforeach()
 endif()
 
 enable_testing()
