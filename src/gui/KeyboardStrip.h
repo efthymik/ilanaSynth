@@ -47,7 +47,6 @@ public:
         return wheel == 0 ? area.withWidth (width) : area.withTrimmedLeft (width + 4.0f);
     }
 
-    float getBend() const { return bend; }
     float getModWheel() const { return modWheel; }
 
     // Moves a wheel as a drag would (bend -1..1, mod 0..1); the tests.
@@ -113,9 +112,6 @@ public:
         if (! isShowing())
             releaseAll();
     }
-
-    // How lit a key is drawn (0..1), for the tests.
-    float getKeyLight (int note) const { return juce::isPositiveAndBelow (note, 128) ? light[(size_t) note] : 0.0f; }
 
     void paint (juce::Graphics& g) override
     {

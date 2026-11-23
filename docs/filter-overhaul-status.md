@@ -36,7 +36,7 @@ DRIVE goes inside for 303 Acid and Moog Drive only (`FilterType::drivesInside`, 
 - **Level table:** `tests/FilterTests.inc` embeds the Linux table made before any change
   (`levels-before-linux.txt`); every cell within 1.25 dB up to resonance 0.5 and 2 dB at 0.9 (worst: Steiner
   at 300 Hz and 0.9, 1.84 dB; the old model clipped its states). `tools/compare_filter_levels.py` diffs two tables.
-- **Tests** (`ILANA_FILTER_TEST=1`, also in the full suite): level table, self-oscillation pitch of 16 models,
+- **Tests** (`ILANA_TEST_ONLY=filter`, also in the full suite): level table, self-oscillation pitch of 16 models,
   comb pitch, stability under loud noise and sweeps for all 29, DC and bass behaviour, the 303's bass against the
   Moog's, roll-off slopes, drive inside, Vowel Morph's vowels and voices, Comb Body's modes, the response display
   against the models, CPU.
@@ -58,7 +58,7 @@ SVF's nonlinear damping, inside the curves; the plugins stop short of it), in tu
 24 dB puts both stages inside one curve pair. Presets: 389 changed tone, every one within the level rule; four needed
 a trim change of 0.2-0.4 dB (Clock Weirdo, Rust Bass, Resonant Drop). Morph, Formant and the other
 models are unchanged. Airwindows character filters are appended types 29-37 (`src/dsp/AirwindowsCharacter.h`, tests
-`ILANA_AWFILTER_TEST`): AW Z LP / HP / BP (MORPH = poles, RESO = drive into the op-amp stage), AW Acid (ZAcidLowpass,
+`ILANA_TEST_ONLY=awfilter`): AW Z LP / HP / BP (MORPH = poles, RESO = drive into the op-amp stage), AW Acid (ZAcidLowpass,
 MORPH = meltdown), AW X LP (RESO = nuke), AW YNot LP (MORPH = resedge), AW Holt (MORPH = poles), AW Angle (MORPH =
 hard), AW Pear (MORPH = nonlin, RESO = poles). Type 38 is the **Disperser**: up to 64 zero-delay all-pass sections at
 the cutoff (KEY TRK tunes it to the note), RESO = sharpness (Q 0.5-8), MORPH = stages. Their display draws a plain
@@ -76,9 +76,9 @@ Osc1 Spectral Amount with Stretch moves the spectral centroid (2375 to 2198 Hz);
 ## How to gate
 ```
 cmake --build build --target ilanaTableTest ilanaSnapshot ilanaFingerprint
-ILANA_FILTER_TEST=1 build/ilanaTableTest_artefacts/Release/ilanaTableTest    # filter tests only
-ILANA_FILTER_TEST=1 ILANA_FILTER_LEVELS=1 ...                                  # print the level table
-ILANA_FILTER_TEST=1 ILANA_FILTER_OSC=1 ...                                     # self-oscillation report
+ILANA_TEST_ONLY=filter build/ilanaTableTest_artefacts/Release/ilanaTableTest    # filter tests only
+ILANA_TEST_ONLY=filter ILANA_FILTER_LEVELS=1 ...                                  # print the level table
+ILANA_TEST_ONLY=filter ILANA_FILTER_OSC=1 ...                                     # self-oscillation report
 build/ilanaFingerprint_artefacts/Release/ilanaFingerprint after.csv
 python3 tools/check_level_rule.py tests/fingerprints-linux.csv after.csv       # before updating the baseline
 tools/verify.sh                                                                # the whole gate

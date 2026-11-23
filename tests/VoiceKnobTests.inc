@@ -4,7 +4,7 @@
 // engines, including wavetable"). A route from RANDOM, velocity, key, an
 // envelope or a retriggered LFO into one of them (voiceKnobOffsetFor) is
 // worked out by each voice for itself: a held note keeps its value while
-// new notes take their own. Included by TableTest.cpp; ILANA_VOICEKNOB_TEST=1
+// new notes take their own. Included by TableTest.cpp; ILANA_TEST_ONLY=voiceknob
 // runs only these.
 
 namespace VoiceKnobLab

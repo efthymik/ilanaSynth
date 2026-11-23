@@ -74,11 +74,6 @@ enum { Plain = 0, Filtered, Cross, Dx7, Count };
 // Shown names (the index is what's saved): Filtered is "Smooth" and Cross
 // "Cross Pair" (UI review 6, I6-10: two of them both claimed the DX7).
 inline juce::StringArray getNames() { return { "Plain", "Smooth", "Cross Pair", "DX7" }; }
-// A short tag for the matrix's feedback cells.
-inline juce::String getTag (int type)
-{
-    return type == Filtered ? "SMOOTH" : type == Cross ? "CROSS" : type == Dx7 ? "DX7" : "PLAIN";
-}
 
 // Cross feedback runs between the two oscillators of a pair: 1-2, 3-4, 5-6.
 inline int partnerOf (int osc) { return osc ^ 1; }
@@ -788,7 +783,6 @@ public:
     float getAftertouch() const noexcept { return aftertouchValue; }
     double getBendSemitones() const noexcept { return bendSemitones; }
     double getCurrentFrequency() const noexcept { return currentFrequency; }
-    float getMasterBendRange() const noexcept { return params.masterBendRange; }
     void renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSample, int numSamples) override;
 
     // (Modal Bowed, chords) How much this note's bowed noise counts toward

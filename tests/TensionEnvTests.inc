@@ -2,7 +2,7 @@
 // closed form (e^(k q) - 1) / (e^k - 1) sample by sample, the straight line
 // (CURVE 0) is exact, the control-rate path (skip) lands where the
 // per-sample path does, and note off, retrigger and a changed length never
-// jump. Included by TableTest.cpp; ILANA_TENSIONENV_TEST=1 runs only these.
+// jump. Included by TableTest.cpp; ILANA_TEST_ONLY=tensionenv runs only these.
 
 namespace TensionEnvLab
 {

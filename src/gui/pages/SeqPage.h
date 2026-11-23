@@ -86,15 +86,12 @@ private:
 public:
     // The UI test reaches the rows through these.
     juce::TextButton& getUseButton (int row) { return useButtons[(size_t) juce::jlimit (0, 1, row)]; }
-    juce::Component& getStepRow (int row) { return row == 0 ? static_cast<juce::Component&> (step1) : step2; }
 
 private:
     // Arp controls step back while the arp is off.
     void timerCallback() override;
 
 public:
-    // The UI test counts the dimmed controls.
-    int getNumInactive() const { return effectRules.numInactive(); }
 
 private:
     float readValue (const char* id) const;
@@ -113,8 +110,6 @@ private:
     void toggleEngine (int engine);
 
 public:
-    // The UI test turns the engines on and off through their tabs' switches.
-    CardTabs& getEngineTabs() { return engineTabs; }
 
 private:
     bool generateFolded() const { return part == Part::notes && clipExpanded && engineTabs.getSelected() == 3; }

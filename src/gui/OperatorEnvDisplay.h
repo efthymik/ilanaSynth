@@ -349,7 +349,6 @@ public:
     // The frame around the plot; the time ruler sits under it (the UI test
     // checks that no handle sits on the ruler).
     juce::Rectangle<float> getFrameBounds() const { return getLocalBounds().toFloat().withTrimmedBottom (compact ? 0.0f : rulerHeight + 2.0f); }
-    juce::Rectangle<float> getPlotBounds() const { return layout().plot; }
 
     // Re-reads the patch; repaints when the shape changed.
     void refresh()
@@ -363,8 +362,6 @@ public:
             repaint();
         }
     }
-
-    const OperatorEnv::Run& getRun() const { return curve; }
 
     // The stage handles' places (L1, L2, L3, then the release's end).
     std::array<juce::Point<float>, 4> getHandlePositions() const

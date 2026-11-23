@@ -316,11 +316,6 @@ void IlanaSynthAudioProcessor::setParamCcMapText (const juce::String& text)
     }
 }
 
-void IlanaSynthAudioProcessor::cancelMacroLearn()
-{
-    macroLearn.store (-1);
-}
-
 juce::File IlanaSynthAudioProcessor::getUserPresetDirectory() const
 {
     if (userPresetDirectoryOverride != juce::File())
@@ -1348,13 +1343,6 @@ void IlanaSynthAudioProcessor::evaluateGlobalModulation (const Mod::Slot* slots,
             anyParamModulation = true;
         }
     }
-}
-
-float IlanaSynthAudioProcessor::getArpStepRateHz() const
-{
-    const auto beats = getSyncDivisionBeats ((int) getParam ("arp_div"));
-
-    return (float) ((currentBpm.load() / 60.0) / juce::jmax (0.001, beats));
 }
 
 float IlanaSynthAudioProcessor::getSourceDisplayValue (int sourceIndex) const

@@ -626,7 +626,6 @@ public:
 
     bool isAuditioning() const { return auditioning; }
     bool isPlayLit() const { return playButton.getToggleState(); } // (PLAY lights while the note sounds; the UI test reads it)
-    juce::String getAuditionCaption() const { return {}; }
     juce::Rectangle<int> getPlayBounds() const { return playButton.isVisible() ? playButton.getBounds() : juce::Rectangle<int>(); }
     juce::Rectangle<int> getDockBounds() const { return dockButton.getBounds(); }
     juce::Rectangle<int> getFooterButtonBounds() const { return surpriseButton.getBounds(); }
@@ -1160,17 +1159,6 @@ private:
                     return box.bounds;
 
             return {};
-        }
-
-        // The keys of the chips drawn (tags folded away aren't).
-        juce::StringArray getShownKeys() const
-        {
-            juce::StringArray keys;
-
-            for (const auto& box : layout (getWidth()))
-                keys.add (box.key);
-
-            return keys;
         }
 
         void paint (juce::Graphics& g) override

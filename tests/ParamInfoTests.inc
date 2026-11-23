@@ -2,7 +2,7 @@
 // unit, the rows that decline and pass a value on, and every row covering at
 // least one real parameter (a row no parameter reaches is dead text, or a
 // broader row above it shadows it). Included by TableTest.cpp;
-// ILANA_PARAMINFO_TEST=1 runs only these.
+// ILANA_TEST_ONLY=paraminfo runs only these.
 
 namespace ParamInfoLab
 {

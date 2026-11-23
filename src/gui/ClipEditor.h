@@ -115,7 +115,6 @@ public:
     }
     float getZoom() const { return zoom; }
     int getLowNote() const { return lowNote; }
-    const Clip& getShownClip() const { return clip; }
 
     int getNumSelected() const { return (int) std::count (selected.begin(), selected.end(), true); }
 
@@ -154,10 +153,6 @@ public:
         repaint();
     }
 
-    // Where the view shows: the UI test and the zoom buttons' state.
-    float getViewStart() const { return viewStart; }
-    float getViewBeats() const { return viewBeats(); }
-
     // Geometry for the UI test: a beat's x, a note row's centre y, a
     // velocity's y in the lane, and the areas.
     float xForBeat (float beat) const { return beatToX (beat); }
@@ -171,7 +166,6 @@ public:
     juce::Rectangle<float> getKeysArea() const { return keysBounds(); }
     juce::Rectangle<float> getRulerArea() const { return rulerBounds(); }
     int getLowestShownNote() const { return lowNote; }
-    int getNumShownRows() const { return visibleRows(); }
 
     void paint (juce::Graphics& g) override
     {
@@ -1775,8 +1769,6 @@ public:
         label.setBounds (area.removeFromTop (13));
         combo.setBounds (area.removeFromTop (24));
     }
-
-    juce::ComboBox& getCombo() { return combo; }
 
 private:
     ClipEditor& editor;

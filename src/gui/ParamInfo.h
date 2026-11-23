@@ -22,16 +22,6 @@
 // placed early can shadow a broader one below it. Exact IDs are found
 // through a sorted index; only the pattern rows are tried one by one.
 
-inline bool isOscParameter (const juce::String& id, const char* suffix, bool includeLegacyThird = true)
-{
-    for (int osc = 0; osc < OscillatorIds::count; ++osc)
-        if ((includeLegacyThird || osc != 2)
-            && id == juce::String (OscillatorIds::prefixes[(size_t) osc]) + suffix)
-            return true;
-
-    return false;
-}
-
 // fx_aw_p1..p5 (the all-in-one) and fx_awsat_p1.. (the category modules).
 inline bool isAirwindowsKnob (const juce::String& id)
 {

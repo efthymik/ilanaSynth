@@ -561,7 +561,6 @@ public:
         setMouseCursor (juce::MouseCursor::PointingHandCursor);
     }
 
-    int getShapeIndex() const { return shapeIndex; }
     juce::Colour colour = IlanaTheme::accent();
 
     void paintButton (juce::Graphics& g, bool highlighted, bool down) override

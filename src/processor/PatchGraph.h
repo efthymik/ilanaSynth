@@ -214,18 +214,6 @@ public:
         return true;
     }
 
-    // Removes every cable into one input port (a cable dragged off a port).
-    int disconnectInput (Port to)
-    {
-        const auto before = cableList.size();
-        cableList.erase (std::remove_if (cableList.begin(), cableList.end(), [to] (const Cable& c) { return c.to == to; }),
-                         cableList.end());
-        const auto removed = (int) (before - cableList.size());
-        if (removed > 0)
-            ++revisionCount;
-        return removed;
-    }
-
     int findCable (Port from, Port to) const
     {
         for (size_t i = 0; i < cableList.size(); ++i)

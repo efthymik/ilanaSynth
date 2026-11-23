@@ -1,5 +1,5 @@
 // Adversarial polish pass (2026-10-13). Included by TableTest.cpp;
-// ILANA_STRESS_TEST=1 runs only these. A held chord is rendered through
+// ILANA_TEST_ONLY=stress runs only these. A held chord is rendered through
 // awkward host behaviour and the output must stay finite and bounded:
 //  - 1-sample, odd and 4096-sample blocks mixed at random,
 //  - the sample rate changing mid-session (44.1, 96, 48 kHz),

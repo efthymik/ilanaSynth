@@ -234,7 +234,6 @@ public:
 
     // The zoom it is at or gliding to.
     float getTargetZoom() const { return gliding ? glideZoom : zoom; }
-    bool isGliding() const { return gliding; }
     // Ends a glide where it was going.
     void finishGlide()
     {
@@ -318,12 +317,6 @@ public:
     }
 
     bool isSelected (PatchGraph::NodeId id) const { return id != 0 && (id == selectedNode || selection.count (id) > 0); }
-
-    // The box a drag over empty space draws (graph coordinates, before the origin), while it is drawn.
-    juce::Rectangle<float> getMarquee() const
-    {
-        return drag.kind == DragKind::marquee ? juce::Rectangle<float> (drag.start, drag.mouse) - origin : juce::Rectangle<float>();
-    }
 
     //==========================================================================
     // Geometry (public for the tests).

@@ -1,4 +1,4 @@
-// CPU pass 2 (2026-10-12). Included by TableTest.cpp; ILANA_CPUPASS_TEST=1
+// CPU pass 2 (2026-10-12). Included by TableTest.cpp; ILANA_TEST_ONLY=cpupass
 // runs only these.
 //  - Oversampling steps down at high host rates (88.2 kHz: one step,
 //    176.4 kHz: two), and is used as set at 44.1 and 48 kHz.

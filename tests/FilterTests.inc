@@ -1,7 +1,7 @@
 // The filter overhaul: every model checked for stability, cutoff accuracy,
 // self-oscillation pitch, DC and its own defining behaviour, plus a CPU check
 // (ILANA_FILTER_CPU=1 prints the per-model report). Included by
-// TableTest.cpp; ILANA_FILTER_TEST=1 runs only these.
+// TableTest.cpp; ILANA_TEST_ONLY=filter runs only these.
 
 #include "dsp/FilterCore.h"
 

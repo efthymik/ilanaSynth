@@ -531,14 +531,6 @@ void MatrixPage::focusSlot (int slot)
     }
 }
 
-juce::Rectangle<int> MatrixPage::getHeadingArea (int source) const
-{
-    for (const auto& heading : list.headings)
-        if (heading.source == source)
-            return getLocalArea (&list, heading.area);
-    return {};
-}
-
 void MatrixPage::showRowMenu (int slot)
 {
     const auto routing = processorRef.readModSlot (slot);

@@ -1,5 +1,5 @@
 // CPU round, 2026-11-01 ("add cpu optimizations in general"). Included by
-// TableTest.cpp; ILANA_CPU3_TEST=1 runs only these. Every change in that
+// TableTest.cpp; ILANA_TEST_ONLY=cpu3 runs only these. Every change in that
 // round keeps the sound bit for bit, and each is checked here against the
 // code it replaced:
 //  - FreeverbFast against juce::Reverb (stereo and mono, parameter moves).

@@ -520,7 +520,6 @@ public:
     // Sets the polarity (0 auto, 1 positive, 2 bipolar, 3 negative) as one undo step.
     void setChoice (int wanted) { attachment.setValueAsCompleteGesture ((float) wanted); }
     bool isEffectivelyBipolar() const { return choice == 2 || (choice == 0 && autoBipolar); }
-    bool isNegative() const { return choice == 3; }
 
     // Clicking a segment (0 +, 1 -, 2 +/-); public for the tests.
     void clickSegment (int segment)
@@ -768,7 +767,6 @@ public:
     juce::ComboBox& getDestinationBox() { return destination; }
     // Why the routing does nothing now (its module is off), or empty.
     const juce::String& getIdleReason() const { return idleReason; }
-    float getLiveValue() const { return liveValue; }
 
     // The "!" of a repeated routing: the page offers to merge it.
     std::function<void (int slot)> onDuplicateClicked;

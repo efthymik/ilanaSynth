@@ -84,8 +84,6 @@ public:
         return std::isfinite (force) ? force : 0.0f;
     }
 
-    int getDelaySamples() const { return delaySamples; }
-
 private:
     struct Biquad
     {

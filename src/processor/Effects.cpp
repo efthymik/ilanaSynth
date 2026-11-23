@@ -12,7 +12,7 @@
 //
 // Roadmap step 17: SERIES and PARALLEL run through the rack's compiled graph
 // (getFxRackGraph), which renders exactly what the fixed loop renders
-// (ILANA_GRAPH_TEST). The plan is made on the message thread for the slots as
+// (ILANA_TEST_ONLY=graph). The plan is made on the message thread for the slots as
 // they are; for the moment after a slot is added, removed, bypassed or
 // soloed, until the new plan is in, the fixed loop runs instead (the same
 // sound). Offline the plan is made here, at once.
@@ -141,11 +141,6 @@ void IlanaSynthAudioProcessor::resetFxLfos()
     fxLfoLastPpq = -1.0;
     fxLfoSamplesSincePpq = 0;
     fxLfoLastNoteCount = noteOnCount.load (std::memory_order_relaxed);
-}
-
-float IlanaSynthAudioProcessor::getFxLfoValue (int id) const
-{
-    return juce::isPositiveAndBelow (id - 1, FxLfo::maxLfos) ? fxLfoShownValue[(size_t) (id - 1)].load (std::memory_order_relaxed) : 0.0f;
 }
 
 float IlanaSynthAudioProcessor::getFxLfoPhase (int id) const

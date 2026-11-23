@@ -1476,17 +1476,6 @@ void OscPage::removeOscillatorCard (int osc)
     IlanaAnim::CardMotion::collapse (*this, area, std::move (picture));
 }
 
-void OscPage::selectShared (int)
-{
-    updateModeVisibility();
-    scrollTo (-1);
-}
-
-juce::StringArray OscPage::getOscMenuItems (int band) const
-{
-    return { isOff (band) ? "Switch on" : "Switch off", "Duplicate oscillator", "Remove oscillator" };
-}
-
 juce::Rectangle<int> OscPage::getCardBounds (int osc) const
 {
     for (const auto& card : cards)
@@ -2094,21 +2083,6 @@ juce::Rectangle<int> OscPage::panelContent (juce::Rectangle<int> panel)
 void OscPage::placeKnob (KnobControl& knob, int x, int y, int width, int dial)
 {
     knob.setBounds (KnobControl::packedBoundsFor ({ x, y, width, dial + nameLine }));
-}
-
-void OscPage::placeEvenDials (juce::Rectangle<int> c, int y, int menuWidth, std::initializer_list<KnobControl*> knobs, int dial)
-{
-    const auto count = (int) knobs.size();
-    const auto half = (float) dial * 0.5f;
-    const auto first = (float) (c.getX() + menuWidth + 4) + half, last = (float) c.getRight() - half;
-    const auto pitch = juce::jmax (33.0f, count > 1 ? (last - first) / (float) (count - 1) : 33.0f);
-    auto index = 0;
-    for (auto* knob : knobs)
-        {
-        // (The cell is as wide as the name needs, so the last one stays inside the panel.)
-        const auto cellW = juce::jmin (pitch, 40.0f);
-        placeKnob (*knob, juce::roundToInt (first + (float) index++ * pitch - cellW * 0.5f), y, juce::roundToInt (cellW), dial);
-    }
 }
 
 void OscPage::layoutMixBlock (CardGeometry& card, juce::Rectangle<int> c, KnobControl& level)
@@ -3021,13 +2995,6 @@ void OscPage::paintPanelList (juce::Graphics& g, const std::vector<CardGeometry:
     }
 }
 
-juce::String OscPage::engineName (int index) const
-{
-    if (getMode (index) == OscMode::fmOperator)
-        return OscRole::usesOperatorEg (processorRef, index) ? "FM operator, OP ENV" : "FM operator";
-    return OscRole::modeName (getMode (index));
-}
-
 int OscPage::textWidth (const juce::String& text, float size, bool bold)
 {
     return juce::GlyphArrangement::getStringWidthInt (juce::Font (IlanaTheme::font (size, bold)), text) + 2;
@@ -3282,15 +3249,6 @@ int OscPage::numShown () const
     for (int i = 0; i < OscillatorIds::count; ++i)
         count += processorRef.isOscillatorShown (i) ? 1 : 0;
     return count;
-}
-
-int OscPage::oscForTab (int tab) const
-{
-    for (int osc = 0, index = 0; osc < OscillatorIds::count; ++osc)
-        if (processorRef.isOscillatorShown (osc) && index++ == tab)
-            return osc;
-
-    return selected;
 }
 
 void OscPage::updateTabItems ()

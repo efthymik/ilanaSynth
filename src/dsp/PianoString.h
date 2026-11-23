@@ -267,13 +267,6 @@ public:
        #endif
     }
 
-    // Register constants, for tests and the display.
-    double getHammerMass() const { return hammerMass; }
-    double getImpedance() const { return impedance; }
-    double getStrikeFraction() const { return strikeFraction; }
-    bool isHammerInContact() const { return hammerActive; }
-    double getInharmonicity() const { return inharmonicity; }
-
 private:
     // process() in two halves around the stiffness chain (processPair runs
     // two strings' chains together): up to the chain's inputs ...

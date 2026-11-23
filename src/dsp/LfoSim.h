@@ -32,10 +32,7 @@ enum
 inline bool isSim (int shape) { return shape >= RandomHold && shape < End; }
 inline bool isRandom (int shape) { return shape >= RandomHold && shape <= DrunkWalk; }
 inline bool isMap (int shape) { return shape == Logistic || shape == Henon; }
-inline bool isChaos (int shape) { return shape >= Lorenz && shape <= DoublePendulum; }
 inline bool isPhysics (int shape) { return shape >= Bounce && shape <= Friction; }
-// Solved as differential equations (control rate, RK4 or exact steps).
-inline bool isOde (int shape) { return isSim (shape) && ! isRandom (shape) && ! isMap (shape); }
 // Phase-driven: one new value per cycle of RATE.
 inline bool isStepped (int shape) { return isRandom (shape) || isMap (shape); }
 } // namespace LfoSimShapes
@@ -359,7 +356,6 @@ public:
     // For the display and tests.
     const std::array<double, 4>& state() const { return st; }
     int getShape() const { return shape; }
-    double getModelTime() const { return modelTime; }
     int getImpactCount() const { return impacts; }
     double getLastImpactTime() const { return lastImpactTime; }
 

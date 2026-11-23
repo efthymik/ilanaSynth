@@ -564,13 +564,9 @@ public:
     // The UI test reaches these.
     OperatorEnvDisplay& getGraph() { return graph; }
     CardTabs& getTabs() { return tabs; }
-    OscPicker& getPicker() { return picker; }
     juce::TextButton& getUseButton() { return useButton; }
     juce::Component* getControl (int osc, int index) { return controls[(size_t) juce::jlimit (0, 5, osc)][(size_t) juce::jlimit (0, numControls - 1, index)].get(); }
     KnobControl* getKnob (int osc, int index) { return dynamic_cast<KnobControl*> (getControl (osc, index)); }
-    KnobControl* getPitchKnob (int index) { return pitchKnobs[(size_t) juce::jlimit (0, numStageControls - 1, index)].get(); }
-    KnobControl& getScaleShift() { return *scaleShift; }
-    TransposeKnob& getTranspose() { return transpose; }
 
     // The FM card: the space left free for its own controls (local).
     // (The FM card's panel: the first line's room at the right of the tabs, for the card's ENVELOPE menu.)

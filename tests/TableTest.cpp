@@ -188,18 +188,93 @@ int main()
         return 0;
     }
 
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_REMAP_TEST", "").isNotEmpty())
+    // ILANA_TEST_ONLY=<key>[,<key>...] runs just those groups of tests, in the order
+    // given, instead of the full run (e.g. ILANA_TEST_ONLY=sweep,oldstate).
+    if (const auto only = juce::SystemStats::getEnvironmentVariable ("ILANA_TEST_ONLY", ""); only.isNotEmpty())
     {
-        runModRemapTests();
-        std::cout << (failures == 0 ? "ALL TESTS PASSED" : "TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
+        struct Group { const char* key; void (*run)(); };
+        static const Group groups[] = {
+            { "remap", [] { runModRemapTests(); } },
+            { "generative", [] { runM71GenerativeTests(); runScaleRandomReleaseTest(); runArpHostStopTests(); } },
+            { "plan", [] { runPlanTests(); } },
+            { "oscmode", [] { runOscModeTests(); } },
+            { "opeg", [] { runOperatorEgTests(); } },
+            { "tuning", [] { runTuningTests(); } },
+            { "airwindows", [] { runAirwindowsTests(); } },
+            { "noise", [] { runNoiseTests(); } },
+            { "graph", [] { runPatchGraphTests(); } },
+            { "oscrouting", [] { runOscRoutingTests (true); } },
+            { "oscslot", [] { runOscSlotTests(); } },
+            { "fxlfo", [] { runFxLfoTests(); } },
+            { "fxpatcher", [] { runFxPatcherTests(); } },
+            { "parallelfx", [] { runParallelFxTests(); } },
+            { "splitter", [] { runSplitterTests(); } },
+            { "awfilter", [] { runAirwindowsFilterTests(); } },
+            { "builtin", [] { runBuiltInTableTests(); } },
+            { "clip", [] { runClipTests(); } },
+            { "sweep", [] { runSweepFixTests(); } },
+            { "hardening", [] { runHardeningTests(); } },
+            { "host", [] { runHostIntegrationTests(); runHostHardeningTests(); } },
+            { "paraminfo", [] { runParamInfoTests(); } },
+            { "stress", [] { runStressTests(); } },
+            { "cpu3", [] { runCpuRound3Tests(); } },
+            { "cpupass", [] { runCpuPassTests(); } },
+            { "filterpair", [] { runFilterPairTests(); } },
+            { "physmod", [] { runPhysModTests(); } },
+            { "tensionenv", [] { runTensionEnvTests(); } },
+            { "sampletempo", [] { runSampleTempoTests(); } },
+            { "sampler", [] { runSamplerTests(); } },
+            { "granular", [] { runGranularControlTests(); } },
+            { "multisample", [] { runMultiSampleTests(); } },
+            { "vocoder", [] { runVocoderTests(); } },
+            { "filter", [] { runFilterOverhaulTests(); } },
+            { "voiceknob", [] { runVoiceKnobTests(); } },
+            { "oldstate", [] { runOldStateTests(); } },
+            { "polish", [] { runPolishTests(); } },
+            { "presetpack", [] { runM10Tests(); } },
+            { "resample", [] { runM86Tests(); } },
+            { "feedback", [] { runM85Tests(); } },
+            { "filtermodels", [] { runM84FilterTests(); } },
+            { "west", [] { runM83WestTests(); } },
+            { "filter2", [] { runFilter2CrossingTest(); runSpectralSweepTest(); } },
+            { "piano", [] { runM82PianoTests(); } },
+            { "modulators", [] { runM81ModulatorTests(); } },
+            { "epiano", [] { runM73ElectricPianoTests(); runM74WavetableEditorTests(); runSplitRenderTest(); } },
+            { "body", [] { runM72BodyTests(); } },
+            { "extfm", [] { runM70ExtendedFmModTests(); } },
+            { "library", [] { runFactoryLibraryTest(); } },
+            { "sympathetic", [] { runSympatheticResonanceTest(); } },
+            { "preset", [] { runPresetSanityTest(); runPresetTuningTest(); runOldStateTests(); } },
+            { "arp", [] { runScaleRandomReleaseTest(); runArpHostStopTests(); runArpLaneTests(); } },
+            { "fm", [] { runM5DeepFmTests(); runM6PhaseDistortionTests(); runM6bMatrixTests(); runWarpTests(); runFmMatrixTests(); } },
+            { "ks", [] { runKarplusStrongTest(); runPhysicalStringTest(); runLoopDecayAcrossRatesTest(); } },
+            { "keys", [] { runM4Tests(); runSympatheticTuningTest(); runSympatheticResonanceTest(); } },
+            { "engine", [] { runM3bEngineTests(); } },
+        };
 
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_M71_TEST", "").isNotEmpty())
-    {
-        runM71GenerativeTests();
-        runScaleRandomReleaseTest();
-        runArpHostStopTests();
+        juce::StringArray wanted;
+        wanted.addTokens (only, ",", "");
+        wanted.trim();
+        wanted.removeEmptyStrings();
+
+        for (const auto& name : wanted)
+        {
+            const auto known = std::any_of (std::begin (groups), std::end (groups), [&] (const Group& group) { return name == group.key; });
+            if (! known)
+            {
+                std::cout << "ILANA_TEST_ONLY: unknown group '" << name << "'. Groups:";
+                for (const auto& group : groups)
+                    std::cout << " " << group.key;
+                std::cout << std::endl;
+                return 2;
+            }
+        }
+
+        for (const auto& name : wanted)
+            for (const auto& group : groups)
+                if (name == group.key)
+                    group.run();
+
         std::cout << (failures == 0 ? "ALL TESTS PASSED" : "TESTS FAILED") << " (" << failures << " failures)" << std::endl;
         return failures == 0 ? 0 : 1;
     }
@@ -243,341 +318,13 @@ int main()
         return 0;
     }
 
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_PLAN_TEST", "").isNotEmpty())
-    {
-        runPlanTests();
-        std::cout << (failures == 0 ? "PLAN TESTS PASSED" : "PLAN TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_OSCMODE_TEST", "").isNotEmpty())
-    {
-        runOscModeTests();
-        std::cout << (failures == 0 ? "OSC MODE TESTS PASSED" : "OSC MODE TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_OPEG_TEST", "").isNotEmpty())
-    {
-        runOperatorEgTests();
-        std::cout << (failures == 0 ? "OPERATOR EG TESTS PASSED" : "OPERATOR EG TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_TUNING_TEST", "").isNotEmpty())
-    {
-        runTuningTests();
-        std::cout << (failures == 0 ? "TUNING TESTS PASSED" : "TUNING TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_AIRWINDOWS_TEST", "").isNotEmpty())
-    {
-        runAirwindowsTests();
-        std::cout << (failures == 0 ? "AIRWINDOWS TESTS PASSED" : "AIRWINDOWS TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_NOISE_TEST", "").isNotEmpty())
-    {
-        runNoiseTests();
-        std::cout << (failures == 0 ? "NOISE TESTS PASSED" : "NOISE TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_GRAPH_TEST", "").isNotEmpty())
-    {
-        runPatchGraphTests();
-        std::cout << (failures == 0 ? "GRAPH TESTS PASSED" : "GRAPH TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_OSC_ROUTING_TEST", "").isNotEmpty())
-    {
-        runOscRoutingTests (true);
-        std::cout << (failures == 0 ? "OSC ROUTING TESTS PASSED" : "OSC ROUTING TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_OSC_SLOT_TEST", "").isNotEmpty())
-    {
-        runOscSlotTests();
-        std::cout << (failures == 0 ? "OSC SLOT TESTS PASSED" : "OSC SLOT TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_FX_LFO_TEST", "").isNotEmpty())
-    {
-        runFxLfoTests();
-        std::cout << (failures == 0 ? "FX LFO TESTS PASSED" : "FX LFO TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_FX_PATCHER_TEST", "").isNotEmpty())
-    {
-        runFxPatcherTests();
-        std::cout << (failures == 0 ? "FX PATCHER TESTS PASSED" : "FX PATCHER TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_PARALLEL_FX_TEST", "").isNotEmpty())
-    {
-        runParallelFxTests();
-        std::cout << (failures == 0 ? "PARALLEL FX TESTS PASSED" : "PARALLEL FX TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_SPLITTER_TEST", "").isNotEmpty())
-    {
-        runSplitterTests();
-        std::cout << (failures == 0 ? "SPLITTER TESTS PASSED" : "SPLITTER TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_AWFILTER_TEST", "").isNotEmpty())
-    {
-        runAirwindowsFilterTests();
-        std::cout << (failures == 0 ? "AWFILTER TESTS PASSED" : "AWFILTER TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_BUILTIN_TEST", "").isNotEmpty())
-    {
-        runBuiltInTableTests();
-        std::cout << (failures == 0 ? "BUILTIN TESTS PASSED" : "BUILTIN TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_CLIP_TEST", "").isNotEmpty())
-    {
-        runClipTests();
-        std::cout << (failures == 0 ? "CLIP TESTS PASSED" : "CLIP TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_SWEEP_TEST", "").isNotEmpty())
-    {
-        runSweepFixTests();
-        std::cout << (failures == 0 ? "SWEEP TESTS PASSED" : "SWEEP TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_HARDENING_TEST", "").isNotEmpty())
-    {
-        runHardeningTests();
-        std::cout << (failures == 0 ? "HARDENING TESTS PASSED" : "HARDENING TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_HOST_TEST", "").isNotEmpty())
-    {
-        runHostIntegrationTests();
-        runHostHardeningTests();
-        std::cout << (failures == 0 ? "HOST TESTS PASSED" : "HOST TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_PARAMINFO_TEST", "").isNotEmpty())
-    {
-        runParamInfoTests();
-        std::cout << (failures == 0 ? "PARAMINFO TESTS PASSED" : "PARAMINFO TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
     if (const auto spec = juce::SystemStats::getEnvironmentVariable ("ILANA_PHYSMOD_RENDER", ""); spec.isNotEmpty())
         return renderPhysModPreset (spec);
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_STRESS_TEST", "").isNotEmpty())
-    {
-        runStressTests();
-        std::cout << (failures == 0 ? "STRESS TESTS PASSED" : "STRESS TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_CPU3_TEST", "").isNotEmpty())
-    {
-        runCpuRound3Tests();
-        std::cout << (failures == 0 ? "ALL TESTS PASSED" : "TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_CPUPASS_TEST", "").isNotEmpty())
-    {
-        runCpuPassTests();
-        std::cout << (failures == 0 ? "CPUPASS TESTS PASSED" : "CPUPASS TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_FILTERPAIR_TEST", "").isNotEmpty())
-    {
-        runFilterPairTests();
-        std::cout << (failures == 0 ? "FILTERPAIR TESTS PASSED" : "FILTERPAIR TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_PHYSMOD_TEST", "").isNotEmpty())
-    {
-        runPhysModTests();
-        std::cout << (failures == 0 ? "PHYSMOD TESTS PASSED" : "PHYSMOD TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_TENSIONENV_TEST", "").isNotEmpty())
-    {
-        runTensionEnvTests();
-        std::cout << (failures == 0 ? "TENSIONENV TESTS PASSED" : "TENSIONENV TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_SAMPLE_TEMPO_TEST", "").isNotEmpty())
-    {
-        runSampleTempoTests();
-        std::cout << (failures == 0 ? "SAMPLE TEMPO TESTS PASSED" : "SAMPLE TEMPO TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_SAMPLER_TEST", "").isNotEmpty())
-    {
-        runSamplerTests();
-        std::cout << (failures == 0 ? "SAMPLER TESTS PASSED" : "SAMPLER TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_GRANULAR_TEST", "").isNotEmpty())
-    {
-        runGranularControlTests();
-        std::cout << (failures == 0 ? "GRANULAR TESTS PASSED" : "GRANULAR TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_MULTISAMPLE_TEST", "").isNotEmpty())
-    {
-        runMultiSampleTests();
-        std::cout << (failures == 0 ? "MULTISAMPLE TESTS PASSED" : "MULTISAMPLE TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_VOCODER_TEST", "").isNotEmpty())
-    {
-        runVocoderTests();
-        std::cout << (failures == 0 ? "VOCODER TESTS PASSED" : "VOCODER TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_FILTER_TEST", "").isNotEmpty())
-    {
-        runFilterOverhaulTests();
-        std::cout << (failures == 0 ? "FILTER TESTS PASSED" : "FILTER TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_VOICEKNOB_TEST", "").isNotEmpty())
-    {
-        runVoiceKnobTests();
-        std::cout << (failures == 0 ? "VOICEKNOB TESTS PASSED" : "VOICEKNOB TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    // ILANA_OLDSTATE_TEST=1: old saved states and factory presets load as before (tests/old-states).
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_OLDSTATE_TEST", "").isNotEmpty())
-    {
-        runOldStateTests();
-        std::cout << (failures == 0 ? "OLDSTATE TESTS PASSED" : "OLDSTATE TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_POLISH_TEST", "").isNotEmpty())
-    {
-        runPolishTests();
-        std::cout << (failures == 0 ? "POLISH TESTS PASSED" : "POLISH TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_M10_TEST", "").isNotEmpty())
-    {
-        runM10Tests();
-        std::cout << (failures == 0 ? "M10 TESTS PASSED" : "M10 TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_M86_TEST", "").isNotEmpty())
-    {
-        runM86Tests();
-        std::cout << (failures == 0 ? "M8.6 TESTS PASSED" : "M8.6 TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_M85_TEST", "").isNotEmpty())
-    {
-        runM85Tests();
-        std::cout << (failures == 0 ? "M8.5 TESTS PASSED" : "M8.5 TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_M84_TEST", "").isNotEmpty())
-    {
-        runM84FilterTests();
-        std::cout << (failures == 0 ? "M8.4 TESTS PASSED" : "M8.4 TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_M83_TEST", "").isNotEmpty())
-    {
-        runM83WestTests();
-        std::cout << (failures == 0 ? "M8.3 TESTS PASSED" : "M8.3 TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    // ILANA_FILTER2_TEST=1: the Filter 2 crossing test alone (and the spectral sweeps).
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_FILTER2_TEST", "").isNotEmpty())
-    {
-        runFilter2CrossingTest();
-        runSpectralSweepTest();
-        std::cout << (failures == 0 ? "ALL TESTS PASSED" : "TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_M82_TEST", "").isNotEmpty())
-    {
-        runM82PianoTests();
-        std::cout << (failures == 0 ? "M8.2 TESTS PASSED" : "M8.2 TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_M81_TEST", "").isNotEmpty())
-    {
-        runM81ModulatorTests();
-        std::cout << (failures == 0 ? "M8.1 TESTS PASSED" : "M8.1 TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_M73_TEST", "").isNotEmpty())
-    {
-        runM73ElectricPianoTests();
-        runM74WavetableEditorTests();
-        runSplitRenderTest();
-        std::cout << (failures == 0 ? "M7.3/M7.4 TESTS PASSED" : "M7.3/M7.4 TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_M72_TEST", "").isNotEmpty())
-    {
-        runM72BodyTests();
-        std::cout << (failures == 0 ? "M7.2 TESTS PASSED" : "M7.2 TESTS FAILED") << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
 
     if (const auto folder = juce::SystemStats::getEnvironmentVariable ("ILANA_BODY_FIT", ""); folder.isNotEmpty())
     {
         renderBodyFit (juce::File (folder));
         return 0;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_M70_TEST", "").isNotEmpty())
-    {
-        runM70ExtendedFmModTests();
-        std::cout << (failures == 0 ? "ALL TESTS PASSED" : "TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
     }
 
     // ILANA_TABLE_DUMP=<file>: the first 40 factory tables' built frames
@@ -596,19 +343,6 @@ int main()
                     out.write (table.getFrameData (level, frame), 2051 * sizeof (float));
         }
         return 0;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_LIBRARY_TEST", "").isNotEmpty())
-    {
-        runFactoryLibraryTest();
-        std::cout << (failures == 0 ? "LIBRARY TESTS PASSED" : "LIBRARY TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_SYM_TEST", "").isNotEmpty())
-    {
-        runSympatheticResonanceTest();
-        return failures == 0 ? 0 : 1;
     }
 
     // ILANA_TABLE_FRAMES=<file>: frames 0, 32 and 63 of every factory table.
@@ -685,26 +419,6 @@ int main()
         return 0;
     }
 
-    // ILANA_PRESET_TEST=1 runs only the factory preset checks.
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_PRESET_TEST", "").isNotEmpty())
-    {
-        runPresetSanityTest();
-        runPresetTuningTest();
-        runOldStateTests();
-        std::cout << (failures == 0 ? "ALL TESTS PASSED" : "TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    // ILANA_ARP_TEST=1 runs only the arpeggiator tests.
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_ARP_TEST", "").isNotEmpty())
-    {
-        runScaleRandomReleaseTest();
-        runArpHostStopTests();
-        runArpLaneTests();
-        std::cout << (failures == 0 ? "ALL TESTS PASSED" : "TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
     if (const auto preset = juce::SystemStats::getEnvironmentVariable ("ILANA_NOTE_DEBUG", ""); preset.isNotEmpty())
     {
         debugPresetNotes (preset);
@@ -740,41 +454,6 @@ int main()
         if (only.isEmpty() || only == "m10")
             Demo::renderM10 (juce::File (demo).getChildFile ("m10"));
         return 0;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_M5_TEST", "").isNotEmpty())
-    {
-        runM5DeepFmTests();
-        runM6PhaseDistortionTests();
-        runM6bMatrixTests();
-        runWarpTests();
-        runFmMatrixTests();
-        std::cout << (failures == 0 ? "M5 TESTS PASSED" : "M5 TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_KS_TEST", "").isNotEmpty())
-    {
-        runKarplusStrongTest();
-        runPhysicalStringTest();
-        runLoopDecayAcrossRatesTest();
-        std::cout << (failures == 0 ? "KS TESTS PASSED" : "KS TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_M4_TEST", "").isNotEmpty())
-    {
-        runM4Tests();
-        runSympatheticTuningTest();
-        runSympatheticResonanceTest();
-        std::cout << (failures == 0 ? "M4 TESTS PASSED" : "M4 TESTS FAILED") << " (" << failures << " failures)" << std::endl;
-        return failures == 0 ? 0 : 1;
-    }
-
-    if (juce::SystemStats::getEnvironmentVariable ("ILANA_M3B_TEST", "").isNotEmpty())
-    {
-        runM3bEngineTests();
-        return failures == 0 ? 0 : 1;
     }
 
     std::cout << "ilanaSynth table tests" << std::endl;

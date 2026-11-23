@@ -76,7 +76,6 @@ inline bool usesMorph (int type)
 inline bool drivesInside (int type) { return type == Acid303 || type == MoogDrive; }
 // The M8.4 models ignore the 12/24 dB switch (each has its own order).
 inline bool usesSlope (int type) { return type < LadderBand; }
-inline bool isModel2 (int type) { return type >= LadderBand && type < Count && ! isComb (type); }
 
 // Vowel formants (Hz) for A E I O U and their relative levels; the Formant
 // filter's morph walks through them.

@@ -1,6 +1,6 @@
 // Roadmap step 16: reroutable oscillators (dsp/VoiceRouting.h, the
 // route_cables and cable_* parameters, processor/OscRouting.cpp). Included
-// by TableTest.cpp after FxPatcherTests.inc; ILANA_OSC_ROUTING_TEST=1 runs
+// by TableTest.cpp after FxPatcherTests.inc; ILANA_TEST_ONLY=oscrouting runs
 // only these (with every factory preset in the migration check; the whole
 // suite checks every sixth).
 

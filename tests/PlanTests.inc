@@ -1,5 +1,5 @@
 // Regressions for the work in the 2026-09-29 product review's plan.
-// Included by TableTest.cpp; ILANA_PLAN_TEST=1 runs only these.
+// Included by TableTest.cpp; ILANA_TEST_ONLY=plan runs only these.
 
 namespace Plan
 {

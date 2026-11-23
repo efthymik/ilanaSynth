@@ -197,19 +197,6 @@ public:
         return nearest;
     }
 
-    // Tests: whether the pool holds this voice step.
-    bool hasVoiceTable (int tableChoice, int mode, float amount) const
-    {
-        const auto step = juce::jlimit (0, voiceSteps, juce::roundToInt (amount * (float) voiceSteps));
-        const auto key = makeKey (tableChoice, mode, step);
-
-        for (const auto& entry : voicePool)
-            if (entry.key.load() == key && entry.table.load() != nullptr)
-                return true;
-
-        return false;
-    }
-
     // Tests: whether the requested warp for an oscillator has been built.
     bool isReady (int osc) const
     {

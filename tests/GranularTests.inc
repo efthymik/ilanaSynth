@@ -1,6 +1,6 @@
 // Roadmap step 45, granular controls: the grain position as its own
 // parameter, SCAN, FREEZE and the grain destinations in the matrix. Included
-// by TableTest.cpp; ILANA_GRANULAR_TEST=1 runs only these.
+// by TableTest.cpp; ILANA_TEST_ONLY=granular runs only these.
 
 namespace GranularLab
 {

@@ -12,7 +12,7 @@
 // has something to move. They are reconstructions, not files old builds
 // wrote: what they check is that loading them stays exactly as it was.
 //
-// ILANA_OLDSTATE_TEST=1 runs this alone (it also runs in ILANA_PRESET_TEST
+// ILANA_TEST_ONLY=oldstate runs this alone (it also runs in ILANA_TEST_ONLY=preset
 // and the full run). ILANA_OLDSTATE_WRITE=1 rewrites the expected values
 // (only when a change of the result is intended). The render hashes are
 // checked on Linux only (another compiler's floats differ in the last bits);

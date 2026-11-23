@@ -7,13 +7,13 @@
  "src/gui/EqCurve.h": 5,
  "src/gui/FilterDisplay.h": 9,
  "src/gui/FilterWidgets.h": 10,
- "src/gui/FmDiagram.h": 25,
+ "src/gui/FmDiagram.h": 22,
  "src/gui/FmWidgets.h": 10,
  "src/gui/FxCarousel.h": 7,
  "src/gui/FxChainChips.h": 5,
  "src/gui/FxDisplays.h": 39,
  "src/gui/FxLibrary.h": 38,
- "src/gui/GenerativeWidgets.h": 26,
+ "src/gui/GenerativeWidgets.h": 25,
  "src/gui/HeaderWidgets.h": 12,
  "src/gui/IlanaLookAndFeel.h": 51,
  "src/gui/InfoStrip.h": 3,
@@ -51,7 +51,6 @@
  "src/gui/ZoneMapEditor.h": 22,
  "src/gui/pages/EnvLfoPages.cpp": 57,
  "src/gui/pages/EnvLfoPages.h": 4,
- "src/gui/pages/FilterVectorPhysicalPages.cpp": 12,
  "src/gui/pages/FmInputPages.cpp": 77,
  "src/gui/pages/FxPage.cpp": 70,
  "src/gui/pages/FxWidgets.h": 14,
@@ -64,5 +63,6 @@
  "src/gui/pages/PatchLfo.cpp": 13,
  "src/gui/pages/PatchPage.cpp": 87,
  "src/gui/pages/PlayPage.cpp": 54,
- "src/gui/pages/SeqPage.cpp": 39
+ "src/gui/pages/SeqPage.cpp": 39,
+ "src/gui/pages/VectorPage.cpp": 12
 }

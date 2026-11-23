@@ -120,7 +120,6 @@ public:
 
     // The height that lists every route (at least one row, for the empty note).
     int getIdealHeight() const { return headerHeight + 6 + juce::jmax (1, (int) slots.size()) * rowHeight + 6; }
-    int getNumRoutes() const { return (int) slots.size(); }
     int getRouteSlot (int row) const { return juce::isPositiveAndBelow (row, (int) slots.size()) ? slots[(size_t) row] : -1; }
     juce::Rectangle<int> getRowBounds (int row) const { return rowArea (row); }
     juce::Rectangle<int> getBarBounds (int row) const { return barArea (rowArea (row)); }
@@ -263,7 +262,6 @@ public:
     void setSource (int newSource, juce::Colour newColour);
 
     bool isMovable() const { return source == (int) Mod::Source::ModWheel || source == (int) Mod::Source::Aftertouch; }
-    float getShownValue() const { return shown; }
 
     // Sets the value as a drag would (0..1); the tests.
     void moveTo (float value);
@@ -329,8 +327,6 @@ public:
     juce::Rectangle<int> placeIn (juce::Rectangle<int> area, juce::Rectangle<int> chip);
 
     void paint (juce::Graphics& g) override;
-
-    SourceValueBar& getValueBar() { return valueBar; }
 
     void resized() override;
 

@@ -28,8 +28,6 @@ public:
 
     int getSlot() const { return slot; }
     KnobControl* getKnob() const { return knob.get(); }
-    int getNumOtherRoutes() const { return (int) chips.size(); }
-    juce::Button* getOtherRoute (int index) const { return juce::isPositiveAndBelow (index, (int) chips.size()) ? chips[(size_t) index].get() : nullptr; }
 
     // Polled by the page: rebuilds the knob when the destination changes and
     // the chips when the routes into it do.
@@ -77,10 +75,6 @@ public:
     // second reverses, a third goes back to slot order. Public for tests.
     void setSort (Sort column);
 
-    Sort getSort() const { return sort; }
-    const std::vector<int>& getVisibleSlots() const { return visibleRows; }
-    RemapEditor* getRemapEditor() const { return remapEditor.get(); }
-
     // Opens the slot's remap editor in the dock under the rows (or closes
     // it if open). The rows never move for it (UI review 6, V6-22).
     // A click on a row: its curve in the dock (opened by hand, so it stays
@@ -101,14 +95,7 @@ public:
     // (a DRIVES row on an LFO's card jumps here). -1 leaves the list as is.
     void focusSlot (int slot);
 
-    // The dock's area (empty when it isn't shown); the tests.
-    juce::Rectangle<int> getDockArea() const { return dockArea; }
-    MatrixDockTarget& getDockTarget() { return dockTarget; }
-    // Whether the source group headings are drawn (only when every row fits with them).
-    bool areGroupHeadingsShown() const { return headingsShown; }
     int getRowHeight() const { return rowHeight; }
-    juce::Rectangle<int> getHeadingArea (int source) const;
-    int getSoloSlot() const { return soloSlot; }
 
     // "Show destination": the editor switches to the knob's page and flashes it.
     std::function<void (int destination)> onShowDestination;

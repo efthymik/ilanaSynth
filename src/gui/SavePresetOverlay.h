@@ -243,7 +243,6 @@ public:
 
     // The chip that opens the text field, and whether the field shows.
     static juce::String typeYourOwnLabel() { return "+  type your own"; }
-    bool isTagsFieldOpen() const { return tagsField.isVisible(); }
 
     void setTagsFieldOpen (bool open)
     {
@@ -273,7 +272,6 @@ public:
         tagsField.setText (current.joinIntoString (", "), true);
         repaint();
     }
-    juce::ComboBox& getCategoryBox() { return categoryBox; }
 
     // SAVE: writes a new preset, or asks first when the name is taken.
     void save()

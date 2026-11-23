@@ -156,7 +156,7 @@ list(TRANSFORM ILANA_ENGINE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 set(ILANA_GUI_SOURCES
     src/PluginEditor.cpp
     src/gui/pages/EnvLfoPages.cpp
-    src/gui/pages/FilterVectorPhysicalPages.cpp
+    src/gui/pages/VectorPage.cpp
     src/gui/pages/FmInputPages.cpp
     src/gui/pages/FxPage.cpp
     src/gui/pages/MatrixPage.cpp

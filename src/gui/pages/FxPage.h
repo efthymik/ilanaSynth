@@ -248,8 +248,6 @@ private:
     {
         float dial, value;
         int pitch, rowHeight;
-        // A knob's drawn height (the dial and a one-line name): rows centre on it, not on its cell.
-        int drawnHeight() const { return (int) dial + 10; }
     };
     static constexpr DialGrid compactGrid { 32.0f, 28.0f * KnobControl::kPackedValueScale, 56, 60 };
     static constexpr int knobPitch = 56, sideWidth = 104, sideRow = 18, sideGap = 5, sideColumnGap = 8;
@@ -664,8 +662,6 @@ private:
     std::vector<AwCategoryControls> awCategories;
 
     static bool isAirwindowsType (int type) { return type == 30 || airwindows::categoryForFxType (type) >= 0; }
-    // The badge after the title; "Airwindows (all)" already says it.
-    static bool showsAirwindowsBadge (int type) { return isAirwindowsType (type) && type != 30; }
 
     int categoryChoice (int c) const;
 

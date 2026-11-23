@@ -128,7 +128,6 @@ public:
     // files first).
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
-    bool isPresetDockOpen() const { return presetDockShown; }
     InfoStrip& getHoverLine() { return infoStrip; }
     // The header's VOICES count as drawn ("3/32") and its tuning text ("" in
     // 12-TET), for the tests.
@@ -157,7 +156,6 @@ public:
     // run here or fails later, the editor goes back to Direct2D (Windows) or
     // to OpenGL when "gpuRendering" is on (Linux). Elsewhere these do nothing.
     void setVulkanRendering (bool shouldUseVulkan);
-    bool isVulkanRendering() const;
    #if ILANA_VULKAN
     ilana::vulkan::Attachment* getVulkanAttachment() const { return vulkan.get(); }
    #endif
@@ -186,7 +184,6 @@ private:
     void createPresetPanel();
     void loadPresetFile (const juce::File& file);
     void setPresetDockShown (bool shown);
-    bool isPresetDockShown() const { return presetDockShown; }
     juce::Rectangle<int> pageArea() const;
     void chooseSyxFile();
     int currentDesignWidth() const { return designWidth; }
@@ -296,8 +293,6 @@ private:
     void updateDragTabHover();
 public:
     static constexpr juce::uint32 dragTabOpenMs = 500;
-    // For the UI test: what the watch does now, without its timer.
-    void checkDragTabHover() { updateDragTabHover(); }
 private:
     std::map<juce::String, int> sectionKnobCounts (const std::set<juce::String>& parameterIds, bool markAb);
     juce::String undoToastKey;

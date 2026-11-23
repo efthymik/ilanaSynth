@@ -2,7 +2,7 @@
 // sound in the block they arrive in, before the message thread has run (an
 // offline export); CCs and the audio thread's changes stay out of the undo
 // history; REPEATABLE RANDOM plays a random arp the same from the same bar.
-// Included by TableTest.cpp; ILANA_HOST_TEST=1 runs only these.
+// Included by TableTest.cpp; ILANA_TEST_ONLY=host runs only these.
 
 namespace HostLab
 {

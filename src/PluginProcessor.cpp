@@ -2707,21 +2707,6 @@ void IlanaSynthAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, j
     cpuUsage.store (cpuUsage.load() * 0.92f + usage * 0.08f);
 }
 
-void IlanaSynthAudioProcessor::copyScopeData (float* left, float* right, int numSamples) const
-{
-    numSamples = juce::jlimit (0, scopeSize, numSamples);
-
-    const juce::SpinLock::ScopedLockType lock (scopeLock);
-    auto start = (scopeWritePos.load() - numSamples + scopeSize) % scopeSize;
-
-    for (int i = 0; i < numSamples; ++i)
-    {
-        left[i] = scopeLeft[(size_t) start];
-        right[i] = scopeRight[(size_t) start];
-        start = (start + 1) % scopeSize;
-    }
-}
-
 void IlanaSynthAudioProcessor::copyScopeDataSmooth (float* left, float* right, int numSamples) const
 {
     numSamples = juce::jlimit (0, scopeSize, numSamples);

@@ -1,6 +1,6 @@
 // Duplicating and reordering oscillators (processor/OscSlots.cpp, ilana
 // 2026-10-26). Included by TableTest.cpp after OscRoutingTests.inc;
-// ILANA_OSC_SLOT_TEST=1 runs only these.
+// ILANA_TEST_ONLY=oscslot runs only these.
 
 namespace OscSlotLab
 {

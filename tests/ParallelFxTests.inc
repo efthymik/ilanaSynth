@@ -1,7 +1,7 @@
 // FX routing (fx_routing, design round 2): SERIES is the old rack (each
 // effect feeds the next one); PARALLEL runs every working slot on the rack's
 // input and averages the branches. Included by TableTest.cpp;
-// ILANA_PARALLEL_FX_TEST=1 runs only these.
+// ILANA_TEST_ONLY=parallelfx runs only these.
 
 namespace ParallelFxLab
 {

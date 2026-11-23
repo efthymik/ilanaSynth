@@ -48,7 +48,6 @@ public:
     }
 
     int getNumChips() const { return (int) chain.size(); }
-    bool showsNames() const { return named; }
     // Each chip's slot and box, for the tests.
     std::vector<std::pair<int, juce::Rectangle<int>>> getChipBoxes() const
     {

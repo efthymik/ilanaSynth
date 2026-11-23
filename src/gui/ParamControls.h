@@ -1422,9 +1422,6 @@ public:
     // Whether a mod slot routes this source into the knob, and whether the
     // source pinned by a chip click is one of them (the knob is lit).
     bool isDrivenBy (int source) const { return routesFrom (source); }
-    // The source a drag under way carries, as the knob last saw it (V8-10;
-    // the tests set it with showDragTarget).
-    int getShownDragSource() const { return dragSource; }
     void showDragTarget (int source) { dragSource = source; repaint(); }
     bool isLitByPinnedSource() const { return pinnedModSource() != 0 && routesFrom (pinnedModSource()); }
 
@@ -1455,8 +1452,6 @@ public:
         }
         resized();
     }
-
-    bool isInline() const { return inlineText; }
 
     // The knob's role sets its largest dial (IlanaTheme::KnobSize: main,
     // small or mini); layoutRow and preferredControlHeight follow it.
@@ -1711,18 +1706,6 @@ public:
             return;
         capDialLikeRings = cap;
         resized();
-    }
-
-    // The largest dial an inline knob draws (40 everywhere; the FX rack's rows
-    // grow their dials with the row when the rack is short).
-    void setInlineDial (int largest)
-    {
-        if (inlineDial == largest)
-            return;
-        inlineDial = largest;
-        slider.getProperties().set ("inlineDial", largest); // (the look-and-feel's slider layout reads it)
-        resized();
-        slider.resized(); // (its bounds may not change, its layout does)
     }
 
     // A value drawn as a faded dash while `shown` says it does nothing (an
@@ -3274,7 +3257,6 @@ public:
         combo.resized();
         combo.repaint();
     }
-    bool isPackedMenu() const { return packedMenu; }
 
     // A menu 18 px high under a 9 px name (the OSC cards and the voice strip).
     void setCompactLayout (bool shouldBeCompact)
@@ -3497,7 +3479,6 @@ public:
         repaint();
     }
     void setColour (juce::Colour newColour) { colour = newColour; repaint(); }
-    const juce::StringArray& getItems() const { return items; }
     // The segments' widths: each its text and a little air (or, with `equal`, the same).
     void setEqual (bool equalWidths) { equal = equalWidths; repaint(); }
 
@@ -3638,12 +3619,6 @@ public:
             x += w + hGap;
         }
         return rects;
-    }
-
-    int heightFor (int width) const
-    {
-        const auto rects = flow (width);
-        return rects.empty() ? 0 : rects.back().getBottom();
     }
 
     void paint (juce::Graphics& g) override
@@ -4042,13 +4017,6 @@ public:
         repaint();
     }
 
-    // The name over the switch in the small size (the voice strip's LEGATO).
-    void setSmallName (bool shrunk)
-    {
-        smallName = shrunk;
-        repaint();
-    }
-
     // The packed panels' switch (review 23): a 28 x 15 switch with its name under it, to its
     // left (small, dim) or to its right (plain text).
     enum class NamePlace { none, below, left, leftFlush, right }; // leftFlush: the name on the box's left edge, the switch on its right
@@ -4060,7 +4028,6 @@ public:
         resized();
         repaint();
     }
-    NamePlace getPackedName() const { return packedPlace; }
     // The size of a name to the switch's right (7.3 px in the cards; the OSC strip's Manual tuning and the dock's LEGATO are bigger).
     void setRightNameSize (float size)
     {
@@ -4082,24 +4049,6 @@ public:
         bareSwitch = shouldBeBare;
         resized();
     }
-
-    // A group's name that is its own switch (the voice strip's SUB, STRINGS,
-    // SOUNDBOARD): a lit dot while on, the name in the family colour, all of
-    // it dimmed while off. The whole area takes the click.
-    void setGroupName (const juce::String& name, juce::Colour colour)
-    {
-        groupColour = colour;
-        groupText = name;
-        groupStyle = true;
-        button.getProperties().set ("groupName", true);
-        button.getProperties().set ("groupColour", (int) colour.getARGB());
-        button.getProperties().set ("groupText", name);
-        resized();
-        repaint();
-    }
-
-    bool isGroupName() const { return groupStyle; }
-    juce::String getGroupText() const { return groupText; }
 
     bool isSwitch() const { return button.getProperties().contains ("switch"); }
     const juce::String& getParameterId() const { return parameterId; }
@@ -4235,16 +4184,6 @@ public:
     void setNameDrop (int pixels) { nameDrop = pixels; repaint(); }
     // The name under the switch at a ring knob's name size, so it reads as one row with them (0: the packed label).
     void setBelowNameSize (float size) { belowNameSize = size; repaint(); }
-
-    // Lowers the switch under its name, to sit level with the dials of the
-    // knobs in its row (S13-1); 0 is the usual place.
-    void setSwitchDrop (int pixels)
-    {
-        if (switchDrop == pixels)
-            return;
-        switchDrop = juce::jmax (0, pixels);
-        resized();
-    }
 
 
 

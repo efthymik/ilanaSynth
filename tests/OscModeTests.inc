@@ -1,7 +1,7 @@
 // The FM / DX7 oscillator type (2026-10-06): an operator is its own type
 // (oscN_mode 5, appended), rendered by the wavetable engine exactly as a
 // wavetable oscillator with the same settings. Included by TableTest.cpp;
-// ILANA_OSCMODE_TEST=1 runs these alone (ILANA_OSCMODE_STATS=1 also lists
+// ILANA_TEST_ONLY=oscmode runs these alone (ILANA_OSCMODE_STATS=1 also lists
 // the factory operators that use wavetable-only controls).
 
 namespace OscModeTests

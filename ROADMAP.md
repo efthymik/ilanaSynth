@@ -8,7 +8,7 @@ The core of the plan is **one physical modelling engine used in two places**:
 
 **Priorities:** weird hybrids and plucked or bowed strings come first, then keys. Deep FM and the generative and physics-modulation work run alongside.
 
-**Platform:** ilanaSynth is built for Windows first. macOS, Linux and CI come at the end of v1.3 (M9).
+**Platform:** ilanaSynth is built for Windows first. macOS, Linux and CI were added in M9 (done; see `.github/workflows`).
 
 **CPU budget:** balanced, meaning a rich physical patch should cost about what a heavy unison patch costs today. A QUALITY setting (Eco / Normal / High), added in M3b, trades detail for CPU.
 
@@ -20,7 +20,7 @@ The core of the plan is **one physical modelling engine used in two places**:
 
 ## When a milestone is done
 
-Every milestone ends with the checks below, a commit and a `mN-done` tag.
+Every milestone ends with the checks below, and a commit.
 
 ### Sounds are fitted to a reference before they count as done
 Any modelled sound (physical models, bodies, electric pianos, the west-coast voice, the feedback guitar, formants) is fitted to a reference before the milestone is done. It does not count as done because it sounds plausible.
@@ -365,7 +365,7 @@ M13 and M14 no longer exist: FOF merged into M11, and resampling moved to M8.6.
 | Per-oscillator amp | An envelope picker per oscillator, defaulting to the main AMP |
 | Order | M3b before M4 and M5 |
 | When a sound is done | When it is fitted to a reference and has passed a listening round, not when it sounds plausible |
-| Platforms | Windows first. macOS, Linux and CI wait for M9 |
+| Platforms | Windows first. macOS, Linux and CI were added in M9 (done) |
 | v1.4 | Pushed back and unscheduled. v1.3 is the next full release |
 | Edited wavetables | Stored in the patch as recipe, embedded data and file reference, in a versioned format; 16 patch-table slots |
 | Chaos and physics LFOs | Rebuilt in M8.1 as real simulations with named parameters and smoothing; the M2 versions stay as "classic" for old patches |

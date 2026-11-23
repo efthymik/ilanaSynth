@@ -120,7 +120,6 @@ public:
         startTimerHz (40);
     }
 
-    void setOscillator (const juce::String& newPrefix) { prefix = newPrefix; restart(); }
     // The picture alone, small (an OSC card's well): no captions, a slim body.
     void setCompact (bool shouldBeCompact) { compact = shouldBeCompact; repaint(); }
     const juce::String& getOscillator() const { return prefix; } // (the UI test reads it)

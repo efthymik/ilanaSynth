@@ -1,5 +1,5 @@
 // The VECTOR page, and operatorVoiceFilterOff (PLAY's FILTER card). VectorPage
-// is declared here; its member functions are in FilterVectorPhysicalPages.cpp.
+// is declared here; its member functions are in VectorPage.cpp.
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -52,10 +52,6 @@ public:
 
     // Writes a shape's points, one undo step (public: the UI test calls it).
     void writePathShape (int shapeIndex);
-
-    juce::ComboBox& getPathShapeMenu() { return pathShapes; }
-    // The LEVEL knob under a corner's picture (the UI test reaches it here).
-    KnobControl* getCornerLevel (int corner) { return cornerLevels[(size_t) juce::jlimit (0, VectorShape::maxCorners - 1, corner)].get(); }
 
     // Each corner's name on its menu, by where it sits on the shape.
     static juce::String cornerName (int shapeIndex, int corner);

@@ -1,4 +1,4 @@
-#include "FilterVectorPhysicalPages.h"
+#include "VectorPage.h"
 
 #include "PageHelpers.h"
 

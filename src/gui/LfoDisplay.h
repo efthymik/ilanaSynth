@@ -666,8 +666,6 @@ private:
         repaint();
     }
 
-    int getHoverPoint() const { return hoverPoint; }
-
     void mouseDrag (const juce::MouseEvent& event) override
     {
         if (cancelled)
@@ -944,7 +942,6 @@ public:
     // high. It writes ordinary curve points, so patches keep their format.
     enum Brush { brushOff = 0, brushStep, brushRampUp, brushRampDown, brushTriangle, brushBump, brushCount };
     static juce::StringArray brushNames() { return { "Off", "Step", "Ramp up", "Ramp down", "Triangle", "Bump" }; }
-    int getBrush() const { return brush; }
     void setBrush (int newBrush) { brush = juce::jlimit (0, brushCount - 1, newBrush); repaint(); }
     int paintCells() const { return gridDivisions > 0 ? gridDivisions : 16; }
 

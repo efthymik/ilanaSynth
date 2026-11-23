@@ -1,5 +1,5 @@
 // The Operator EG (2026-10-02): DX7 voices as ordinary parameters. Included
-// by TableTest.cpp; ILANA_OPEG_TEST=1 runs these alone. That the 288 DX7
+// by TableTest.cpp; ILANA_TEST_ONLY=opeg runs these alone. That the 288 DX7
 // presets still sound as DX7 mode played them is the fingerprint check
 // (bit-identical when this landed).
 
