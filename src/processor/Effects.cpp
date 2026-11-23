@@ -12,7 +12,7 @@
 //
 // Roadmap step 17: SERIES and PARALLEL run through the rack's compiled graph
 // (getFxRackGraph), which renders exactly what the fixed loop renders
-// (ILANA_GRAPH_TEST). The plan is made on the message thread for the slots as
+// (ILANA_TEST_ONLY=graph). The plan is made on the message thread for the slots as
 // they are; for the moment after a slot is added, removed, bypassed or
 // soloed, until the new plan is in, the fixed loop runs instead (the same
 // sound). Offline the plan is made here, at once.
